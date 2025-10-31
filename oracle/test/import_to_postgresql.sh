@@ -36,7 +36,8 @@ if [ ! -f "${DUMP_FILE}" ]; then
     echo "ERROR: Dump file not found: ${DUMP_FILE}"
     echo ""
     echo "Please export data first using:"
-    echo "  sqlplus -s billing7/billing@bm7 @export_v_iridium_services_info.sql"
+    echo "  sqlplus -s \$ORACLE_USER/\$ORACLE_PASSWORD@\$ORACLE_SERVICE @export_v_iridium_services_info.sql"
+    echo "  or: sqlplus -s username/password@service_name @export_v_iridium_services_info.sql"
     exit 1
 fi
 

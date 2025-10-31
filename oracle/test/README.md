@@ -7,10 +7,11 @@
 ```bash
 # Вариант 1: из директории oracle/test
 cd oracle/test
-sqlplus -s billing7/billing@bm7 @export_v_iridium_services_info.sql
+sqlplus -s $ORACLE_USER/$ORACLE_PASSWORD@$ORACLE_SERVICE @export_v_iridium_services_info.sql
+# или: sqlplus -s username/password@service_name @export_v_iridium_services_info.sql
 
 # Вариант 2: из корня проекта
-sqlplus -s billing7/billing@bm7 @oracle/test/export_v_iridium_services_info.sql
+sqlplus -s $ORACLE_USER/$ORACLE_PASSWORD@$ORACLE_SERVICE @oracle/test/export_v_iridium_services_info.sql
 ```
 
 **Результат:** `V_IRIDIUM_SERVICES_INFO.txt` (TSV, 17 колонок, таб-разделитель)
@@ -78,10 +79,14 @@ psql -U postgres -d billing -c "
 
 ```bash
 # 1. Экспорт из Oracle
-sqlplus -s billing7/billing@bm7 @oracle/test/export_v_iridium_services_info.sql
+export ORACLE_USER=your-username
+export ORACLE_PASSWORD=your-password
+export ORACLE_SERVICE=your-service-name
+sqlplus -s $ORACLE_USER/$ORACLE_PASSWORD@$ORACLE_SERVICE @oracle/test/export_v_iridium_services_info.sql
 
 # 2. Импорт в PostgreSQL
 cd oracle/test
+export PGPASSWORD=your-postgres-password
 ./import_to_postgresql.sh
 
 # 3. Проверка

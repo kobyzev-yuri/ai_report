@@ -44,7 +44,7 @@ ai_report/
 ## 🎯 Назначение баз данных
 
 ### Oracle (Production)
-- **Расположение**: billing7@bm7
+- **Расположение**: Укажите свой Oracle connection string
 - **Назначение**: Основная production база данных
 - **Данные**: Реальные данные из SPNet и STECCOM
 - **Интеграция**: С биллингом (SERVICES, ACCOUNTS, CUSTOMERS)
@@ -63,19 +63,20 @@ ai_report/
 ```bash
 # 1. Создать таблицы
 cd oracle/tables
-sqlplus billing7/billing@bm7 @install_all_tables.sql
+sqlplus $ORACLE_USER/$ORACLE_PASSWORD@$ORACLE_SERVICE @install_all_tables.sql
+# или: sqlplus username/password@service_name @install_all_tables.sql
 
 # 2. Загрузить справочники
 cd ../data
-sqlplus billing7/billing@bm7 @tariff_plans_data.sql
+sqlplus $ORACLE_USER/$ORACLE_PASSWORD@$ORACLE_SERVICE @tariff_plans_data.sql
 
 # 3. Создать функции
 cd ../functions
-sqlplus billing7/billing@bm7 @calculate_overage.sql
+sqlplus $ORACLE_USER/$ORACLE_PASSWORD@$ORACLE_SERVICE @calculate_overage.sql
 
 # 4. Создать представления
 cd ../views
-sqlplus billing7/billing@bm7 @install_all_views.sql
+sqlplus $ORACLE_USER/$ORACLE_PASSWORD@$ORACLE_SERVICE @install_all_views.sql
 
 # 5. Загрузить данные
 cd ../../../python
@@ -166,7 +167,7 @@ streamlit run streamlit_report.py --server.port 8502
 
 ## 🛠️ Технологии
 
-- **Oracle 11g+** - production база данных (billing7@bm7)
+- **Oracle 11g+** - production база данных
 - **PostgreSQL 12+** - testing база данных
 - **Python 3.10+** - загрузка данных и расчеты
 - **Streamlit** - веб-интерфейс для отчетов
@@ -213,10 +214,10 @@ python load_from_oracle_views.py
 
 | Ситуация | База данных | Streamlit |
 |----------|-------------|-----------|
-| Production отчеты | Oracle (billing7@bm7) | streamlit_report_oracle.py |
+| Production отчеты | Oracle | streamlit_report_oracle.py |
 | Разработка | PostgreSQL (localhost) | streamlit_report.py |
 | Отладка без Oracle | PostgreSQL (localhost) | streamlit_report.py |
-| Полные данные + клиенты | Oracle (billing7@bm7) | streamlit_report_oracle.py |
+| Полные данные + клиенты | Oracle | streamlit_report_oracle.py |
 
 ## ⚠️ Важные примечания
 
@@ -224,6 +225,12 @@ python load_from_oracle_views.py
 2. **Oracle** - production система, имеет интеграцию с биллингом
 3. Views с биллингом (`V_IRIDIUM_SERVICES_INFO`, `V_CONSOLIDATED_REPORT_WITH_BILLING`) работают только в Oracle
 4. Для синхронизации данных используйте `postgresql/scripts/load_from_oracle_views.py`
+5. **ВАЖНО**: Используйте переменные окружения для паролей Oracle:
+   ```bash
+   export ORACLE_USER=your-username
+   export ORACLE_PASSWORD=your-password
+   export ORACLE_SERVICE=your-service-name
+   ```
 
 ## 📞 Контакты
 

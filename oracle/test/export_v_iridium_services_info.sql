@@ -1,7 +1,8 @@
 -- ============================================================================
 -- Export V_IRIDIUM_SERVICES_INFO to TSV (Tab-Separated Values)
 -- Last successful version with proper tab delimiters
--- Usage: sqlplus -s billing7/billing@bm7 @export_v_iridium_services_info.sql
+-- Usage: sqlplus -s $ORACLE_USER/$ORACLE_PASSWORD@$ORACLE_SERVICE @export_v_iridium_services_info.sql
+--   or: sqlplus -s username/password@service_name @export_v_iridium_services_info.sql
 -- Output: V_IRIDIUM_SERVICES_INFO.txt (17 columns, tab-separated)
 -- ============================================================================
 
