@@ -46,9 +46,11 @@ EXIT
 
 -- ============================================================================
 -- Usage:
---   sqlplus -s billing7/billing@bm7 @export_v_iridium_services_info.sql
+--   sqlplus -s $ORACLE_USER/$ORACLE_PASSWORD@$ORACLE_SERVICE @export_v_iridium_services_info.sql
 --   или из директории oracle/test:
---   sqlplus -s billing7/billing@bm7 @oracle/test/export_v_iridium_services_info.sql
+--   sqlplus -s $ORACLE_USER/$ORACLE_PASSWORD@$ORACLE_SERVICE @oracle/test/export_v_iridium_services_info.sql
+--   или напрямую:
+--   sqlplus -s username/password@service_name @export_v_iridium_services_info.sql
 --
 -- Notes:
 -- 1. Используется CHR(9) для гарантированных табов (работает во всех версиях SQL*Plus)
