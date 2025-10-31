@@ -58,6 +58,34 @@ ai_report/
 
 ## 🚀 Быстрый старт
 
+### Настройка переменных окружения
+
+Перед началом работы установите переменные окружения для подключения к базам данных:
+
+```bash
+# Oracle
+export ORACLE_USER=your-username
+export ORACLE_PASSWORD=your-password
+export ORACLE_SERVICE=your-service-name
+
+# PostgreSQL (опционально)
+export POSTGRES_DB=billing
+export POSTGRES_USER=postgres
+export POSTGRES_PASSWORD=your-password
+export POSTGRES_HOST=localhost
+export POSTGRES_PORT=5432
+```
+
+**Пример:**
+```bash
+export ORACLE_USER=billing7
+export ORACLE_PASSWORD=your-secure-password
+export ORACLE_SERVICE=bm7
+
+# Теперь можно использовать команды без явного указания паролей:
+sqlplus -s $ORACLE_USER/$ORACLE_PASSWORD@$ORACLE_SERVICE @script.sql
+```
+
 ### Oracle (Production)
 
 ```bash
@@ -90,12 +118,19 @@ streamlit run ../streamlit_report_oracle.py --server.port 8501
 ### PostgreSQL (Testing)
 
 ```bash
+# Использование переменных окружения (рекомендуется):
+export PGPASSWORD=$POSTGRES_PASSWORD
+# или установите в переменных окружения выше
+
 # 1. Создать структуру
 cd postgresql
-psql -U postgres -d billing -f tables/install_all_tables.sql
-psql -U postgres -d billing -f data/tariff_plans_data.sql
-psql -U postgres -d billing -f functions/calculate_overage.sql
-cd views && psql -U postgres -d billing -f install_all_views.sql
+psql -h ${POSTGRES_HOST:-localhost} -p ${POSTGRES_PORT:-5432} -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-billing} -f tables/install_all_tables.sql
+psql -h ${POSTGRES_HOST:-localhost} -p ${POSTGRES_PORT:-5432} -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-billing} -f data/tariff_plans_data.sql
+psql -h ${POSTGRES_HOST:-localhost} -p ${POSTGRES_PORT:-5432} -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-billing} -f functions/calculate_overage.sql
+cd views && psql -h ${POSTGRES_HOST:-localhost} -p ${POSTGRES_PORT:-5432} -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-billing} -f install_all_views.sql
+
+# Или напрямую (не рекомендуется для production):
+# psql -U postgres -d billing -f tables/install_all_tables.sql
 
 # 2. Загрузить данные (вариант A: из CSV)
 cd ../../python

@@ -10,6 +10,7 @@ data/
 **/*.csv
 **/*.xlsx
 **/*.txt
+!requirements.txt
 !oracle/test/import_iridium.py
 !oracle/test/export_v_iridium_services_info.sql
 !oracle/test/import_to_postgresql.sh
