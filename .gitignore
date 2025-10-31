@@ -1,0 +1,75 @@
+# Data directories - completely ignore
+**/data/
+**/*/data/
+oracle/data/
+postgresql/data/
+python/data/
+data/
+
+# Data files
+**/*.csv
+**/*.xlsx
+**/*.txt
+!oracle/test/import_iridium.py
+!oracle/test/export_v_iridium_services_info.sql
+!oracle/test/import_to_postgresql.sh
+!oracle/test/README.md
+!docs/**/*.txt
+!docs/**/*.md
+
+# Logs
+*.log
+**/*.log
+load_*.log
+import_*.log
+streamlit.log
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+dist/
+build/
+
+# Virtual environments
+venv/
+env/
+ENV/
+.venv
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Temporary files
+*.tmp
+*.bak
+*.backup
+*.old
+
+# Database dumps (keep only structure files)
+*.sql.gz
+*.dump
+*.backup
+
+# Secrets and configs with passwords
+*.env
+.env.*
+config.local.*
+secrets.*
+
+# Keep example configs
+!config.example.*
+!*.example.*
+
+# OS
+Thumbs.db
+.DS_Store
+

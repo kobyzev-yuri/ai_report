@@ -1,0 +1,22 @@
+# Oracle Database connectivity
+oracledb
+cx_Oracle
+
+# Data processing and analysis
+pandas
+numpy
+sqlalchemy
+
+# CLI tools for database interaction
+click
+rich
+tabulate
+
+# Configuration and environment
+python-dotenv
+pyyaml
+
+# Logging and utilities
+colorama
+tqdm
+
