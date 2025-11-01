@@ -85,12 +85,17 @@ psql -U cnn -d billing -c "
    (SELECT oi.EXT_ID 
     FROM OUTER_IDS oi 
     WHERE oi.ID = c.CUSTOMER_ID 
-      AND oi.TBL = 'CUSTOMERS' 
+      AND UPPER(oi.TBL) = 'CUSTOMERS'  -- TBL хранится в нижнем регистре 'customers'
       AND ROWNUM = 1) AS CODE_1C
    ```
+   **ВАЖНО:** В таблице `OUTER_IDS` поле `TBL` хранится в нижнем регистре (`'customers'`), поэтому используется `UPPER(oi.TBL) = 'CUSTOMERS'` для сравнения без учета регистра.
+   
    Если `CODE_1C` NULL после импорта:
-   - Проверьте наличие записей в `OUTER_IDS` для `CUSTOMER_ID`
-   - Запустите тест: `sqlplus @test_code_1c_export.sql`
+   - Проверьте наличие записей в `OUTER_IDS` для `CUSTOMER_ID`: 
+     ```sql
+     SELECT * FROM OUTER_IDS WHERE ID = <CUSTOMER_ID>;
+     ```
+   - Запустите тест: `sqlplus @test_outer_ids.sql`
    - Проверьте view: `sqlplus @query_view_simple.sql`
 
 4. **Формат файла:** TSV (Tab-Separated Values), 17 колонок, обработка кавычек и NULL
