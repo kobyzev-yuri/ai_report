@@ -281,9 +281,14 @@ def main():
     st.markdown("**All Plans (Calculated Overage for SBD-1 and SBD-10 only)**")
     st.markdown("---")
     
-    # Фильтры в боковой панели
-    with st.sidebar:
-        st.header("⚙️ Filters")
+    # Создаем вкладки для отчета и загрузки данных
+    tab_report, tab_loader = st.tabs(["📊 Report", "📥 Data Loader"])
+    
+    # ========== REPORT TAB ==========
+    with tab_report:
+        # Фильтры в боковой панели
+        with st.sidebar:
+            st.header("⚙️ Filters")
         
         # Период
         periods = get_periods()
@@ -463,10 +468,137 @@ def main():
             finally:
                 conn2.close()
     
-    elif df is not None and df.empty:
-        st.warning("⚠️ No data found with selected filters")
-    else:
-        st.error("❌ Error loading data")
+        elif df is not None and df.empty:
+            st.warning("⚠️ No data found with selected filters")
+        else:
+            st.error("❌ Error loading data")
+    
+    # ========== DATA LOADER TAB ==========
+    with tab_loader:
+        st.header("📥 Data Loader")
+        st.markdown("Загрузка и импорт данных SPNet и STECCOM в базу данных")
+        st.markdown("---")
+        
+        # Директории для данных
+        from pathlib import Path
+        DATA_DIR = Path(__file__).parent / 'data'
+        SPNET_DIR = DATA_DIR / 'SPNet reports'
+        STECCOM_DIR = DATA_DIR / 'STECCOMLLCRussiaSBD.AccessFees_reports'
+        
+        # Выбор типа данных
+        data_type = st.radio(
+            "Select data type to upload",
+            ["SPNet Traffic", "STECCOM Access Fees"],
+            horizontal=True
+        )
+        
+        st.markdown("---")
+        
+        if data_type == "SPNet Traffic":
+            st.subheader("📊 SPNet Traffic Reports")
+            st.markdown(f"**Directory:** `{SPNET_DIR}`")
+            
+            col1, col2 = st.columns([2, 1])
+            
+            with col1:
+                # Список существующих файлов
+                if SPNET_DIR.exists():
+                    spnet_files = list(SPNET_DIR.glob("*.csv")) + list(SPNET_DIR.glob("*.xlsx"))
+                    if spnet_files:
+                        st.markdown(f"**Found files: {len(spnet_files)}**")
+                        files_info = []
+                        for f in sorted(spnet_files, key=lambda x: x.stat().st_mtime, reverse=True)[:20]:
+                            files_info.append({
+                                'File Name': f.name,
+                                'Size (MB)': round(f.stat().st_size / (1024 * 1024), 2),
+                                'Modified': datetime.fromtimestamp(f.stat().st_mtime).strftime('%Y-%m-%d %H:%M:%S')
+                            })
+                        st.dataframe(pd.DataFrame(files_info), use_container_width=True, hide_index=True, height=200)
+                    else:
+                        st.info("📁 Directory is empty")
+                else:
+                    st.info(f"📁 Directory does not exist: {SPNET_DIR}")
+            
+            with col2:
+                st.markdown("### Actions")
+                uploaded_file = st.file_uploader(
+                    "Upload SPNet file",
+                    type=['csv', 'xlsx'],
+                    key='spnet_upload'
+                )
+                
+                if uploaded_file:
+                    save_path = SPNET_DIR / uploaded_file.name
+                    if save_path.exists():
+                        st.warning(f"⚠️ File `{uploaded_file.name}` already exists")
+                    else:
+                        if st.button("💾 Save File", key='save_spnet', use_container_width=True):
+                            try:
+                                SPNET_DIR.mkdir(parents=True, exist_ok=True)
+                                with open(save_path, 'wb') as f:
+                                    f.write(uploaded_file.getbuffer())
+                                st.success(f"✅ File saved: {uploaded_file.name}")
+                                st.rerun()
+                            except Exception as e:
+                                st.error(f"Error saving: {e}")
+        
+        else:  # STECCOM Access Fees
+            st.subheader("💰 STECCOM Access Fees Reports")
+            st.markdown(f"**Directory:** `{STECCOM_DIR}`")
+            
+            col1, col2 = st.columns([2, 1])
+            
+            with col1:
+                # Список существующих файлов
+                if STECCOM_DIR.exists():
+                    steccom_files = list(STECCOM_DIR.glob("*.csv"))
+                    if steccom_files:
+                        st.markdown(f"**Found files: {len(steccom_files)}**")
+                        files_info = []
+                        for f in sorted(steccom_files, key=lambda x: x.stat().st_mtime, reverse=True)[:20]:
+                            files_info.append({
+                                'File Name': f.name,
+                                'Size (MB)': round(f.stat().st_size / (1024 * 1024), 2),
+                                'Modified': datetime.fromtimestamp(f.stat().st_mtime).strftime('%Y-%m-%d %H:%M:%S')
+                            })
+                        st.dataframe(pd.DataFrame(files_info), use_container_width=True, hide_index=True, height=200)
+                    else:
+                        st.info("📁 Directory is empty")
+                else:
+                    st.info(f"📁 Directory does not exist: {STECCOM_DIR}")
+            
+            with col2:
+                st.markdown("### Actions")
+                uploaded_file = st.file_uploader(
+                    "Upload STECCOM file",
+                    type=['csv'],
+                    key='steccom_upload'
+                )
+                
+                if uploaded_file:
+                    save_path = STECCOM_DIR / uploaded_file.name
+                    if save_path.exists():
+                        st.warning(f"⚠️ File `{uploaded_file.name}` already exists")
+                    else:
+                        if st.button("💾 Save File", key='save_steccom', use_container_width=True):
+                            try:
+                                STECCOM_DIR.mkdir(parents=True, exist_ok=True)
+                                with open(save_path, 'wb') as f:
+                                    f.write(uploaded_file.getbuffer())
+                                st.success(f"✅ File saved: {uploaded_file.name}")
+                                st.rerun()
+                            except Exception as e:
+                                st.error(f"Error saving: {e}")
+        
+        st.markdown("---")
+        st.info("💡 **Note:** After uploading files, use Python scripts to import data into database:")
+        st.code("""
+# Import SPNet files
+python python/load_spnet_traffic.py
+
+# Import STECCOM files  
+python python/load_steccom_expenses.py
+        """)
 
 
 if __name__ == "__main__":
