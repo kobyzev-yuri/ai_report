@@ -58,31 +58,37 @@ ai_report/
 
 ## 🚀 Быстрый старт
 
-### Настройка переменных окружения
+### Настройка конфигурации
 
-Перед началом работы установите переменные окружения для подключения к базам данных:
-
+1. **Создайте файл `config.env`** на основе примера:
 ```bash
-# Oracle
+cp config.env.example config.env
+```
+
+2. **Заполните `config.env`** реальными значениями:
+```bash
+# PostgreSQL Configuration
+POSTGRES_HOST=localhost
+POSTGRES_PORT=5432
+POSTGRES_DB=billing
+POSTGRES_USER=cnn
+POSTGRES_PASSWORD=your-actual-password
+
+# Oracle Configuration (optional)
+ORACLE_USER=your-username
+ORACLE_PASSWORD=your-password
+ORACLE_HOST=your-oracle-host
+ORACLE_PORT=1521
+ORACLE_SERVICE=your-service-name
+```
+
+**Важно:** Файл `config.env` игнорируется git и не будет загружен в репозиторий.
+
+3. **Для Oracle команд** (если нужно), можно использовать переменные окружения напрямую:
+```bash
 export ORACLE_USER=your-username
 export ORACLE_PASSWORD=your-password
 export ORACLE_SERVICE=your-service-name
-
-# PostgreSQL (опционально)
-export POSTGRES_DB=billing
-export POSTGRES_USER=postgres
-export POSTGRES_PASSWORD=your-password
-export POSTGRES_HOST=localhost
-export POSTGRES_PORT=5432
-```
-
-**Пример:**
-```bash
-export ORACLE_USER=billing7
-export ORACLE_PASSWORD=your-secure-password
-export ORACLE_SERVICE=bm7
-
-# Теперь можно использовать команды без явного указания паролей:
 sqlplus -s $ORACLE_USER/$ORACLE_PASSWORD@$ORACLE_SERVICE @script.sql
 ```
 

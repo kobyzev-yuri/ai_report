@@ -127,3 +127,4 @@ SELECT 'Services without CODE_1C: ' || COUNT(*) FROM v_iridium_services_info WHE
 
 
 
+

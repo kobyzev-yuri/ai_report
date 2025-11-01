@@ -61,8 +61,10 @@ ENV/
 *.backup
 
 # Secrets and configs with passwords
+config.env
 *.env
 .env.*
+!config.env.example
 config.local.*
 secrets.*
 

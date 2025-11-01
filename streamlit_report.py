@@ -12,11 +12,11 @@ import io
 import os
 
 # Конфигурация базы данных
-# Используйте переменные окружения для паролей в production!
+# Загружается из config.env через run_streamlit.sh
 DB_CONFIG = {
     'dbname': os.getenv('POSTGRES_DB', 'billing'),
-    'user': os.getenv('POSTGRES_USER', 'postgres'),
-    'password': os.getenv('POSTGRES_PASSWORD', 'your-password-here'),
+    'user': os.getenv('POSTGRES_USER', 'cnn'),
+    'password': os.getenv('POSTGRES_PASSWORD', ''),
     'host': os.getenv('POSTGRES_HOST', 'localhost'),
     'port': int(os.getenv('POSTGRES_PORT', '5432'))
 }
@@ -25,10 +25,14 @@ DB_CONFIG = {
 def get_connection():
     """Создание подключения к базе данных"""
     try:
+        if not DB_CONFIG['password']:
+            st.error("⚠️ Пароль не установлен! Убедитесь, что config.env загружен через run_streamlit.sh")
+            return None
         conn = psycopg2.connect(**DB_CONFIG)
         return conn
     except Exception as e:
         st.error(f"Ошибка подключения к базе данных: {e}")
+        st.info(f"Проверьте конфигурацию: {DB_CONFIG['user']}@{DB_CONFIG['host']}:{DB_CONFIG['port']}/{DB_CONFIG['dbname']}")
         return None
 
 
@@ -251,9 +255,20 @@ def main():
         selected_plan = st.selectbox("Plan", plan_options)
         
         st.markdown("---")
-        st.caption("Database: PostgreSQL billing@localhost:5432")
+        st.header("🔐 Database Connection")
+        st.caption(f"📡 {DB_CONFIG['user']}@{DB_CONFIG['host']}:{DB_CONFIG['port']}/{DB_CONFIG['dbname']}")
+        
+        # Кнопка тестирования подключения
+        if st.button("🔌 Test Connection"):
+            test_conn = get_connection()
+            if test_conn:
+                st.success("✅ Подключение успешно!")
+                test_conn.close()
+            else:
+                st.error("❌ Ошибка подключения. Проверьте config.env")
+        
+        st.info("💡 Конфигурация загружается из config.env при запуске через run_streamlit.sh")
     
-    # Получение данных
     period_filter = None if selected_period == "All Periods" else selected_period
     plan_filter = None if selected_plan == "All Plans" else selected_plan
     

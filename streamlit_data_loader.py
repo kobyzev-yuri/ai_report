@@ -26,8 +26,8 @@ ORACLE_CONFIG = {
 
 POSTGRES_CONFIG = {
     'dbname': os.getenv('POSTGRES_DB', 'billing'),
-    'user': os.getenv('POSTGRES_USER', 'postgres'),
-    'password': os.getenv('POSTGRES_PASSWORD', 'your-password-here'),
+    'user': os.getenv('POSTGRES_USER', 'cnn'),
+    'password': os.getenv('POSTGRES_PASSWORD', ''),
     'host': os.getenv('POSTGRES_HOST', 'localhost'),
     'port': int(os.getenv('POSTGRES_PORT', '5432'))
 }
