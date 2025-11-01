@@ -314,13 +314,13 @@ def main():
                 st.error("❌ Ошибка подключения. Проверьте config.env")
         
         st.info("💡 Конфигурация загружается из config.env при запуске через run_streamlit.sh")
-    
-    period_filter = None if selected_period == "All Periods" else selected_period
-    plan_filter = None if selected_plan == "All Plans" else selected_plan
-    
-    df = get_main_report(period_filter, plan_filter)
-    
-    if df is not None and not df.empty:
+        
+        period_filter = None if selected_period == "All Periods" else selected_period
+        plan_filter = None if selected_plan == "All Plans" else selected_plan
+        
+        df = get_main_report(period_filter, plan_filter)
+        
+        if df is not None and not df.empty:
         # Информация о выборке
         st.info(f"📊 Records: **{len(df)}** | IMEI: **{df['IMEI'].nunique()}**")
         
@@ -467,7 +467,7 @@ def main():
                 st.warning(f"Failed to load fees breakdown: {e}")
             finally:
                 conn2.close()
-    
+        
         elif df is not None and df.empty:
             st.warning("⚠️ No data found with selected filters")
         else:
