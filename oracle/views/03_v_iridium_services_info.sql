@@ -49,7 +49,7 @@ JOIN CUSTOMERS c ON s.CUSTOMER_ID = c.CUSTOMER_ID
 LEFT JOIN BM_CUSTOMER_CONTACT cc ON c.CUSTOMER_ID = cc.CUSTOMER_ID
 LEFT JOIN BM_CONTACT_DICT cd ON cc.CONTACT_DICT_ID = cd.CONTACT_DICT_ID
     AND cd.MNEMONIC IN ('b_name', 'first_name', 'last_name', 'middle_name')
-WHERE s.TYPE_ID = 9002  -- Только SBD сервисы
+WHERE s.TYPE_ID IN (9002, 9014)  -- SBD сервисы (9002 - тарификация по трафику) + услуги по сообщениям (9014 - в биллинге по сообщениям, у Iridium только по трафику)
 GROUP BY 
     s.SERVICE_ID,
     s.LOGIN,
@@ -66,7 +66,7 @@ GROUP BY
     a.ACCOUNT_ID;
 
 -- Комментарии
-COMMENT ON TABLE V_IRIDIUM_SERVICES_INFO IS 'Информация о SBD сервисах Iridium с данными клиентов';
+COMMENT ON TABLE V_IRIDIUM_SERVICES_INFO IS 'Информация о SBD сервисах Iridium с данными клиентов. TYPE_ID: 9002 (трафик), 9014 (сообщения в биллинге, трафик у Iridium)';
 COMMENT ON COLUMN V_IRIDIUM_SERVICES_INFO.CONTRACT_ID IS 'ID контракта (LOGIN) - связь с SPNET_TRAFFIC.CONTRACT_ID';
 COMMENT ON COLUMN V_IRIDIUM_SERVICES_INFO.IMEI IS 'IMEI устройства (VSAT из SERVICES)';
 COMMENT ON COLUMN V_IRIDIUM_SERVICES_INFO.AGREEMENT_NUMBER IS 'Номер договора в СТЭККОМ';
