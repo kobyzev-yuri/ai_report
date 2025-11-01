@@ -19,8 +19,8 @@ def parse_args():
     p.add_argument("--input", required=True, help="Path to V_IRIDIUM_SERVICES_INFO.txt (TSV)")
     p.add_argument("--dsn", required=False, default="host=localhost dbname=billing user=cnn",
                    help='psycopg2 DSN, e.g. "host=localhost dbname=billing user=cnn password=..."')
-    p.add_argument("--table", required=False, default="iridium_services_info_fixed",
-                   help="Target table name")
+    p.add_argument("--table", required=False, default="iridium_services_info",
+                   help="Target table name (default: iridium_services_info)")
     p.add_argument("--batch", type=int, default=1000, help="Batch size for inserts")
     p.add_argument("--truncate", action="store_true", help="TRUNCATE target table before insert")
     p.add_argument("--log", default="import_iridium.log", help="Path to log file")
