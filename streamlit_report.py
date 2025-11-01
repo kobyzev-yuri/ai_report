@@ -501,19 +501,40 @@ def main():
             col1, col2 = st.columns([2, 1])
             
             with col1:
-                # Список существующих файлов
+                # Список существующих файлов с статусом загрузки
                 if SPNET_DIR.exists():
                     spnet_files = list(SPNET_DIR.glob("*.csv")) + list(SPNET_DIR.glob("*.xlsx"))
                     if spnet_files:
+                        # Получаем список загруженных файлов из load_logs
+                        conn_status = get_connection()
+                        loaded_files = set()
+                        if conn_status:
+                            try:
+                                cursor = conn_status.cursor()
+                                cursor.execute("""
+                                    SELECT LOWER(file_name) FROM load_logs 
+                                    WHERE LOWER(table_name) = 'spnet_traffic' 
+                                    AND load_status = 'SUCCESS'
+                                """)
+                                loaded_files = {row[0] for row in cursor.fetchall()}
+                                cursor.close()
+                            except:
+                                pass
+                            finally:
+                                conn_status.close()
+                        
                         st.markdown(f"**Found files: {len(spnet_files)}**")
                         files_info = []
                         for f in sorted(spnet_files, key=lambda x: x.stat().st_mtime, reverse=True)[:20]:
+                            is_loaded = f.name.lower() in loaded_files
                             files_info.append({
                                 'File Name': f.name,
                                 'Size (MB)': round(f.stat().st_size / (1024 * 1024), 2),
-                                'Modified': datetime.fromtimestamp(f.stat().st_mtime).strftime('%Y-%m-%d %H:%M:%S')
+                                'Modified': datetime.fromtimestamp(f.stat().st_mtime).strftime('%Y-%m-%d %H:%M:%S'),
+                                'Status': '✅ Loaded' if is_loaded else '⏳ Not loaded'
                             })
-                        st.dataframe(pd.DataFrame(files_info), use_container_width=True, hide_index=True, height=200)
+                        df_files = pd.DataFrame(files_info)
+                        st.dataframe(df_files, use_container_width=True, hide_index=True, height=200)
                     else:
                         st.info("📁 Directory is empty")
                 else:
@@ -521,23 +542,46 @@ def main():
             
             with col2:
                 st.markdown("### Actions")
+                
+                # Универсальный загрузчик файлов (drag & drop)
                 uploaded_file = st.file_uploader(
-                    "Upload SPNet file",
+                    "📤 Upload file (drag & drop)",
                     type=['csv', 'xlsx'],
-                    key='spnet_upload'
+                    key='spnet_upload',
+                    help="Files will be automatically saved to SPNet reports directory"
                 )
                 
                 if uploaded_file:
-                    save_path = SPNET_DIR / uploaded_file.name
+                    # Определяем тип файла автоматически
+                    try:
+                        from python.load_data_postgres import PostgresDataLoader
+                        temp_loader = PostgresDataLoader(DB_CONFIG)
+                        file_type = temp_loader.detect_file_type(uploaded_file)
+                    except:
+                        file_type = None
+                    
+                    # Определяем директорию назначения
+                    if file_type == 'STECCOM':
+                        target_dir = STECCOM_DIR
+                        file_type_msg = "⚠️ **Detected as STECCOM file!** Will save to STECCOM directory"
+                    else:
+                        target_dir = SPNET_DIR
+                        file_type_msg = "✅ Detected as SPNet file"
+                    
+                    save_path = target_dir / uploaded_file.name
+                    
                     if save_path.exists():
                         st.warning(f"⚠️ File `{uploaded_file.name}` already exists")
                     else:
+                        if file_type and file_type == 'STECCOM':
+                            st.info(file_type_msg)
+                        
                         if st.button("💾 Save File", key='save_spnet', use_container_width=True):
                             try:
-                                SPNET_DIR.mkdir(parents=True, exist_ok=True)
+                                target_dir.mkdir(parents=True, exist_ok=True)
                                 with open(save_path, 'wb') as f:
                                     f.write(uploaded_file.getbuffer())
-                                st.success(f"✅ File saved: {uploaded_file.name}")
+                                st.success(f"✅ File saved to {target_dir.name}/: {uploaded_file.name}")
                                 st.rerun()
                             except Exception as e:
                                 st.error(f"Error saving: {e}")
@@ -549,19 +593,40 @@ def main():
             col1, col2 = st.columns([2, 1])
             
             with col1:
-                # Список существующих файлов
+                # Список существующих файлов с статусом загрузки
                 if STECCOM_DIR.exists():
                     steccom_files = list(STECCOM_DIR.glob("*.csv"))
                     if steccom_files:
+                        # Получаем список загруженных файлов из load_logs
+                        conn_status = get_connection()
+                        loaded_files = set()
+                        if conn_status:
+                            try:
+                                cursor = conn_status.cursor()
+                                cursor.execute("""
+                                    SELECT LOWER(file_name) FROM load_logs 
+                                    WHERE LOWER(table_name) = 'steccom_expenses' 
+                                    AND load_status = 'SUCCESS'
+                                """)
+                                loaded_files = {row[0] for row in cursor.fetchall()}
+                                cursor.close()
+                            except:
+                                pass
+                            finally:
+                                conn_status.close()
+                        
                         st.markdown(f"**Found files: {len(steccom_files)}**")
                         files_info = []
                         for f in sorted(steccom_files, key=lambda x: x.stat().st_mtime, reverse=True)[:20]:
+                            is_loaded = f.name.lower() in loaded_files
                             files_info.append({
                                 'File Name': f.name,
                                 'Size (MB)': round(f.stat().st_size / (1024 * 1024), 2),
-                                'Modified': datetime.fromtimestamp(f.stat().st_mtime).strftime('%Y-%m-%d %H:%M:%S')
+                                'Modified': datetime.fromtimestamp(f.stat().st_mtime).strftime('%Y-%m-%d %H:%M:%S'),
+                                'Status': '✅ Loaded' if is_loaded else '⏳ Not loaded'
                             })
-                        st.dataframe(pd.DataFrame(files_info), use_container_width=True, hide_index=True, height=200)
+                        df_files = pd.DataFrame(files_info)
+                        st.dataframe(df_files, use_container_width=True, hide_index=True, height=200)
                     else:
                         st.info("📁 Directory is empty")
                 else:
@@ -569,23 +634,64 @@ def main():
             
             with col2:
                 st.markdown("### Actions")
+                
+                # Универсальный загрузчик файлов (drag & drop)
                 uploaded_file = st.file_uploader(
-                    "Upload STECCOM file",
+                    "📤 Upload file (drag & drop)",
                     type=['csv'],
-                    key='steccom_upload'
+                    key='steccom_upload',
+                    help="Files will be automatically saved to STECCOM directory"
                 )
                 
                 if uploaded_file:
-                    save_path = STECCOM_DIR / uploaded_file.name
+                    # Определяем тип файла автоматически
+                    file_type = None
+                    try:
+                        import tempfile
+                        import io
+                        from python.load_data_postgres import PostgresDataLoader
+                        
+                        # Сохраняем во временный файл для определения типа
+                        with tempfile.NamedTemporaryFile(mode='wb', suffix='.csv', delete=False) as tmp_file:
+                            tmp_file.write(uploaded_file.getbuffer())
+                            tmp_path = tmp_file.name
+                        
+                        temp_loader = PostgresDataLoader(DB_CONFIG)
+                        file_type = temp_loader.detect_file_type(tmp_path)
+                        
+                        # Удаляем временный файл
+                        import os
+                        os.unlink(tmp_path)
+                    except Exception as e:
+                        # Если не удалось определить, пробуем по имени файла
+                        file_name_lower = uploaded_file.name.lower()
+                        if 'spnet' in file_name_lower or 'traffic' in file_name_lower:
+                            file_type = 'SPNet'
+                        elif 'steccom' in file_name_lower or 'access' in file_name_lower or 'fee' in file_name_lower:
+                            file_type = 'STECCOM'
+                    
+                    # Определяем директорию назначения
+                    if file_type == 'SPNet':
+                        target_dir = SPNET_DIR
+                        file_type_msg = "⚠️ **Detected as SPNet file!** Will save to SPNet directory"
+                    else:
+                        target_dir = STECCOM_DIR
+                        file_type_msg = "✅ Detected as STECCOM file"
+                    
+                    save_path = target_dir / uploaded_file.name
+                    
                     if save_path.exists():
                         st.warning(f"⚠️ File `{uploaded_file.name}` already exists")
                     else:
+                        if file_type and file_type == 'SPNet':
+                            st.info(file_type_msg)
+                        
                         if st.button("💾 Save File", key='save_steccom', use_container_width=True):
                             try:
-                                STECCOM_DIR.mkdir(parents=True, exist_ok=True)
+                                target_dir.mkdir(parents=True, exist_ok=True)
                                 with open(save_path, 'wb') as f:
                                     f.write(uploaded_file.getbuffer())
-                                st.success(f"✅ File saved: {uploaded_file.name}")
+                                st.success(f"✅ File saved to {target_dir.name}/: {uploaded_file.name}")
                                 st.rerun()
                             except Exception as e:
                                 st.error(f"Error saving: {e}")

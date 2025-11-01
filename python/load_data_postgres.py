@@ -45,29 +45,86 @@ class PostgresDataLoader:
             logger.error(f"Ошибка подключения к PostgreSQL: {e}")
             return False
     
+    def is_file_loaded(self, file_name, table_name='spnet_traffic'):
+        """Проверка, загружен ли файл уже"""
+        if not self.connection:
+            return False
+        cursor = self.connection.cursor()
+        try:
+            cursor.execute("""
+                SELECT COUNT(*) FROM load_logs 
+                WHERE LOWER(file_name) = LOWER(%s) 
+                AND LOWER(table_name) = LOWER(%s)
+                AND load_status = 'SUCCESS'
+            """, (file_name, table_name))
+            count = cursor.fetchone()[0]
+            return count > 0
+        except Exception as e:
+            logger.warning(f"Ошибка проверки load_logs: {e}")
+            return False
+        finally:
+            cursor.close()
+    
+    def log_load_result(self, table_name, file_name, records_loaded, load_status='SUCCESS', error_message=None):
+        """Логирование результата загрузки в load_logs"""
+        if not self.connection:
+            return
+        cursor = self.connection.cursor()
+        try:
+            cursor.execute("""
+                INSERT INTO load_logs (
+                    table_name, file_name, records_loaded, load_status, 
+                    error_message, load_start_time, load_end_time, loaded_by
+                ) VALUES (
+                    %s, %s, %s, %s, %s, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, %s
+                )
+            """, (table_name, file_name, records_loaded, load_status, error_message, 'STREAMLIT_LOADER'))
+            self.connection.commit()
+        except Exception as e:
+            logger.error(f"Ошибка логирования в load_logs: {e}")
+            self.connection.rollback()
+        finally:
+            cursor.close()
+    
     def load_spnet_files(self):
-        """Загрузка SPNet CSV файлов"""
+        """Загрузка SPNet CSV файлов (пропускает уже загруженные)"""
         logger.info("="*80)
         logger.info("Начинаем загрузку данных SPNet...")
         logger.info("="*80)
         
-        csv_files = glob.glob(f"{self.spnet_path}/*.csv")
+        csv_files = glob.glob(f"{self.spnet_path}/*.csv") + glob.glob(f"{self.spnet_path}/*.xlsx")
         if not csv_files:
-            logger.warning(f"CSV файлы SPNet не найдены в {self.spnet_path}")
+            logger.warning(f"Файлы SPNet не найдены в {self.spnet_path}")
             return False
         
         total_records = 0
+        skipped_files = 0
         load_start_time = datetime.now()
         
         for file_path in csv_files:
+            file_name = Path(file_path).name
             try:
-                logger.info(f"\nОбрабатываем файл: {Path(file_path).name}")
+                # Проверяем, загружен ли файл уже
+                if self.is_file_loaded(file_name, 'spnet_traffic'):
+                    logger.info(f"\n⏭ Пропускаем файл (уже загружен): {file_name}")
+                    skipped_files += 1
+                    continue
+                
+                logger.info(f"\nОбрабатываем файл: {file_name}")
+                load_start = datetime.now()
                 records_loaded = self.load_spnet_file(file_path)
+                load_end = datetime.now()
                 total_records += records_loaded
+                
+                # Логируем успешную загрузку
+                self.log_load_result('spnet_traffic', file_name, records_loaded, 'SUCCESS')
                 logger.info(f"✓ Загружено {records_loaded} записей")
                 
             except Exception as e:
-                logger.error(f"✗ Ошибка при обработке файла {file_path}: {e}")
+                error_msg = str(e)
+                logger.error(f"✗ Ошибка при обработке файла {file_path}: {error_msg}")
+                # Логируем ошибку
+                self.log_load_result('spnet_traffic', file_name, 0, 'FAILED', error_msg)
         
         load_end_time = datetime.now()
         duration = (load_end_time - load_start_time).total_seconds()
@@ -75,6 +132,7 @@ class PostgresDataLoader:
         logger.info(f"\n{'='*80}")
         logger.info(f"Загрузка SPNet завершена")
         logger.info(f"Всего загружено: {total_records:,} записей")
+        logger.info(f"Пропущено файлов (уже загружены): {skipped_files}")
         logger.info(f"Время выполнения: {duration:.2f} сек")
         logger.info(f"{'='*80}\n")
         
@@ -150,7 +208,7 @@ class PostgresDataLoader:
             cursor.close()
     
     def load_steccom_files(self):
-        """Загрузка STECCOM CSV файлов"""
+        """Загрузка STECCOM CSV файлов (пропускает уже загруженные)"""
         logger.info("="*80)
         logger.info("Начинаем загрузку данных STECCOM...")
         logger.info("="*80)
@@ -161,17 +219,33 @@ class PostgresDataLoader:
             return False
         
         total_records = 0
+        skipped_files = 0
         load_start_time = datetime.now()
         
         for file_path in csv_files:
+            file_name = Path(file_path).name
             try:
-                logger.info(f"\nОбрабатываем файл: {Path(file_path).name}")
+                # Проверяем, загружен ли файл уже
+                if self.is_file_loaded(file_name, 'steccom_expenses'):
+                    logger.info(f"\n⏭ Пропускаем файл (уже загружен): {file_name}")
+                    skipped_files += 1
+                    continue
+                
+                logger.info(f"\nОбрабатываем файл: {file_name}")
+                load_start = datetime.now()
                 records_loaded = self.load_steccom_file(file_path)
+                load_end = datetime.now()
                 total_records += records_loaded
+                
+                # Логируем успешную загрузку
+                self.log_load_result('steccom_expenses', file_name, records_loaded, 'SUCCESS')
                 logger.info(f"✓ Загружено {records_loaded} записей")
                 
             except Exception as e:
-                logger.error(f"✗ Ошибка при обработке файла {file_path}: {e}")
+                error_msg = str(e)
+                logger.error(f"✗ Ошибка при обработке файла {file_path}: {error_msg}")
+                # Логируем ошибку
+                self.log_load_result('steccom_expenses', file_name, 0, 'FAILED', error_msg)
         
         load_end_time = datetime.now()
         duration = (load_end_time - load_start_time).total_seconds()
@@ -179,6 +253,7 @@ class PostgresDataLoader:
         logger.info(f"\n{'='*80}")
         logger.info(f"Загрузка STECCOM завершена")
         logger.info(f"Всего загружено: {total_records:,} записей")
+        logger.info(f"Пропущено файлов (уже загружены): {skipped_files}")
         logger.info(f"Время выполнения: {duration:.2f} сек")
         logger.info(f"{'='*80}\n")
         
