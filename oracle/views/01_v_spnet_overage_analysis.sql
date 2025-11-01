@@ -1,7 +1,7 @@
 -- ============================================================================
 -- V_SPNET_OVERAGE_ANALYSIS
 -- Анализ превышения трафика по IMEI с расчетом стоимости
--- База данных: Oracle
+-- База данных: Oracle (production)
 -- ============================================================================
 
 CREATE OR REPLACE VIEW V_SPNET_OVERAGE_ANALYSIS AS
@@ -10,26 +10,47 @@ SELECT
     st.CONTRACT_ID,
     st.BILL_MONTH,
     st.PLAN_NAME,
-    st.USAGE_TYPE,
     tp.PLAN_CODE,
     tp.INCLUDED_KB,
     
-    -- Трафик
+    -- Разделение на трафик (bytes) и события (count)
+    -- Трафик: только для SBD Data Usage в байтах
+    SUM(CASE WHEN st.USAGE_TYPE = 'SBD Data Usage' THEN st.USAGE_BYTES ELSE 0 END) AS TRAFFIC_USAGE_BYTES,
+    
+    -- События: количество сессий/вызовов (CALL_SESSION_COUNT)
+    -- Для всех типов использования суммируем события
+    SUM(NVL(st.CALL_SESSION_COUNT, 0)) AS EVENTS_COUNT,
+    
+    -- Также можно отдельно считать события по типам
+    SUM(CASE WHEN st.USAGE_TYPE = 'SBD Data Usage' THEN NVL(st.CALL_SESSION_COUNT, 0) ELSE 0 END) AS DATA_USAGE_EVENTS,
+    SUM(CASE WHEN st.USAGE_TYPE = 'SBD Mailbox Checks' THEN NVL(st.CALL_SESSION_COUNT, 0) ELSE 0 END) AS MAILBOX_EVENTS,
+    SUM(CASE WHEN st.USAGE_TYPE = 'SBD Registrations' THEN NVL(st.CALL_SESSION_COUNT, 0) ELSE 0 END) AS REGISTRATION_EVENTS,
+    
+    -- Количество записей
     COUNT(*) AS RECORD_COUNT,
-    SUM(st.USAGE_BYTES) AS TOTAL_USAGE_BYTES,
-    ROUND(SUM(st.USAGE_BYTES) / 1000, 2) AS TOTAL_USAGE_KB,
+    
+    -- Трафик в KB (только SBD Data Usage)
+    ROUND(SUM(CASE WHEN st.USAGE_TYPE = 'SBD Data Usage' THEN st.USAGE_BYTES ELSE 0 END) / 1000, 2) AS TOTAL_USAGE_KB,
     
     -- Превышение (только для SBD Data Usage)
     CASE 
-        WHEN st.USAGE_TYPE = 'SBD Data Usage' AND tp.ACTIVE = 'Y' THEN
-            GREATEST(0, ROUND(SUM(st.USAGE_BYTES) / 1000 - tp.INCLUDED_KB, 2))
+        WHEN SUM(CASE WHEN st.USAGE_TYPE = 'SBD Data Usage' THEN st.USAGE_BYTES ELSE 0 END) > 0 
+             AND tp.ACTIVE = 'Y' THEN
+            GREATEST(0, ROUND(
+                SUM(CASE WHEN st.USAGE_TYPE = 'SBD Data Usage' THEN st.USAGE_BYTES ELSE 0 END) / 1000 - tp.INCLUDED_KB, 
+                2
+            ))
         ELSE 0
     END AS OVERAGE_KB,
     
     -- Расчет стоимости превышения через функцию (только для SBD Data Usage)
     CASE 
-        WHEN st.USAGE_TYPE = 'SBD Data Usage' AND tp.ACTIVE = 'Y' THEN
-            CALCULATE_OVERAGE(st.PLAN_NAME, SUM(st.USAGE_BYTES))
+        WHEN SUM(CASE WHEN st.USAGE_TYPE = 'SBD Data Usage' THEN st.USAGE_BYTES ELSE 0 END) > 0 
+             AND tp.ACTIVE = 'Y' THEN
+            CALCULATE_OVERAGE(
+                st.PLAN_NAME, 
+                SUM(CASE WHEN st.USAGE_TYPE = 'SBD Data Usage' THEN st.USAGE_BYTES ELSE 0 END)
+            )
         ELSE 0
     END AS CALCULATED_OVERAGE_CHARGE,
     
@@ -43,11 +64,8 @@ GROUP BY
     st.CONTRACT_ID,
     st.BILL_MONTH,
     st.PLAN_NAME,
-    st.USAGE_TYPE,
     tp.PLAN_CODE,
     tp.INCLUDED_KB,
     tp.ACTIVE;
 
-COMMENT ON TABLE V_SPNET_OVERAGE_ANALYSIS IS 'Анализ превышения трафика по IMEI с расчетом стоимости';
-
-
+COMMENT ON TABLE V_SPNET_OVERAGE_ANALYSIS IS 'Анализ превышения трафика по IMEI с расчетом стоимости. Разделение на трафик (bytes) и события (count)';
