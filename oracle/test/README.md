@@ -22,6 +22,15 @@ awk -F'\t' '{print NF}' V_IRIDIUM_SERVICES_INFO.txt | head -10 | sort -u
 # Должно выводить только "17"
 ```
 
+**Проверка содержимого:**
+```bash
+# Просмотр первых строк
+head -5 V_IRIDIUM_SERVICES_INFO.txt
+
+# Проверка CODE_1C (колонка 17)
+awk -F'\t' 'NR<=10 {print "CODE_1C:", $17}' V_IRIDIUM_SERVICES_INFO.txt
+```
+
 ## 📥 Импорт в PostgreSQL
 
 ### Вариант 1: Использовать готовый bash скрипт
@@ -33,7 +42,7 @@ cd oracle/test
 export PGHOST=localhost
 export PGPORT=5432
 export PGDATABASE=billing
-export PGUSER=postgres
+export PGUSER=cnn
 export PGPASSWORD=your-password-here
 
 ./import_to_postgresql.sh
@@ -46,7 +55,7 @@ cd oracle/test
 
 PGPASSWORD=your-password-here python3 import_iridium.py \
   --input V_IRIDIUM_SERVICES_INFO.txt \
-  --dsn "host=localhost dbname=billing user=postgres password=your-password-here" \
+  --dsn "host=localhost dbname=billing user=cnn password=your-password-here" \
   --table iridium_services_info \
   --truncate
 ```
@@ -54,8 +63,8 @@ PGPASSWORD=your-password-here python3 import_iridium.py \
 ## ✅ Проверка результата
 
 ```bash
-psql -U postgres -d billing -c "SELECT COUNT(*) FROM iridium_services_info;"
-psql -U postgres -d billing -c "
+psql -U cnn -d billing -c "SELECT COUNT(*) FROM iridium_services_info;"
+psql -U cnn -d billing -c "
   SELECT service_id, contract_id, LEFT(imei,20) as imei, tariff_id, status, account_id 
   FROM iridium_services_info 
   LIMIT 5;
@@ -64,23 +73,29 @@ psql -U postgres -d billing -c "
 
 ## 📝 Примечания
 
-1. **IMEI источник:** По умолчанию используется `VSAT` из `V_IRIDIUM_SERVICES_INFO`.
-   View уже настроен: `s.VSAT AS IMEI`
+1. **IMEI источник:** Используется `VSAT` из `V_IRIDIUM_SERVICES_INFO`.
+   View настроен: `s.VSAT AS IMEI`
 
-2. **CODE_1C:** Код клиента из 1С собирается из таблицы `OUTER_IDS`:
+2. **TYPE_ID:** View включает оба типа услуг:
+   - `TYPE_ID = 9002` - тарификация по трафику
+   - `TYPE_ID = 9014` - тарификация по сообщениям в биллинге (у Iridium только трафик)
+
+3. **CODE_1C:** Код клиента из 1С собирается из таблицы `OUTER_IDS`:
    ```sql
-   LEFT JOIN OUTER_IDS oi ON c.CUSTOMER_ID = oi.ID 
-       AND oi.TBL = 'CUSTOMERS'
-   -- oi.EXT_ID AS CODE_1C
+   (SELECT oi.EXT_ID 
+    FROM OUTER_IDS oi 
+    WHERE oi.ID = c.CUSTOMER_ID 
+      AND oi.TBL = 'CUSTOMERS' 
+      AND ROWNUM = 1) AS CODE_1C
    ```
    Если `CODE_1C` NULL после импорта:
    - Проверьте наличие записей в `OUTER_IDS` для `CUSTOMER_ID`
    - Запустите тест: `sqlplus @test_code_1c_export.sql`
-   - Убедитесь, что view `V_IRIDIUM_SERVICES_INFO` возвращает `CODE_1C` в Oracle
+   - Проверьте view: `sqlplus @query_view_simple.sql`
 
-3. **Формат файла:** TSV (Tab-Separated Values), 17 колонок, обработка кавычек и NULL
+4. **Формат файла:** TSV (Tab-Separated Values), 17 колонок, обработка кавычек и NULL
 
-4. **Импорт:** Использует `import_iridium.py` с валидацией, безопасными кастами типов и логированием
+5. **Импорт:** Использует `import_iridium.py` с валидацией, безопасными кастами типов и логированием
 
 ## 🔄 Полный цикл
 
@@ -97,6 +112,23 @@ export PGPASSWORD=your-postgres-password
 ./import_to_postgresql.sh
 
 # 3. Проверка
-psql -U postgres -d billing -c "SELECT COUNT(*) FROM iridium_services_info;"
+psql -U cnn -d billing -c "SELECT COUNT(*) FROM iridium_services_info;"
 ```
 
+## 🔍 Просмотр данных view в Oracle
+
+Если нужно просто посмотреть данные (не экспортировать):
+
+```bash
+# Простой просмотр (читаемый формат)
+sqlplus -s $ORACLE_USER/$ORACLE_PASSWORD@$ORACLE_SERVICE @query_view_simple.sql
+
+# Или напрямую:
+sqlplus -s $ORACLE_USER/$ORACLE_PASSWORD@$ORACLE_SERVICE << EOF
+SET PAGESIZE 50 LINESIZE 300
+SELECT SERVICE_ID, CONTRACT_ID, CUSTOMER_NAME, CODE_1C 
+FROM V_IRIDIUM_SERVICES_INFO 
+WHERE ROWNUM <= 10;
+EXIT
+EOF
+```
