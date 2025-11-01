@@ -38,10 +38,11 @@ SELECT
     a.ACCOUNT_ID,
     -- CODE_1C из OUTER_IDS через подзапрос (более надежно, чем JOIN в GROUP BY)
     -- Используем ROWNUM = 1 на случай нескольких записей для одного CUSTOMER_ID
+    -- ВАЖНО: TBL в нижнем регистре 'customers' (не 'CUSTOMERS')
     (SELECT oi.EXT_ID 
      FROM OUTER_IDS oi 
      WHERE oi.ID = c.CUSTOMER_ID 
-       AND oi.TBL = 'CUSTOMERS' 
+       AND UPPER(oi.TBL) = 'CUSTOMERS' 
        AND ROWNUM = 1) AS CODE_1C
 FROM SERVICES s
 JOIN ACCOUNTS a ON s.ACCOUNT_ID = a.ACCOUNT_ID
