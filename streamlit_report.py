@@ -380,41 +380,71 @@ def main():
         # Фильтруем только контракты из основного отчета
         contract_ids = df['Contract ID'].dropna().unique().tolist() if not df.empty else []
         
-        # Собираем условие
-        conditions = []
-        if contract_ids:
-            contract_list = "', '".join([str(c) for c in contract_ids])
-            conditions.append(f"contract_id IN ('{contract_list}')")
-        
+        # Если указан фильтр, добавляем его
         if contract_filter.strip():
-            conditions.append(f"contract_id = '{contract_filter.strip()}'")
+            contract_ids.append(contract_filter.strip())
         
-        # Фильтр по периоду (если выбран период в основном отчете)
-        if period_filter and period_filter != "All Periods":
-            year, month = period_filter.split('-')
-            # Ищем fees с периодами близкими к выбранному месяцу (формат YYYYMMDD)
-            # Например, для 2025-05 ищем периоды начинающиеся с 202505 или 202506
-            period_pattern = f"{year}{month:0>2}"
-            conditions.append(f"fee_period_date::text LIKE '{period_pattern}%'")
-        
-        fees_q_cond = f"WHERE {' AND '.join(conditions)}" if conditions else ""
-
-        fees_q = f"""
-        SELECT 
-            fee_period_date AS "Period",
-            contract_id AS "Contract ID",
-            imei AS "IMEI",
-            category AS "Category", 
-            SUM(amount) AS "Amount"
-        FROM v_steccom_access_fees_norm
-        {fees_q_cond}
-        WHERE imei IS NOT NULL
-        GROUP BY fee_period_date, contract_id, imei, category
-        ORDER BY fee_period_date DESC, contract_id, imei, category
-        """
-
+        # Подключаемся БЕЗ фильтра по всем контрактам, если их слишком много
+        # Ограничиваем фильтрацию для избежания слишком длинных запросов
         conn2 = get_connection()
         if conn2:
+            contract_condition = ""
+            
+            if contract_ids:
+                # Ограничиваем количество контрактов в запросе (макс 200)
+                limited_contract_ids = contract_ids[:200]
+                
+                # Если контрактов много (>100), используем временную таблицу
+                if len(contract_ids) > 100:
+                    try:
+                        cursor = conn2.cursor()
+                        # Создаем временную таблицу
+                        cursor.execute("DROP TABLE IF EXISTS temp_contract_filter")
+                        cursor.execute("CREATE TEMP TABLE temp_contract_filter (contract_id TEXT)")
+                        
+                        # Вставляем значения через executemany
+                        insert_data = [(str(c),) for c in limited_contract_ids]
+                        cursor.executemany(
+                            "INSERT INTO temp_contract_filter VALUES (%s)",
+                            insert_data
+                        )
+                        conn2.commit()
+                        cursor.close()
+                        
+                        contract_condition = "AND f.contract_id IN (SELECT contract_id FROM temp_contract_filter)"
+                    except Exception as e:
+                        st.warning(f"Ошибка создания временной таблицы: {e}. Используем прямое условие (ограничено 100 контрактами).")
+                        # Fallback на прямое условие (ограниченное)
+                        contract_list = "', '".join([str(c).replace("'", "''") for c in limited_contract_ids[:100]])
+                        contract_condition = f"AND f.contract_id IN ('{contract_list}')"
+                else:
+                    # Если контрактов немного, используем обычный IN (экранируем кавычки)
+                    contract_list = "', '".join([str(c).replace("'", "''") for c in contract_ids])
+                    contract_condition = f"AND f.contract_id IN ('{contract_list}')"
+            
+            # Фильтр по периоду (если выбран период в основном отчете)
+            period_condition = ""
+            if period_filter and period_filter != "All Periods":
+                year, month = period_filter.split('-')
+                # Ищем fees с периодами близкими к выбранному месяцу (формат YYYYMMDD)
+                # Например, для 2025-05 ищем периоды начинающиеся с 202505 или 202506
+                period_pattern = f"{year}{month:0>2}"
+                period_condition = f"AND f.fee_period_date::text LIKE '{period_pattern}%'"
+
+            fees_q = f"""
+            SELECT 
+                f.fee_period_date AS "Period",
+                f.contract_id AS "Contract ID",
+                f.imei AS "IMEI",
+                f.category AS "Category", 
+                SUM(f.amount) AS "Amount"
+            FROM v_steccom_access_fees_norm f
+            WHERE f.imei IS NOT NULL
+            {contract_condition}
+            {period_condition}
+            GROUP BY f.fee_period_date, f.contract_id, f.imei, f.category
+            ORDER BY f.fee_period_date DESC, f.contract_id, f.imei, f.category
+            """
             try:
                 fees_detail_df = pd.read_sql_query(fees_q, conn2)
                 
