@@ -321,152 +321,152 @@ def main():
         df = get_main_report(period_filter, plan_filter)
         
         if df is not None and not df.empty:
-        # Информация о выборке
-        st.info(f"📊 Records: **{len(df)}** | IMEI: **{df['IMEI'].nunique()}**")
-        
-        # Убеждаемся, что все колонки видны, даже если они NULL
-        display_df = df.copy()
-        
-        # Заполняем NULL пустыми строками для строковых колонок
-        for col in display_df.columns:
-            if display_df[col].dtype == 'object':  # строковые колонки
-                display_df[col] = display_df[col].fillna('')
-        
-        # Убеждаемся, что Code 1C всегда присутствует (на случай если pandas скрыл её)
-        if 'Code 1C' in df.columns:
-            # Колонка есть, просто заполняем NULL
-            display_df['Code 1C'] = display_df['Code 1C'].fillna('')
-        else:
-            # Колонка отсутствует - добавляем (не должно случиться, но на всякий случай)
-            display_df['Code 1C'] = ''
-        
-        # Таблица
-        st.dataframe(
-            display_df,
-            use_container_width=True,
-            hide_index=True,
-            height=600
-        )
-        
-        # Экспорт
-        st.markdown("---")
-        st.subheader("💾 Export")
-        
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            csv_data = export_to_csv(df)
-            st.download_button(
-                label="📥 Download CSV",
-                data=csv_data,
-                file_name=f"iridium_overage_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
-                mime="text/csv",
-                use_container_width=True
+            # Информация о выборке
+            st.info(f"📊 Records: **{len(df)}** | IMEI: **{df['IMEI'].nunique()}**")
+            
+            # Убеждаемся, что все колонки видны, даже если они NULL
+            display_df = df.copy()
+            
+            # Заполняем NULL пустыми строками для строковых колонок
+            for col in display_df.columns:
+                if display_df[col].dtype == 'object':  # строковые колонки
+                    display_df[col] = display_df[col].fillna('')
+            
+            # Убеждаемся, что Code 1C всегда присутствует (на случай если pandas скрыл её)
+            if 'Code 1C' in df.columns:
+                # Колонка есть, просто заполняем NULL
+                display_df['Code 1C'] = display_df['Code 1C'].fillna('')
+            else:
+                # Колонка отсутствует - добавляем (не должно случиться, но на всякий случай)
+                display_df['Code 1C'] = ''
+            
+            # Таблица
+            st.dataframe(
+                display_df,
+                use_container_width=True,
+                hide_index=True,
+                height=600
             )
-        
-        with col2:
-            try:
-                excel_data = export_to_excel(df)
+            
+            # Экспорт
+            st.markdown("---")
+            st.subheader("💾 Export")
+            
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                csv_data = export_to_csv(df)
                 st.download_button(
-                    label="📥 Download Excel",
-                    data=excel_data,
-                    file_name=f"iridium_overage_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    label="📥 Download CSV",
+                    data=csv_data,
+                    file_name=f"iridium_overage_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+                    mime="text/csv",
                     use_container_width=True
                 )
-            except Exception as e:
-                st.warning(f"Excel export unavailable: {e}")
-
-        # Детализация плат по категориям (30-дневные циклы со 2-го по 2-е)
-        st.markdown("---")
-        st.subheader("🔎 Fees breakdown (by category)")
-        contract_filter = st.text_input("Filter by Contract ID (optional)", value="")
-
-        # Фильтруем только контракты из основного отчета
-        contract_ids = df['Contract ID'].dropna().unique().tolist() if not df.empty else []
-        
-        # Если указан фильтр, добавляем его
-        if contract_filter.strip():
-            contract_ids.append(contract_filter.strip())
-        
-        # Подключаемся БЕЗ фильтра по всем контрактам, если их слишком много
-        # Ограничиваем фильтрацию для избежания слишком длинных запросов
-        conn2 = get_connection()
-        if conn2:
-            contract_condition = ""
             
-            if contract_ids:
-                # Ограничиваем количество контрактов в запросе (макс 200)
-                limited_contract_ids = contract_ids[:200]
-                
-                # Если контрактов много (>100), используем временную таблицу
-                if len(contract_ids) > 100:
-                    try:
-                        cursor = conn2.cursor()
-                        # Создаем временную таблицу
-                        cursor.execute("DROP TABLE IF EXISTS temp_contract_filter")
-                        cursor.execute("CREATE TEMP TABLE temp_contract_filter (contract_id TEXT)")
-                        
-                        # Вставляем значения через executemany
-                        insert_data = [(str(c),) for c in limited_contract_ids]
-                        cursor.executemany(
-                            "INSERT INTO temp_contract_filter VALUES (%s)",
-                            insert_data
-                        )
-                        conn2.commit()
-                        cursor.close()
-                        
-                        contract_condition = "AND f.contract_id IN (SELECT contract_id FROM temp_contract_filter)"
-                    except Exception as e:
-                        st.warning(f"Ошибка создания временной таблицы: {e}. Используем прямое условие (ограничено 100 контрактами).")
-                        # Fallback на прямое условие (ограниченное)
-                        contract_list = "', '".join([str(c).replace("'", "''") for c in limited_contract_ids[:100]])
-                        contract_condition = f"AND f.contract_id IN ('{contract_list}')"
-                else:
-                    # Если контрактов немного, используем обычный IN (экранируем кавычки)
-                    contract_list = "', '".join([str(c).replace("'", "''") for c in contract_ids])
-                    contract_condition = f"AND f.contract_id IN ('{contract_list}')"
-            
-            # Фильтр по периоду (если выбран период в основном отчете)
-            period_condition = ""
-            if period_filter and period_filter != "All Periods":
-                year, month = period_filter.split('-')
-                # Ищем fees с периодами близкими к выбранному месяцу (формат YYYYMMDD)
-                # Например, для 2025-05 ищем периоды начинающиеся с 202505 или 202506
-                period_pattern = f"{year}{month:0>2}"
-                period_condition = f"AND f.fee_period_date::text LIKE '{period_pattern}%'"
-
-            fees_q = f"""
-            SELECT 
-                f.fee_period_date AS "Period",
-                f.contract_id AS "Contract ID",
-                f.imei AS "IMEI",
-                f.category AS "Category", 
-                SUM(f.amount) AS "Amount"
-            FROM v_steccom_access_fees_norm f
-            WHERE f.imei IS NOT NULL
-            {contract_condition}
-            {period_condition}
-            GROUP BY f.fee_period_date, f.contract_id, f.imei, f.category
-            ORDER BY f.fee_period_date DESC, f.contract_id, f.imei, f.category
-            """
-            try:
-                fees_detail_df = pd.read_sql_query(fees_q, conn2)
-                
-                # Форматируем период: 20250302 -> "2025-03-02"
-                if 'Period' in fees_detail_df.columns and not fees_detail_df.empty:
-                    fees_detail_df['Period'] = fees_detail_df['Period'].apply(
-                        lambda x: f"{str(x)[:4]}-{str(x)[4:6]}-{str(x)[6:8]}" if pd.notna(x) and len(str(x)) >= 8 else str(x)
+            with col2:
+                try:
+                    excel_data = export_to_excel(df)
+                    st.download_button(
+                        label="📥 Download Excel",
+                        data=excel_data,
+                        file_name=f"iridium_overage_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        use_container_width=True
                     )
+                except Exception as e:
+                    st.warning(f"Excel export unavailable: {e}")
+
+            # Детализация плат по категориям (30-дневные циклы со 2-го по 2-е)
+            st.markdown("---")
+            st.subheader("🔎 Fees breakdown (by category)")
+            contract_filter = st.text_input("Filter by Contract ID (optional)", value="")
+
+            # Фильтруем только контракты из основного отчета
+            contract_ids = df['Contract ID'].dropna().unique().tolist() if not df.empty else []
+            
+            # Если указан фильтр, добавляем его
+            if contract_filter.strip():
+                contract_ids.append(contract_filter.strip())
+            
+            # Подключаемся БЕЗ фильтра по всем контрактам, если их слишком много
+            # Ограничиваем фильтрацию для избежания слишком длинных запросов
+            conn2 = get_connection()
+            if conn2:
+                contract_condition = ""
                 
-                if not fees_detail_df.empty:
-                    st.dataframe(fees_detail_df, use_container_width=True, hide_index=True, height=300)
-                else:
-                    st.info("No fees data found for selected filters")
-            except Exception as e:
-                st.warning(f"Failed to load fees breakdown: {e}")
-            finally:
-                conn2.close()
+                if contract_ids:
+                    # Ограничиваем количество контрактов в запросе (макс 200)
+                    limited_contract_ids = contract_ids[:200]
+                    
+                    # Если контрактов много (>100), используем временную таблицу
+                    if len(contract_ids) > 100:
+                        try:
+                            cursor = conn2.cursor()
+                            # Создаем временную таблицу
+                            cursor.execute("DROP TABLE IF EXISTS temp_contract_filter")
+                            cursor.execute("CREATE TEMP TABLE temp_contract_filter (contract_id TEXT)")
+                            
+                            # Вставляем значения через executemany
+                            insert_data = [(str(c),) for c in limited_contract_ids]
+                            cursor.executemany(
+                                "INSERT INTO temp_contract_filter VALUES (%s)",
+                                insert_data
+                            )
+                            conn2.commit()
+                            cursor.close()
+                            
+                            contract_condition = "AND f.contract_id IN (SELECT contract_id FROM temp_contract_filter)"
+                        except Exception as e:
+                            st.warning(f"Ошибка создания временной таблицы: {e}. Используем прямое условие (ограничено 100 контрактами).")
+                            # Fallback на прямое условие (ограниченное)
+                            contract_list = "', '".join([str(c).replace("'", "''") for c in limited_contract_ids[:100]])
+                            contract_condition = f"AND f.contract_id IN ('{contract_list}')"
+                    else:
+                        # Если контрактов немного, используем обычный IN (экранируем кавычки)
+                        contract_list = "', '".join([str(c).replace("'", "''") for c in contract_ids])
+                        contract_condition = f"AND f.contract_id IN ('{contract_list}')"
+                
+                # Фильтр по периоду (если выбран период в основном отчете)
+                period_condition = ""
+                if period_filter and period_filter != "All Periods":
+                    year, month = period_filter.split('-')
+                    # Ищем fees с периодами близкими к выбранному месяцу (формат YYYYMMDD)
+                    # Например, для 2025-05 ищем периоды начинающиеся с 202505 или 202506
+                    period_pattern = f"{year}{month:0>2}"
+                    period_condition = f"AND f.fee_period_date::text LIKE '{period_pattern}%'"
+
+                fees_q = f"""
+                SELECT 
+                    f.fee_period_date AS "Period",
+                    f.contract_id AS "Contract ID",
+                    f.imei AS "IMEI",
+                    f.category AS "Category", 
+                    SUM(f.amount) AS "Amount"
+                FROM v_steccom_access_fees_norm f
+                WHERE f.imei IS NOT NULL
+                {contract_condition}
+                {period_condition}
+                GROUP BY f.fee_period_date, f.contract_id, f.imei, f.category
+                ORDER BY f.fee_period_date DESC, f.contract_id, f.imei, f.category
+                """
+                try:
+                    fees_detail_df = pd.read_sql_query(fees_q, conn2)
+                    
+                    # Форматируем период: 20250302 -> "2025-03-02"
+                    if 'Period' in fees_detail_df.columns and not fees_detail_df.empty:
+                        fees_detail_df['Period'] = fees_detail_df['Period'].apply(
+                            lambda x: f"{str(x)[:4]}-{str(x)[4:6]}-{str(x)[6:8]}" if pd.notna(x) and len(str(x)) >= 8 else str(x)
+                        )
+                    
+                    if not fees_detail_df.empty:
+                        st.dataframe(fees_detail_df, use_container_width=True, hide_index=True, height=300)
+                    else:
+                        st.info("No fees data found for selected filters")
+                except Exception as e:
+                    st.warning(f"Failed to load fees breakdown: {e}")
+                finally:
+                    conn2.close()
         
         elif df is not None and df.empty:
             st.warning("⚠️ No data found with selected filters")
