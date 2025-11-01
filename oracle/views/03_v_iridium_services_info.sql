@@ -36,15 +36,19 @@ SELECT
     s.START_DATE,
     s.STOP_DATE,
     a.ACCOUNT_ID,
-    oi.EXT_ID AS CODE_1C
+    -- CODE_1C из OUTER_IDS через подзапрос (более надежно, чем JOIN в GROUP BY)
+    -- Используем ROWNUM = 1 на случай нескольких записей для одного CUSTOMER_ID
+    (SELECT oi.EXT_ID 
+     FROM OUTER_IDS oi 
+     WHERE oi.ID = c.CUSTOMER_ID 
+       AND oi.TBL = 'CUSTOMERS' 
+       AND ROWNUM = 1) AS CODE_1C
 FROM SERVICES s
 JOIN ACCOUNTS a ON s.ACCOUNT_ID = a.ACCOUNT_ID
 JOIN CUSTOMERS c ON s.CUSTOMER_ID = c.CUSTOMER_ID
 LEFT JOIN BM_CUSTOMER_CONTACT cc ON c.CUSTOMER_ID = cc.CUSTOMER_ID
 LEFT JOIN BM_CONTACT_DICT cd ON cc.CONTACT_DICT_ID = cd.CONTACT_DICT_ID
     AND cd.MNEMONIC IN ('b_name', 'first_name', 'last_name', 'middle_name')
-LEFT JOIN OUTER_IDS oi ON c.CUSTOMER_ID = oi.ID 
-    AND oi.TBL = 'CUSTOMERS'
 WHERE s.TYPE_ID = 9002  -- Только SBD сервисы
 GROUP BY 
     s.SERVICE_ID,
@@ -59,8 +63,7 @@ GROUP BY
     s.CREATE_DATE,
     s.START_DATE,
     s.STOP_DATE,
-    a.ACCOUNT_ID,
-    oi.EXT_ID;
+    a.ACCOUNT_ID;
 
 -- Комментарии
 COMMENT ON TABLE V_IRIDIUM_SERVICES_INFO IS 'Информация о SBD сервисах Iridium с данными клиентов';
@@ -69,6 +72,4 @@ COMMENT ON COLUMN V_IRIDIUM_SERVICES_INFO.IMEI IS 'IMEI устройства (VS
 COMMENT ON COLUMN V_IRIDIUM_SERVICES_INFO.AGREEMENT_NUMBER IS 'Номер договора в СТЭККОМ';
 COMMENT ON COLUMN V_IRIDIUM_SERVICES_INFO.ORDER_NUMBER IS 'Номер заказа/приложения к договору';
 COMMENT ON COLUMN V_IRIDIUM_SERVICES_INFO.CUSTOMER_NAME IS 'Название организации или ФИО';
-COMMENT ON COLUMN V_IRIDIUM_SERVICES_INFO.CODE_1C IS 'Код клиента из системы 1С';
-
-
+COMMENT ON COLUMN V_IRIDIUM_SERVICES_INFO.CODE_1C IS 'Код клиента из системы 1С (из OUTER_IDS по CUSTOMER_ID)';
