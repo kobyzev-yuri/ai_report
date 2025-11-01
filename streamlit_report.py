@@ -115,20 +115,21 @@ def get_main_report(period_filter=None, plan_filter=None):
         df['bill_month_num'] = df['Bill Month'].apply(lambda x: int(x) if pd.notna(x) else None)
         
         # Загружаем fees и делаем pivot по категориям
-        # Мержим только по contract_id, так как периоды разные (календарный месяц vs 30-дневный цикл со 2-го по 2-е)
+        # Группируем по IMEI и bill_month (периоду), чтобы не суммировать по всем периодам
         fees_query = f"""
-        SELECT fee_period_date, contract_id, category, SUM(amount) AS total_amount
+        SELECT bill_month, contract_id, imei, category, SUM(amount) AS total_amount
         FROM v_steccom_access_fees_norm
-        GROUP BY fee_period_date, contract_id, category
+        WHERE bill_month IS NOT NULL AND imei IS NOT NULL
+        GROUP BY bill_month, contract_id, imei, category
         """
         
         try:
             fees_df = pd.read_sql_query(fees_query, conn)
             
             if not fees_df.empty:
-                # Pivot: категории -> колонки (агрегируем все периоды по contract_id)
+                # Pivot: категории -> колонки (группируем по IMEI и bill_month, НЕ суммируем все периоды!)
                 fees_pivot = fees_df.pivot_table(
-                    index='contract_id',
+                    index=['imei', 'bill_month', 'contract_id'],
                     columns='category',
                     values='total_amount',
                     aggfunc='sum',
@@ -136,14 +137,14 @@ def get_main_report(period_filter=None, plan_filter=None):
                 ).reset_index()
                 
                 # Переименовываем колонки категорий
-                fees_pivot.columns = [f"Fee: {col}" if col != 'contract_id' else col 
+                fees_pivot.columns = [f"Fee: {col}" if col not in ['imei', 'bill_month', 'contract_id'] else col 
                                       for col in fees_pivot.columns]
                 
-                # Merge с основным отчетом только по contract_id
+                # Merge с основным отчетом по IMEI и bill_month (а не только по contract_id)
                 df = df.merge(
                     fees_pivot,
-                    left_on='Contract ID',
-                    right_on='contract_id',
+                    left_on=['IMEI', 'bill_month_num'],
+                    right_on=['imei', 'bill_month'],
                     how='left'
                 )
                 
@@ -154,7 +155,7 @@ def get_main_report(period_filter=None, plan_filter=None):
                         df[c] = pd.to_numeric(df[c], errors='coerce').fillna(0)
 
                 # Удаляем служебные колонки
-                df = df.drop(columns=['contract_id', 'bill_month_num'], errors='ignore')
+                df = df.drop(columns=['contract_id', 'imei', 'bill_month', 'bill_month_num'], errors='ignore')
             
         except Exception as e:
             st.warning(f"Не удалось загрузить категории плат: {e}")

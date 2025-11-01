@@ -16,7 +16,15 @@ SELECT
             (regexp_match(source_file, '\.([0-9]{8})\.csv$'))[1]::int
         ELSE NULL
     END AS fee_period_date,  -- YYYYMMDD из имени файла
+    -- Конвертируем fee_period_date (YYYYMMDD) в BILL_MONTH (YYYYMM) для связи с основным отчетом
+    -- fee_period_date = 20250302 -> bill_month = 202503 (первые 6 символов делим на 100)
+    CASE 
+        WHEN source_file ~ '\.([0-9]{8})\.csv$' THEN
+            ((regexp_match(source_file, '\.([0-9]{8})\.csv$'))[1]::int) / 100
+        ELSE NULL
+    END AS bill_month,  -- YYYYMM для связи с основным отчетом
     contract_id,
+    icc_id_imei AS imei,  -- IMEI для группировки по устройству
     description AS category,
     amount::numeric AS amount
 FROM steccom_expenses
@@ -28,7 +36,9 @@ WHERE contract_id IS NOT NULL
 -- Комментарии
 COMMENT ON VIEW v_steccom_access_fees_norm IS 
 'Нормализованный view категорий плат STECCOM из steccom_expenses.
-fee_period_date в формате YYYYMMDD из имени файла (например, 20251002) - цикл 30 дней со 2-го по 2-е.';
+fee_period_date в формате YYYYMMDD из имени файла (например, 20251002) - цикл 30 дней со 2-го по 2-е.
+bill_month в формате YYYYMM для связи с основным отчетом (например, 202510).
+imei - IMEI устройства для группировки по устройству и периоду.';
 
 -- Сводная таблица: категории -> колонки
 DROP VIEW IF EXISTS v_steccom_access_fees_pivot CASCADE;
@@ -37,15 +47,19 @@ CREATE OR REPLACE VIEW v_steccom_access_fees_pivot AS
 WITH aggregated AS (
     SELECT
         fee_period_date,
+        bill_month,
         contract_id,
+        imei,
         category,
         SUM(amount) AS total_amount
     FROM v_steccom_access_fees_norm
-    GROUP BY fee_period_date, contract_id, category
+    GROUP BY fee_period_date, bill_month, contract_id, imei, category
 )
 SELECT
     fee_period_date,
+    bill_month,
     contract_id,
+    imei,
     -- Динамически создаем колонки для каждой категории через COALESCE
     -- Основные категории (можно расширить по мере появления новых)
     COALESCE(SUM(CASE WHEN category ILIKE '%Advance Charge%' THEN total_amount END), 0) AS fee_advance_charge,
@@ -67,7 +81,7 @@ SELECT
     -- Общая сумма всех плат
     SUM(total_amount) AS fee_total
 FROM aggregated
-GROUP BY fee_period_date, contract_id;
+GROUP BY fee_period_date, bill_month, contract_id, imei;
 
 -- Комментарии
 COMMENT ON VIEW v_steccom_access_fees_pivot IS 
@@ -75,7 +89,9 @@ COMMENT ON VIEW v_steccom_access_fees_pivot IS
 fee_period_date в формате YYYYMMDD из имени файла (например, 20251002) - цикл 30 дней со 2-го по 2-е.';
 
 COMMENT ON COLUMN v_steccom_access_fees_pivot.fee_period_date IS 'Период в формате YYYYMMDD из имени файла (цикл 30 дней со 2-го по 2-е)';
+COMMENT ON COLUMN v_steccom_access_fees_pivot.bill_month IS 'Период в формате YYYYMM для связи с основным отчетом (извлечен из fee_period_date)';
 COMMENT ON COLUMN v_steccom_access_fees_pivot.contract_id IS 'ID контракта (SUB-...)';
+COMMENT ON COLUMN v_steccom_access_fees_pivot.imei IS 'IMEI устройства для группировки по устройству и периоду';
 COMMENT ON COLUMN v_steccom_access_fees_pivot.fee_advance_charge IS 'Сумма Advance Charge';
 COMMENT ON COLUMN v_steccom_access_fees_pivot.fee_activation IS 'Сумма Activation Fee';
 COMMENT ON COLUMN v_steccom_access_fees_pivot.fee_monthly IS 'Сумма Monthly Access Fee';
