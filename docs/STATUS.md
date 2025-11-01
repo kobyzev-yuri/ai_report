@@ -21,17 +21,22 @@
 ### Колонки отчета
 1. IMEI
 2. Contract ID
-3. Plan Name
-4. Bill Month (YYYY-MM)
-5. Usage (KB)
-6. Included (KB)
-7. Overage (KB)
-8. **Calculated Overage ($)** - только для SBD-1 и SBD-10
-9. SPNet Total Amount ($) - все типы использования
-10. Advance Charge ($)
-11. STECCOM Total Amount ($)
-12. Overage Diff ($)
-13. Total Diff ($)
+3. Plan Monthly - основной тариф (пусто, если нет)
+4. Plan Suspended - suspended тариф (пусто, если нет)
+5. Bill Month (YYYY-MM)
+6. Traffic Usage (KB)
+7. Events (Count)
+8. Included (KB)
+9. Overage (KB)
+10. **Calculated Overage ($)** - только для SBD-1 и SBD-10
+11. SPNet Total Amount ($) - все типы использования
+12. STECCOM Monthly ($) - основной тариф
+13. STECCOM Suspended ($) - suspended тариф
+14. STECCOM Total Amount ($) - общая сумма
+15. Organization/Person - название клиента
+16. Code 1C
+17. Service ID
+18. Agreement #
 
 ### Фильтры
 - **Period** - выбор периода (All Periods / 2025-09 / и т.д.)

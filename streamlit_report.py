@@ -79,7 +79,8 @@ def get_main_report(period_filter=None, plan_filter=None):
     SELECT 
         v.IMEI AS "IMEI",
         v.CONTRACT_ID AS "Contract ID",
-        v.PLAN_NAME AS "Plan Name",
+        COALESCE(v.STECCOM_PLAN_NAME_MONTHLY, '') AS "Plan Monthly",
+        COALESCE(v.STECCOM_PLAN_NAME_SUSPENDED, '') AS "Plan Suspended",
         CAST(v.BILL_MONTH AS integer) AS "Bill Month",
         -- Разделение трафика и событий
         ROUND(CAST(v.TRAFFIC_USAGE_BYTES AS NUMERIC) / 1000, 2) AS "Traffic Usage (KB)",
@@ -92,9 +93,11 @@ def get_main_report(period_filter=None, plan_filter=None):
         v.OVERAGE_KB AS "Overage (KB)",
         v.CALCULATED_OVERAGE AS "Calculated Overage ($)",
         v.SPNET_TOTAL_AMOUNT AS "SPNet Total Amount ($)",
+        v.STECCOM_MONTHLY_AMOUNT AS "STECCOM Monthly ($)",
+        v.STECCOM_SUSPENDED_AMOUNT AS "STECCOM Suspended ($)",
         v.STECCOM_TOTAL_AMOUNT AS "STECCOM Total Amount ($)",
         -- Доп. поля из биллинга
-        v.organization_name    AS "Organization/Person",
+        v.display_name         AS "Organization/Person",
         v.code_1c              AS "Code 1C",
         v.service_id           AS "Service ID",
         v.agreement_number     AS "Agreement #"

@@ -17,3 +17,4 @@ ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public GRANT SELECT ON SEQU
 
 \echo 'Права доступа предоставлены пользователю cnn'
 
+

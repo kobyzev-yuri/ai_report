@@ -42,3 +42,6 @@ COMMENT ON VIEW v_iridium_services_info IS 'View для доступа к дан
 
 
 
+
+
+

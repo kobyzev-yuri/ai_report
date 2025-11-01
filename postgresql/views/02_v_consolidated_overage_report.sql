@@ -41,7 +41,39 @@ steccom_data AS (
         se.ICC_ID_IMEI AS IMEI,
         se.CONTRACT_ID,
         TO_CHAR(se.INVOICE_DATE, 'YYYYMM') AS BILL_MONTH,
-        SUM(se.AMOUNT) AS STECCOM_TOTAL_AMOUNT
+        -- Основной тариф (Monthly Fee, не Suspended) - сумма и план
+        SUM(CASE 
+            WHEN se.RATE_TYPE IS NOT NULL 
+             AND UPPER(TRIM(se.RATE_TYPE)) NOT LIKE '%SUSPEND%'
+            THEN se.AMOUNT 
+            ELSE 0 
+        END) AS STECCOM_MONTHLY_AMOUNT,
+        -- Suspended тариф - сумма
+        SUM(CASE 
+            WHEN se.RATE_TYPE IS NOT NULL 
+             AND UPPER(TRIM(se.RATE_TYPE)) LIKE '%SUSPEND%'
+            THEN se.AMOUNT 
+            ELSE 0 
+        END) AS STECCOM_SUSPENDED_AMOUNT,
+        -- Общая сумма для обратной совместимости
+        SUM(se.AMOUNT) AS STECCOM_TOTAL_AMOUNT,
+        -- Две отдельные колонки для планов: основной и suspended
+        -- Основной план тарифа (из plan_discount, где rate_type не Suspend)
+        MAX(CASE 
+            WHEN se.RATE_TYPE IS NOT NULL 
+             AND UPPER(TRIM(se.RATE_TYPE)) NOT LIKE '%SUSPEND%'
+             AND se.PLAN_DISCOUNT IS NOT NULL
+            THEN se.PLAN_DISCOUNT 
+            ELSE NULL 
+        END) AS STECCOM_PLAN_NAME_MONTHLY,
+        -- Suspended план тарифа (из plan_discount, где rate_type содержит Suspend)
+        MAX(CASE 
+            WHEN se.RATE_TYPE IS NOT NULL 
+             AND UPPER(TRIM(se.RATE_TYPE)) LIKE '%SUSPEND%'
+             AND se.PLAN_DISCOUNT IS NOT NULL
+            THEN se.PLAN_DISCOUNT 
+            ELSE NULL 
+        END) AS STECCOM_PLAN_NAME_SUSPENDED
     FROM STECCOM_EXPENSES se
     WHERE se.ICC_ID_IMEI IS NOT NULL
       AND (se.SERVICE IS NULL OR UPPER(TRIM(se.SERVICE)) != 'BROADBAND')
@@ -49,12 +81,51 @@ steccom_data AS (
         se.ICC_ID_IMEI,
         se.CONTRACT_ID,
         TO_CHAR(se.INVOICE_DATE, 'YYYYMM')
+),
+-- Получаем plan_name из spnet_traffic даже когда нет превышения
+-- Сначала ищем по точному совпадению (contract_id + bill_month + imei)
+plan_lookup_exact AS (
+    SELECT DISTINCT
+        st.CONTRACT_ID,
+        LPAD(CAST(st.BILL_MONTH % 10000 AS TEXT), 4, '0') || LPAD(CAST(st.BILL_MONTH / 10000 AS TEXT), 2, '0') AS BILL_MONTH,
+        st.IMEI,
+        st.PLAN_NAME
+    FROM SPNET_TRAFFIC st
+    WHERE st.PLAN_NAME IS NOT NULL
+      AND st.CONTRACT_ID IS NOT NULL
+),
+-- Также ищем план по contract_id (последний известный план для контракта)
+plan_lookup_contract AS (
+    SELECT DISTINCT ON (st.CONTRACT_ID)
+        st.CONTRACT_ID,
+        st.PLAN_NAME
+    FROM SPNET_TRAFFIC st
+    WHERE st.PLAN_NAME IS NOT NULL
+      AND st.CONTRACT_ID IS NOT NULL
+    ORDER BY st.CONTRACT_ID, st.BILL_MONTH DESC
+),
+-- Также ищем план по IMEI (последний известный план для IMEI, даже если contract_id другой)
+plan_lookup_imei AS (
+    SELECT DISTINCT ON (st.IMEI)
+        st.IMEI,
+        st.PLAN_NAME
+    FROM SPNET_TRAFFIC st
+    WHERE st.PLAN_NAME IS NOT NULL
+      AND st.IMEI IS NOT NULL
+    ORDER BY st.IMEI, st.BILL_MONTH DESC
 )
 SELECT 
     COALESCE(sp.IMEI, st.IMEI) AS IMEI,
     COALESCE(sp.CONTRACT_ID, st.CONTRACT_ID) AS CONTRACT_ID,
     COALESCE(sp.BILL_MONTH, st.BILL_MONTH) AS BILL_MONTH,
-    sp.PLAN_NAME,
+    -- PLAN_NAME для обратной совместимости: основной план (если нет - из SPNet)
+    COALESCE(
+        sp.PLAN_NAME,
+        st.STECCOM_PLAN_NAME_MONTHLY,
+        ple.PLAN_NAME,
+        plc.PLAN_NAME,
+        pli.PLAN_NAME
+    ) AS PLAN_NAME,
     
     -- Разделение трафика и событий (по каждому периоду)
     COALESCE(sp.TRAFFIC_USAGE_BYTES, 0) AS TRAFFIC_USAGE_BYTES,
@@ -71,17 +142,35 @@ SELECT
     COALESCE(sp.CALCULATED_OVERAGE, 0) AS CALCULATED_OVERAGE,
     
     -- STECCOM данные (по каждому периоду отдельно)
-    COALESCE(st.STECCOM_TOTAL_AMOUNT, 0) AS STECCOM_TOTAL_AMOUNT
+    -- Разделение на основной тариф и suspended
+    COALESCE(st.STECCOM_MONTHLY_AMOUNT, 0) AS STECCOM_MONTHLY_AMOUNT,
+    COALESCE(st.STECCOM_SUSPENDED_AMOUNT, 0) AS STECCOM_SUSPENDED_AMOUNT,
+    -- Общая сумма для обратной совместимости
+    COALESCE(st.STECCOM_TOTAL_AMOUNT, 0) AS STECCOM_TOTAL_AMOUNT,
+    -- Две отдельные колонки для планов: основной и suspended
+    st.STECCOM_PLAN_NAME_MONTHLY AS STECCOM_PLAN_NAME_MONTHLY,
+    st.STECCOM_PLAN_NAME_SUSPENDED AS STECCOM_PLAN_NAME_SUSPENDED
     
 FROM spnet_data sp
 FULL OUTER JOIN steccom_data st 
     ON sp.IMEI = st.IMEI 
     AND sp.CONTRACT_ID = st.CONTRACT_ID
     AND sp.BILL_MONTH = st.BILL_MONTH
+-- Точное совпадение по contract_id + bill_month + imei
+LEFT JOIN plan_lookup_exact ple
+    ON COALESCE(sp.CONTRACT_ID, st.CONTRACT_ID) = ple.CONTRACT_ID
+    AND COALESCE(sp.BILL_MONTH, st.BILL_MONTH) = ple.BILL_MONTH
+    AND COALESCE(sp.IMEI, st.IMEI) = ple.IMEI
+-- Если точного совпадения нет, берем последний известный план для контракта
+LEFT JOIN plan_lookup_contract plc
+    ON COALESCE(sp.CONTRACT_ID, st.CONTRACT_ID) = plc.CONTRACT_ID
+-- Если нет плана по контракту, ищем по IMEI
+LEFT JOIN plan_lookup_imei pli
+    ON COALESCE(sp.IMEI, st.IMEI) = pli.IMEI
 ORDER BY 
     COALESCE(sp.IMEI, st.IMEI),
     COALESCE(sp.BILL_MONTH, st.BILL_MONTH) DESC;
 
-COMMENT ON VIEW V_CONSOLIDATED_OVERAGE_REPORT IS 'Сводный отчет по превышению с данными из SPNet и STECCOM. КАЖДАЯ СТРОКА = ОТДЕЛЬНЫЙ ПЕРИОД (BILL_MONTH). Периоды НЕ суммируются!';
+COMMENT ON VIEW V_CONSOLIDATED_OVERAGE_REPORT IS 'Сводный отчет по превышению с данными из SPNet и STECCOM. КАЖДАЯ СТРОКА = ОТДЕЛЬНЫЙ ПЕРИОД (BILL_MONTH). Периоды НЕ суммируются! STECCOM данные разделены: STECCOM_MONTHLY_AMOUNT/SUSPENDED_AMOUNT (суммы) и STECCOM_PLAN_NAME_MONTHLY/SUSPENDED (планы). Группировка: IMEI + CONTRACT_ID + BILL_MONTH - одна строка на период.';
 
 \echo 'View V_CONSOLIDATED_OVERAGE_REPORT создан успешно!'

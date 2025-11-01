@@ -1,5 +1,25 @@
 # История изменений
 
+## 2025-01-XX (latest)
+
+### ✅ Разделение STECCOM данных на Monthly и Suspended
+- **Добавлены две отдельные колонки для планов:**
+  - `STECCOM_PLAN_NAME_MONTHLY` - основной тариф (пусто, если нет)
+  - `STECCOM_PLAN_NAME_SUSPENDED` - suspended тариф (пусто, если нет)
+- **Добавлены две отдельные колонки для сумм:**
+  - `STECCOM_MONTHLY_AMOUNT` - сумма основного тарифа
+  - `STECCOM_SUSPENDED_AMOUNT` - сумма suspended тарифа
+- **Группировка:** одна строка для каждого IMEI + период (не дублируются)
+- **Обновлены представления:**
+  - `V_CONSOLIDATED_OVERAGE_REPORT` (PostgreSQL и Oracle)
+  - `V_CONSOLIDATED_REPORT_WITH_BILLING` (PostgreSQL и Oracle)
+- **Обновлен Streamlit:** добавлены колонки "Plan Monthly" и "Plan Suspended"
+- **Логика:** если есть основной тариф - показывается основной план, если только suspended - показывается suspended план
+
+### ✅ Исправления
+- Убрана дублирующая колонка "Plan Name" из Streamlit (дублировала "Plan Monthly")
+- План теперь определяется корректно для устройств только с suspended тарифом
+
 ## 2025-10-28 (final)
 
 ### ✅ Упрощение приложения

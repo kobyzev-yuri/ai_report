@@ -39,7 +39,39 @@ steccom_data AS (
         se.ICC_ID_IMEI AS IMEI,
         se.CONTRACT_ID,
         TO_CHAR(se.INVOICE_DATE, 'YYYYMM') AS BILL_MONTH,
-        SUM(se.AMOUNT) AS STECCOM_TOTAL_AMOUNT
+        -- Основной тариф (Monthly Fee, не Suspended) - сумма и план
+        SUM(CASE 
+            WHEN se.RATE_TYPE IS NOT NULL 
+             AND UPPER(TRIM(se.RATE_TYPE)) NOT LIKE '%SUSPEND%'
+            THEN se.AMOUNT 
+            ELSE 0 
+        END) AS STECCOM_MONTHLY_AMOUNT,
+        -- Suspended тариф - сумма
+        SUM(CASE 
+            WHEN se.RATE_TYPE IS NOT NULL 
+             AND UPPER(TRIM(se.RATE_TYPE)) LIKE '%SUSPEND%'
+            THEN se.AMOUNT 
+            ELSE 0 
+        END) AS STECCOM_SUSPENDED_AMOUNT,
+        -- Общая сумма для обратной совместимости
+        SUM(se.AMOUNT) AS STECCOM_TOTAL_AMOUNT,
+        -- Две отдельные колонки для планов: основной и suspended
+        -- Основной план тарифа (из plan_discount, где rate_type не Suspend)
+        MAX(CASE 
+            WHEN se.RATE_TYPE IS NOT NULL 
+             AND UPPER(TRIM(se.RATE_TYPE)) NOT LIKE '%SUSPEND%'
+             AND se.PLAN_DISCOUNT IS NOT NULL
+            THEN se.PLAN_DISCOUNT 
+            ELSE NULL 
+        END) AS STECCOM_PLAN_NAME_MONTHLY,
+        -- Suspended план тарифа (из plan_discount, где rate_type содержит Suspend)
+        MAX(CASE 
+            WHEN se.RATE_TYPE IS NOT NULL 
+             AND UPPER(TRIM(se.RATE_TYPE)) LIKE '%SUSPEND%'
+             AND se.PLAN_DISCOUNT IS NOT NULL
+            THEN se.PLAN_DISCOUNT 
+            ELSE NULL 
+        END) AS STECCOM_PLAN_NAME_SUSPENDED
     FROM STECCOM_EXPENSES se
     WHERE se.ICC_ID_IMEI IS NOT NULL
       AND (se.SERVICE IS NULL OR UPPER(TRIM(se.SERVICE)) != 'BROADBAND')
@@ -52,7 +84,8 @@ SELECT
     NVL(sp.IMEI, st.IMEI) AS IMEI,
     NVL(sp.CONTRACT_ID, st.CONTRACT_ID) AS CONTRACT_ID,
     NVL(sp.BILL_MONTH, st.BILL_MONTH) AS BILL_MONTH,
-    sp.PLAN_NAME,
+    -- PLAN_NAME для обратной совместимости: основной план (если нет - из SPNet)
+    NVL(sp.PLAN_NAME, st.STECCOM_PLAN_NAME_MONTHLY) AS PLAN_NAME,
     
     -- Разделение трафика и событий (по каждому периоду)
     NVL(sp.TRAFFIC_USAGE_BYTES, 0) AS TRAFFIC_USAGE_BYTES,
@@ -69,7 +102,14 @@ SELECT
     NVL(sp.CALCULATED_OVERAGE, 0) AS CALCULATED_OVERAGE,
     
     -- STECCOM данные (по каждому периоду отдельно)
-    NVL(st.STECCOM_TOTAL_AMOUNT, 0) AS STECCOM_TOTAL_AMOUNT
+    -- Разделение на основной тариф и suspended
+    NVL(st.STECCOM_MONTHLY_AMOUNT, 0) AS STECCOM_MONTHLY_AMOUNT,
+    NVL(st.STECCOM_SUSPENDED_AMOUNT, 0) AS STECCOM_SUSPENDED_AMOUNT,
+    -- Общая сумма для обратной совместимости
+    NVL(st.STECCOM_TOTAL_AMOUNT, 0) AS STECCOM_TOTAL_AMOUNT,
+    -- Две отдельные колонки для планов: основной и suspended
+    st.STECCOM_PLAN_NAME_MONTHLY AS STECCOM_PLAN_NAME_MONTHLY,
+    st.STECCOM_PLAN_NAME_SUSPENDED AS STECCOM_PLAN_NAME_SUSPENDED
     
 FROM spnet_data sp
 FULL OUTER JOIN steccom_data st 
@@ -80,4 +120,4 @@ ORDER BY
     NVL(sp.IMEI, st.IMEI),
     NVL(sp.BILL_MONTH, st.BILL_MONTH) DESC;
 
-COMMENT ON TABLE V_CONSOLIDATED_OVERAGE_REPORT IS 'Сводный отчет по превышению с данными из SPNet и STECCOM. КАЖДАЯ СТРОКА = ОТДЕЛЬНЫЙ ПЕРИОД (BILL_MONTH). Периоды НЕ суммируются!';
+COMMENT ON TABLE V_CONSOLIDATED_OVERAGE_REPORT IS 'Сводный отчет по превышению с данными из SPNet и STECCOM. КАЖДАЯ СТРОКА = ОТДЕЛЬНЫЙ ПЕРИОД (BILL_MONTH). Периоды НЕ суммируются! STECCOM данные разделены: STECCOM_MONTHLY_AMOUNT/SUSPENDED_AMOUNT (суммы) и STECCOM_PLAN_NAME_MONTHLY/SUSPENDED (планы). Группировка: IMEI + CONTRACT_ID + BILL_MONTH - одна строка на период.';

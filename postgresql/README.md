@@ -98,8 +98,14 @@ python load_from_oracle_views.py
    - Источник: SPNET_TRAFFIC + TARIFF_PLANS
 
 2. **V_CONSOLIDATED_OVERAGE_REPORT**
-   - Консолидированный отчет
+   - Консолидированный отчет SPNet + STECCOM
    - Источник: V_SPNET_OVERAGE_ANALYSIS + STECCOM_EXPENSES
+   - **STECCOM данные разделены:**
+     - `STECCOM_MONTHLY_AMOUNT` - сумма основного тарифа
+     - `STECCOM_SUSPENDED_AMOUNT` - сумма suspended тарифа
+     - `STECCOM_PLAN_NAME_MONTHLY` - план основного тарифа (пусто, если нет)
+     - `STECCOM_PLAN_NAME_SUSPENDED` - план suspended тарифа (пусто, если нет)
+   - Группировка: IMEI + CONTRACT_ID + BILL_MONTH (одна строка на период)
 
 ## Использование в Streamlit
 
@@ -227,6 +233,9 @@ ORACLE_CONFIG = {
 
 - Oracle (production): см. [../oracle/README.md](../oracle/README.md)
 - Документация: см. [../docs/INDEX.md](../docs/INDEX.md)
+
+
+
 
 
 

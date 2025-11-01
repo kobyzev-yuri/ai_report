@@ -23,7 +23,12 @@ SELECT
     cor.TOTAL_USAGE_KB,
     cor.OVERAGE_KB,
     cor.CALCULATED_OVERAGE,
+    cor.STECCOM_MONTHLY_AMOUNT,
+    cor.STECCOM_SUSPENDED_AMOUNT,
     cor.STECCOM_TOTAL_AMOUNT,
+    -- Две отдельные колонки для планов: основной и suspended
+    cor.STECCOM_PLAN_NAME_MONTHLY,
+    cor.STECCOM_PLAN_NAME_SUSPENDED,
     -- Добавляем данные из биллинга
     v.SERVICE_ID,
     v.CODE_1C,

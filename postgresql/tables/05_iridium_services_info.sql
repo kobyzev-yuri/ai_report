@@ -51,3 +51,6 @@ COMMENT ON COLUMN IRIDIUM_SERVICES_INFO.STATUS IS 'Статус сервиса (
 
 
 
+
+
+
