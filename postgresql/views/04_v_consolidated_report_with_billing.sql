@@ -8,12 +8,18 @@ DROP VIEW IF EXISTS V_CONSOLIDATED_REPORT_WITH_BILLING CASCADE;
 
 CREATE OR REPLACE VIEW V_CONSOLIDATED_REPORT_WITH_BILLING AS
 SELECT 
-    -- Все поля из основного отчета
+    -- Все поля из основного отчета (по каждому периоду отдельно!)
     cor.bill_month,
     cor.imei,
     cor.contract_id,
     cor.plan_name,
-    cor.activation_date,
+    -- Разделение трафика и событий (по каждому периоду)
+    cor.traffic_usage_bytes,
+    cor.events_count,
+    cor.data_usage_events,
+    cor.mailbox_events,
+    cor.registration_events,
+    -- Суммы и превышения
     cor.spnet_total_amount,
     cor.included_kb,
     cor.total_usage_kb,

@@ -80,8 +80,14 @@ def get_main_report(period_filter=None, plan_filter=None):
         v.IMEI AS "IMEI",
         v.CONTRACT_ID AS "Contract ID",
         v.PLAN_NAME AS "Plan Name",
-        v.BILL_MONTH AS "Bill Month",
-        v.TOTAL_USAGE_KB AS "Usage (KB)",
+        CAST(v.BILL_MONTH AS integer) AS "Bill Month",
+        -- Разделение трафика и событий
+        ROUND(CAST(v.TRAFFIC_USAGE_BYTES AS NUMERIC) / 1000, 2) AS "Traffic Usage (KB)",
+        v.EVENTS_COUNT AS "Events (Count)",
+        v.DATA_USAGE_EVENTS AS "Data Events",
+        v.MAILBOX_EVENTS AS "Mailbox Events",
+        v.REGISTRATION_EVENTS AS "Registration Events",
+        -- Превышения
         v.INCLUDED_KB AS "Included (KB)",
         v.OVERAGE_KB AS "Overage (KB)",
         v.CALCULATED_OVERAGE AS "Calculated Overage ($)",
@@ -96,7 +102,7 @@ def get_main_report(period_filter=None, plan_filter=None):
     WHERE 1=1
         {plan_condition}
         {period_condition}
-    ORDER BY v.BILL_MONTH DESC, "Calculated Overage ($)" DESC NULLS LAST
+    ORDER BY CAST(v.BILL_MONTH AS integer) DESC, "Calculated Overage ($)" DESC NULLS LAST
     """
     
     try:
@@ -162,9 +168,10 @@ def get_main_report(period_filter=None, plan_filter=None):
                 df['Δ vs STECCOM ($)'] = df['STECCOM Total Amount ($)'] - df['Fees Total ($)']
 
         # Форматируем Bill Month для отображения (YYYY-MM) из YYYYMM
-        df['Bill Month'] = df['Bill Month'].apply(lambda x: 
-            f"{int(x) // 100:04d}-{int(x) % 100:02d}" if pd.notna(x) else ""
-        )
+        if 'Bill Month' in df.columns:
+            df['Bill Month'] = df['Bill Month'].apply(lambda x: 
+                f"{int(x) // 100:04d}-{int(x) % 100:02d}" if pd.notna(x) and pd.notnull(x) else ""
+            )
         
         return df
     except Exception as e:
