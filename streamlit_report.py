@@ -10,9 +10,29 @@ import psycopg2
 from datetime import datetime
 import io
 import os
+from pathlib import Path
+
+# Попытка загрузить config.env если переменные окружения не установлены
+def load_config_env():
+    """Загрузка config.env если переменные окружения не установлены"""
+    if not os.getenv('POSTGRES_PASSWORD'):
+        config_file = Path(__file__).parent / 'config.env'
+        if config_file.exists():
+            with open(config_file, 'r') as f:
+                for line in f:
+                    line = line.strip()
+                    if line and not line.startswith('#') and '=' in line:
+                        key, value = line.split('=', 1)
+                        key = key.strip()
+                        value = value.strip().strip('"\'')
+                        if key.startswith('POSTGRES_') and not os.getenv(key):
+                            os.environ[key] = value
+
+# Загружаем config.env если нужно
+load_config_env()
 
 # Конфигурация базы данных
-# Загружается из config.env через run_streamlit.sh
+# Загружается из config.env через run_streamlit.sh или автоматически из config.env
 DB_CONFIG = {
     'dbname': os.getenv('POSTGRES_DB', 'billing'),
     'user': os.getenv('POSTGRES_USER', 'cnn'),
@@ -234,6 +254,19 @@ def main():
         page_icon="📊",
         layout="wide"
     )
+    
+    # Проверка загрузки конфигурации
+    if not DB_CONFIG.get('password'):
+        st.error("⚠️ **Конфигурация не загружена!**")
+        st.warning("""
+        Запустите приложение через скрипт:
+        ```bash
+        ./run_streamlit.sh
+        ```
+        
+        Скрипт автоматически загрузит `config.env` с настройками базы данных.
+        """)
+        st.stop()
     
     # Заголовок
     st.title("📊 Iridium M2M Overage Report")
