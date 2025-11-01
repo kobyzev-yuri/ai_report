@@ -11,24 +11,24 @@
 \echo ''
 
 -- 1. V_SPNET_OVERAGE_ANALYSIS - базовый анализ превышения
-\echo '[1/4] Создание V_SPNET_OVERAGE_ANALYSIS...'
-\i 01_v_spnet_overage_analysis.sql
+\echo '[1/5] Создание V_SPNET_OVERAGE_ANALYSIS...'
+\i postgresql/views/01_v_spnet_overage_analysis.sql
 
 -- 2. V_CONSOLIDATED_OVERAGE_REPORT - консолидированный отчет
 \echo '[2/5] Создание V_CONSOLIDATED_OVERAGE_REPORT...'
-\i 02_v_consolidated_overage_report.sql
+\i postgresql/views/02_v_consolidated_overage_report.sql
 
 -- 3. V_IRIDIUM_SERVICES_INFO - информация о сервисах (wrapper)
 \echo '[3/5] Создание V_IRIDIUM_SERVICES_INFO...'
-\i 03_v_iridium_services_info.sql
+\i postgresql/views/03_v_iridium_services_info.sql
 
 -- 4. V_CONSOLIDATED_REPORT_WITH_BILLING - отчет с данными клиентов
 \echo '[4/5] Создание V_CONSOLIDATED_REPORT_WITH_BILLING...'
-\i 04_v_consolidated_report_with_billing.sql
+\i postgresql/views/04_v_consolidated_report_with_billing.sql
 
 -- 5. V_STECCOM_ACCESS_FEES_PIVOT - сводная таблица категорий плат STECCOM
 \echo '[5/5] Создание V_STECCOM_ACCESS_FEES_PIVOT...'
-\i 05_v_steccom_access_fees_pivot.sql
+\i postgresql/views/05_v_steccom_access_fees_pivot.sql
 
 \echo ''
 \echo '========================================'
