@@ -127,10 +127,10 @@ class PostgresDataLoader:
         try:
             insert_sql = """
             INSERT INTO spnet_traffic (
-                TOTAL_ROWS, CONTRACT_ID, IMEI, SIM_ICCID, SERVICE, USAGE_TYPE,
-                USAGE_BYTES, USAGE_UNIT, TOTAL_AMOUNT, BILL_MONTH, PLAN_NAME,
-                IMSI, MSISDN, ACTUAL_USAGE, CALL_SESSION_COUNT, SP_ACCOUNT_NO,
-                SP_NAME, SP_REFERENCE, SOURCE_FILE, LOAD_DATE, CREATED_BY
+                total_rows, contract_id, imei, sim_iccid, service, usage_type,
+                usage_bytes, usage_unit, total_amount, bill_month, plan_name,
+                imsi, msisdn, actual_usage, call_session_count, sp_account_no,
+                sp_name, sp_reference, source_file, load_date, created_by
             ) VALUES (
                 %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
                 %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
@@ -229,11 +229,11 @@ class PostgresDataLoader:
         
         try:
             insert_sql = """
-            INSERT INTO STECCOM_EXPENSES (
-                INVOICE_DATE, COMPANY_NAME, COMPANY_NUMBER, SETTLING_PERIOD,
-                FEE_TYPE, CONTRACT_ID, IMSI_ISDNA, ICC_ID_IMEI, ACTIVATION_DATE,
-                TRANSACTION_DATE, SERVICE, RATE_TYPE, PLAN_DISCOUNT, DESCRIPTION,
-                PRORATED_DAYS, AMOUNT, GROUP_NAME, SOURCE_FILE, LOAD_DATE, CREATED_BY
+            INSERT INTO steccom_expenses (
+                invoice_date, company_name, company_number, settling_period,
+                fee_type, contract_id, imsi_isdna, icc_id_imei, activation_date,
+                transaction_date, service, rate_type, plan_discount, description,
+                prorated_days, amount, group_name, source_file, load_date, created_by
             ) VALUES (
                 %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
                 %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
