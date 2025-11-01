@@ -513,7 +513,7 @@ def main():
                                 cursor = conn_status.cursor()
                                 cursor.execute("""
                                     SELECT LOWER(file_name) FROM load_logs 
-                                    WHERE LOWER(table_name) = 'spnet_traffic' 
+                                    WHERE LOWER(table_name) = LOWER('spnet_traffic') 
                                     AND load_status = 'SUCCESS'
                                 """)
                                 loaded_files = {row[0] for row in cursor.fetchall()}
@@ -605,7 +605,7 @@ def main():
                                 cursor = conn_status.cursor()
                                 cursor.execute("""
                                     SELECT LOWER(file_name) FROM load_logs 
-                                    WHERE LOWER(table_name) = 'steccom_expenses' 
+                                    WHERE LOWER(table_name) = LOWER('steccom_expenses') 
                                     AND load_status = 'SUCCESS'
                                 """)
                                 loaded_files = {row[0] for row in cursor.fetchall()}
