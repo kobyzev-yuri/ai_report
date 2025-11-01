@@ -402,13 +402,15 @@ def main():
         fees_q = f"""
         SELECT 
             fee_period_date AS "Period",
-            contract_id AS "Contract ID", 
+            contract_id AS "Contract ID",
+            imei AS "IMEI",
             category AS "Category", 
             SUM(amount) AS "Amount"
         FROM v_steccom_access_fees_norm
         {fees_q_cond}
-        GROUP BY fee_period_date, contract_id, category
-        ORDER BY fee_period_date DESC, contract_id, category
+        WHERE imei IS NOT NULL
+        GROUP BY fee_period_date, contract_id, imei, category
+        ORDER BY fee_period_date DESC, contract_id, imei, category
         """
 
         conn2 = get_connection()
