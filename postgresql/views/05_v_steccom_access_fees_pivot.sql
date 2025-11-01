@@ -31,7 +31,8 @@ FROM steccom_expenses
 WHERE contract_id IS NOT NULL
   AND description IS NOT NULL
   AND amount IS NOT NULL
-  AND source_file ~ '\.([0-9]{8})\.csv$';  -- Только записи с валидной датой в имени файла
+  AND source_file ~ '\.([0-9]{8})\.csv$'  -- Только записи с валидной датой в имени файла
+  AND (service IS NULL OR UPPER(TRIM(service)) != 'BROADBAND');  -- Исключаем только BROADBAND
 
 -- Комментарии
 COMMENT ON VIEW v_steccom_access_fees_norm IS 

@@ -134,9 +134,16 @@ class STECCOMDataLoader:
             df['load_date'] = datetime.now()
             df['created_by'] = 'STECCOM_LOADER'
             
-            # Подготавливаем данные для вставки
+            # Подготавливаем данные для вставки (исключаем только BROADBAND)
             records = []
+            skipped_broadband = 0
             for _, row in df.iterrows():
+                # Пропускаем записи с SERVICE = 'BROADBAND'
+                service = str(row.get('Service', '')).strip().upper() if row.get('Service') else ''
+                if service == 'BROADBAND':
+                    skipped_broadband += 1
+                    continue
+                
                 record = {
                     'invoice_date': self.parse_date(row.get('Invoice Date')),
                     'company_name': row.get('Company Name'),
@@ -160,6 +167,9 @@ class STECCOMDataLoader:
                     'created_by': row.get('created_by')
                 }
                 records.append(record)
+            
+            if skipped_broadband > 0:
+                logger.info(f"Пропущено {skipped_broadband} записей с SERVICE = 'BROADBAND'")
             
             # Вставляем данные в Oracle
             return self.insert_records(records)
