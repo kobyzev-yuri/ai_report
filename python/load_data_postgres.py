@@ -126,7 +126,7 @@ class PostgresDataLoader:
         
         try:
             insert_sql = """
-            INSERT INTO SPNET_TRAFFIC (
+            INSERT INTO spnet_traffic (
                 TOTAL_ROWS, CONTRACT_ID, IMEI, SIM_ICCID, SERVICE, USAGE_TYPE,
                 USAGE_BYTES, USAGE_UNIT, TOTAL_AMOUNT, BILL_MONTH, PLAN_NAME,
                 IMSI, MSISDN, ACTUAL_USAGE, CALL_SESSION_COUNT, SP_ACCOUNT_NO,
@@ -308,16 +308,16 @@ class PostgresDataLoader:
             logger.info("="*80)
             
             # SPNet статистика
-            cursor.execute("SELECT COUNT(*) FROM SPNET_TRAFFIC")
+            cursor.execute("SELECT COUNT(*) FROM spnet_traffic")
             spnet_count = cursor.fetchone()[0]
             
-            cursor.execute("SELECT COUNT(DISTINCT IMEI) FROM SPNET_TRAFFIC WHERE IMEI IS NOT NULL")
+            cursor.execute("SELECT COUNT(DISTINCT imei) FROM spnet_traffic WHERE imei IS NOT NULL")
             spnet_imeis = cursor.fetchone()[0]
             
-            cursor.execute("SELECT SUM(USAGE_BYTES) FROM SPNET_TRAFFIC")
+            cursor.execute("SELECT SUM(usage_bytes) FROM spnet_traffic")
             spnet_usage = cursor.fetchone()[0] or 0
             
-            cursor.execute("SELECT SUM(TOTAL_AMOUNT) FROM SPNET_TRAFFIC")
+            cursor.execute("SELECT SUM(total_amount) FROM spnet_traffic")
             spnet_amount = cursor.fetchone()[0] or 0
             
             logger.info(f"\nSPNET_TRAFFIC:")
@@ -327,13 +327,13 @@ class PostgresDataLoader:
             logger.info(f"  Общая сумма: ${spnet_amount:,.2f}")
             
             # STECCOM статистика
-            cursor.execute("SELECT COUNT(*) FROM STECCOM_EXPENSES")
+            cursor.execute("SELECT COUNT(*) FROM steccom_expenses")
             steccom_count = cursor.fetchone()[0]
             
-            cursor.execute("SELECT COUNT(DISTINCT ICC_ID_IMEI) FROM STECCOM_EXPENSES WHERE ICC_ID_IMEI IS NOT NULL")
+            cursor.execute("SELECT COUNT(DISTINCT icc_id_imei) FROM steccom_expenses WHERE icc_id_imei IS NOT NULL")
             steccom_imeis = cursor.fetchone()[0]
             
-            cursor.execute("SELECT SUM(AMOUNT) FROM STECCOM_EXPENSES")
+            cursor.execute("SELECT SUM(amount) FROM steccom_expenses")
             steccom_amount = cursor.fetchone()[0] or 0
             
             logger.info(f"\nSTECCOM_EXPENSES:")
@@ -342,7 +342,7 @@ class PostgresDataLoader:
             logger.info(f"  Общая сумма: ${steccom_amount:,.2f}")
             
             # Тарифные планы
-            cursor.execute("SELECT PLAN_CODE, PLAN_NAME, COUNT(*) FROM SPNET_TRAFFIC WHERE PLAN_NAME IS NOT NULL GROUP BY PLAN_CODE, PLAN_NAME")
+            cursor.execute("SELECT plan_code, plan_name, COUNT(*) FROM spnet_traffic WHERE plan_name IS NOT NULL GROUP BY plan_code, plan_name")
             plans = cursor.fetchall()
             
             logger.info(f"\nТАРИФНЫЕ ПЛАНЫ:")

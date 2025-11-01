@@ -591,14 +591,105 @@ def main():
                                 st.error(f"Error saving: {e}")
         
         st.markdown("---")
-        st.info("💡 **Note:** After uploading files, use Python scripts to import data into database:")
-        st.code("""
-# Import SPNet files
-python python/load_spnet_traffic.py
-
-# Import STECCOM files  
-python python/load_steccom_expenses.py
-        """)
+        st.subheader("🔄 Import to Database")
+        
+        # Импорт данных в базу
+        col_imp1, col_imp2 = st.columns(2)
+        
+        with col_imp1:
+            if st.button("📥 Import SPNet Files", use_container_width=True, type="primary"):
+                with st.spinner("Импорт данных SPNet в PostgreSQL..."):
+                    try:
+                        from python.load_data_postgres import PostgresDataLoader
+                        
+                        loader = PostgresDataLoader(DB_CONFIG)
+                        if loader.connect():
+                            import io
+                            from contextlib import redirect_stdout, redirect_stderr
+                            import sys
+                            
+                            # Обновляем путь к директории
+                            loader.spnet_path = str(SPNET_DIR)
+                            
+                            # Перехватываем вывод
+                            log_capture = io.StringIO()
+                            old_stdout = sys.stdout
+                            old_stderr = sys.stderr
+                            
+                            try:
+                                sys.stdout = log_capture
+                                sys.stderr = log_capture
+                                
+                                result = loader.load_spnet_files()
+                                
+                                log_output = log_capture.getvalue()
+                                
+                                if result:
+                                    st.success("✅ Импорт SPNet завершен успешно!")
+                                    st.text_area("Log output", log_output, height=200, key='spnet_log')
+                                else:
+                                    st.error(f"❌ Ошибка импорта SPNet")
+                                    st.text_area("Log output", log_output, height=200, key='spnet_log_err')
+                            finally:
+                                sys.stdout = old_stdout
+                                sys.stderr = old_stderr
+                                if loader.connection:
+                                    loader.close()
+                        else:
+                            st.error("❌ Не удалось подключиться к базе данных")
+                    except Exception as e:
+                        import traceback
+                        st.error(f"❌ Ошибка: {e}")
+                        st.text_area("Error details", traceback.format_exc(), height=200)
+        
+        with col_imp2:
+            if st.button("📥 Import STECCOM Files", use_container_width=True, type="primary"):
+                with st.spinner("Импорт данных STECCOM в PostgreSQL..."):
+                    try:
+                        from python.load_data_postgres import PostgresDataLoader
+                        
+                        loader = PostgresDataLoader(DB_CONFIG)
+                        if loader.connect():
+                            import io
+                            from contextlib import redirect_stdout, redirect_stderr
+                            import sys
+                            
+                            # Обновляем путь к директории
+                            loader.steccom_path = str(STECCOM_DIR)
+                            
+                            # Перехватываем вывод
+                            log_capture = io.StringIO()
+                            old_stdout = sys.stdout
+                            old_stderr = sys.stderr
+                            
+                            try:
+                                sys.stdout = log_capture
+                                sys.stderr = log_capture
+                                
+                                result = loader.load_steccom_files()
+                                
+                                log_output = log_capture.getvalue()
+                                
+                                if result:
+                                    st.success("✅ Импорт STECCOM завершен успешно!")
+                                    st.text_area("Log output", log_output, height=200, key='steccom_log')
+                                else:
+                                    st.error(f"❌ Ошибка импорта STECCOM")
+                                    st.text_area("Log output", log_output, height=200, key='steccom_log_err')
+                            finally:
+                                sys.stdout = old_stdout
+                                sys.stderr = old_stderr
+                                if loader.connection:
+                                    loader.close()
+                        else:
+                            st.error("❌ Не удалось подключиться к базе данных")
+                    except Exception as e:
+                        import traceback
+                        st.error(f"❌ Ошибка: {e}")
+                        st.text_area("Error details", traceback.format_exc(), height=200)
+        
+        st.markdown("---")
+        st.caption("💡 **Tip:** After importing, refresh the Report tab to see updated data")
 
 
 if __name__ == "__main__":
