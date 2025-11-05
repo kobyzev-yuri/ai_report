@@ -1,75 +1,55 @@
-# Oracle Export / PostgreSQL Import
+# Oracle Test Utilities
 
-Рабочие скрипты для экспорта данных из Oracle и импорта в PostgreSQL.
+Утилиты для работы с Oracle VIEW и тестирования данных.
 
-## 📤 Экспорт из Oracle
+## 📋 Содержимое
+
+- `query_view_simple.sql` - простой запрос для просмотра данных из `V_IRIDIUM_SERVICES_INFO`
+- `V_IRIDIUM_SERVICES_INFO.csv` - экспортированные данные (создается автоматически при запуске `export_all.sql`)
+
+## 🔍 Просмотр данных VIEW в Oracle
+
+Для быстрого просмотра данных используйте:
 
 ```bash
-# Вариант 1: из директории oracle/test
+# Простой просмотр (читаемый формат)
 cd oracle/test
-sqlplus -s $ORACLE_USER/$ORACLE_PASSWORD@$ORACLE_SERVICE @export_v_iridium_services_info.sql
-# или: sqlplus -s username/password@service_name @export_v_iridium_services_info.sql
+sqlplus -s $ORACLE_USER/$ORACLE_PASSWORD@$ORACLE_SERVICE @query_view_simple.sql
 
-# Вариант 2: из корня проекта
-sqlplus -s $ORACLE_USER/$ORACLE_PASSWORD@$ORACLE_SERVICE @oracle/test/export_v_iridium_services_info.sql
+# Или напрямую:
+sqlplus -s $ORACLE_USER/$ORACLE_PASSWORD@$ORACLE_SERVICE << EOF
+SET PAGESIZE 50 LINESIZE 300
+SELECT SERVICE_ID, CONTRACT_ID, CUSTOMER_NAME, CODE_1C, IS_SUSPENDED
+FROM V_IRIDIUM_SERVICES_INFO 
+WHERE ROWNUM <= 10;
+EXIT
+EOF
 ```
 
-**Результат:** `V_IRIDIUM_SERVICES_INFO.txt` (TSV, 17 колонок, таб-разделитель)
+## 📤 Экспорт данных
 
-**Проверка формата:**
+**Для экспорта используйте единый скрипт:**
+
 ```bash
-awk -F'\t' '{print NF}' V_IRIDIUM_SERVICES_INFO.txt | head -10 | sort -u
-# Должно выводить только "17"
+cd oracle/export
+sqlplus billing7/billing@bm7 @export_all.sql
 ```
 
-**Проверка содержимого:**
-```bash
-# Просмотр первых строк
-head -5 V_IRIDIUM_SERVICES_INFO.txt
-
-# Проверка CODE_1C (колонка 17)
-awk -F'\t' 'NR<=10 {print "CODE_1C:", $17}' V_IRIDIUM_SERVICES_INFO.txt
-```
+Этот скрипт создаст:
+- `billing_integration.csv` - для импорта в 1С
+- `../test/V_IRIDIUM_SERVICES_INFO.csv` - для импорта в PostgreSQL
+- `service_transfer_history.csv` - история переводов услуг
 
 ## 📥 Импорт в PostgreSQL
 
-### Вариант 1: Использовать готовый bash скрипт
+**Для импорта используйте:**
 
 ```bash
-cd oracle/test
-
-# С переменными окружения (опционально)
-export PGHOST=localhost
-export PGPORT=5432
-export PGDATABASE=billing
-export PGUSER=cnn
-export PGPASSWORD=your-password-here
-
-./import_to_postgresql.sh
+cd postgresql/scripts
+python3 load_from_oracle_views.py
 ```
 
-### Вариант 2: Использовать Python скрипт напрямую
-
-```bash
-cd oracle/test
-
-PGPASSWORD=your-password-here python3 import_iridium.py \
-  --input V_IRIDIUM_SERVICES_INFO.txt \
-  --dsn "host=localhost dbname=billing user=cnn password=your-password-here" \
-  --table iridium_services_info \
-  --truncate
-```
-
-## ✅ Проверка результата
-
-```bash
-psql -U cnn -d billing -c "SELECT COUNT(*) FROM iridium_services_info;"
-psql -U cnn -d billing -c "
-  SELECT service_id, contract_id, LEFT(imei,20) as imei, tariff_id, status, account_id 
-  FROM iridium_services_info 
-  LIMIT 5;
-"
-```
+Этот скрипт напрямую загружает данные из Oracle VIEW в PostgreSQL таблицы.
 
 ## 📝 Примечания
 
@@ -85,55 +65,14 @@ psql -U cnn -d billing -c "
    (SELECT oi.EXT_ID 
     FROM OUTER_IDS oi 
     WHERE oi.ID = c.CUSTOMER_ID 
-      AND UPPER(oi.TBL) = 'CUSTOMERS'  -- TBL хранится в нижнем регистре 'customers'
+      AND oi.TBL = 'CUSTOMERS'
       AND ROWNUM = 1) AS CODE_1C
    ```
-   **ВАЖНО:** В таблице `OUTER_IDS` поле `TBL` хранится в нижнем регистре (`'customers'`), поэтому используется `UPPER(oi.TBL) = 'CUSTOMERS'` для сравнения без учета регистра.
-   
-   Если `CODE_1C` NULL после импорта:
-   - Проверьте наличие записей в `OUTER_IDS` для `CUSTOMER_ID`: 
-     ```sql
-     SELECT * FROM OUTER_IDS WHERE ID = <CUSTOMER_ID>;
-     ```
-   - Запустите тест: `sqlplus @test_outer_ids.sql`
-   - Проверьте view: `sqlplus @query_view_simple.sql`
 
-4. **Формат файла:** TSV (Tab-Separated Values), 17 колонок, обработка кавычек и NULL
+4. **IS_SUSPENDED:** Флаг приостановления услуги (проверяет наличие активной услуги типа 9008)
 
-5. **Импорт:** Использует `import_iridium.py` с валидацией, безопасными кастами типов и логированием
+5. **STATUS:** 
+   - `10` - активный
+   - `-10` - приостановленный/закрытый
 
-## 🔄 Полный цикл
-
-```bash
-# 1. Экспорт из Oracle
-export ORACLE_USER=your-username
-export ORACLE_PASSWORD=your-password
-export ORACLE_SERVICE=your-service-name
-sqlplus -s $ORACLE_USER/$ORACLE_PASSWORD@$ORACLE_SERVICE @oracle/test/export_v_iridium_services_info.sql
-
-# 2. Импорт в PostgreSQL
-cd oracle/test
-export PGPASSWORD=your-postgres-password
-./import_to_postgresql.sh
-
-# 3. Проверка
-psql -U cnn -d billing -c "SELECT COUNT(*) FROM iridium_services_info;"
-```
-
-## 🔍 Просмотр данных view в Oracle
-
-Если нужно просто посмотреть данные (не экспортировать):
-
-```bash
-# Простой просмотр (читаемый формат)
-sqlplus -s $ORACLE_USER/$ORACLE_PASSWORD@$ORACLE_SERVICE @query_view_simple.sql
-
-# Или напрямую:
-sqlplus -s $ORACLE_USER/$ORACLE_PASSWORD@$ORACLE_SERVICE << EOF
-SET PAGESIZE 50 LINESIZE 300
-SELECT SERVICE_ID, CONTRACT_ID, CUSTOMER_NAME, CODE_1C 
-FROM V_IRIDIUM_SERVICES_INFO 
-WHERE ROWNUM <= 10;
-EXIT
-EOF
-```
+6. **STOP_DATE:** Дата завершения предоставления услуги (stop_date)

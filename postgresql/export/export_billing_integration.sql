@@ -21,7 +21,9 @@ SELECT
     COALESCE(code_1c, ''),
     COALESCE(status::text, '')
 FROM v_iridium_services_info
-WHERE status = 1  -- Только активные сервисы
+WHERE status = 10  -- Только активные сервисы (10 = активный, -10 = приостановленный)
+  AND contract_id NOT LIKE '%-clone-%'  -- Исключаем клонированные/перенесенные сервисы (clone = перевод с закрываемого договора)
+  AND (stop_date IS NULL OR stop_date > CURRENT_DATE)  -- stop_date = дата завершения заказа (услуги), для активных должна быть NULL или будущей
 ORDER BY code_1c, contract_id;
 
 \o
@@ -56,7 +58,9 @@ SELECT
     '''' || status || '''' ||
     ');'
 FROM v_iridium_services_info
-WHERE status = 1
+WHERE status = 10  -- Только активные сервисы (10 = активный, -10 = приостановленный)
+  AND contract_id NOT LIKE '%-clone-%'  -- Исключаем клонированные/перенесенные сервисы
+  AND (stop_date IS NULL OR stop_date > CURRENT_DATE)  -- stop_date = дата завершения заказа (услуги)
 ORDER BY code_1c, contract_id;
 
 \o
@@ -79,7 +83,8 @@ SELECT
     COALESCE(r.calculated_overage::text, '0'),
     COALESCE((r.spnet_total_amount + r.steccom_total_amount)::text, '0')
 FROM v_consolidated_report_with_billing r
-WHERE r.service_status = 1
+WHERE r.service_status = 10  -- Только активные сервисы (10 = активный, -10 = приостановленный)
+  AND (r.service_stop_date IS NULL OR r.service_stop_date > CURRENT_DATE)  -- stop_date = дата завершения заказа (услуги)
 ORDER BY r.code_1c, r.bill_month DESC, r.contract_id;
 
 \o
@@ -92,9 +97,9 @@ ORDER BY r.code_1c, r.bill_month DESC, r.contract_id;
 \echo '============================================================================'
 \echo ''
 
-SELECT 'Total active services: ' || COUNT(*) FROM v_iridium_services_info WHERE status = 1;
-SELECT 'Services with CODE_1C: ' || COUNT(*) FROM v_iridium_services_info WHERE status = 1 AND code_1c IS NOT NULL;
-SELECT 'Services without CODE_1C: ' || COUNT(*) FROM v_iridium_services_info WHERE status = 1 AND code_1c IS NULL;
+SELECT 'Total active services: ' || COUNT(*) FROM v_iridium_services_info WHERE status = 10 AND contract_id NOT LIKE '%-clone-%' AND (stop_date IS NULL OR stop_date > CURRENT_DATE);
+SELECT 'Services with CODE_1C: ' || COUNT(*) FROM v_iridium_services_info WHERE status = 10 AND contract_id NOT LIKE '%-clone-%' AND (stop_date IS NULL OR stop_date > CURRENT_DATE) AND code_1c IS NOT NULL;
+SELECT 'Services without CODE_1C: ' || COUNT(*) FROM v_iridium_services_info WHERE status = 10 AND contract_id NOT LIKE '%-clone-%' AND (stop_date IS NULL OR stop_date > CURRENT_DATE) AND code_1c IS NULL;
 
 \echo ''
 \echo 'Files generated:'
@@ -110,7 +115,9 @@ SELECT 'Services without CODE_1C: ' || COUNT(*) FROM v_iridium_services_info WHE
 \echo '  - AGREEMENT_NUMBER: Contract number (договор)'
 \echo '  - ORDER_NUMBER: Order/appendix number (бланк)'
 \echo '  - CODE_1C: Customer code from 1C system'
-\echo '  - STATUS: Service status (1=active)'
+\echo '  - STATUS: Service status (10=active, -10=suspended/closed)'
+\echo '  - STOP_DATE: Service completion date (NULL or future date for active services)'
+\echo '  - clone: Services transferred from closing contract (excluded from export)'
 \echo ''
 \echo 'Usage in 1C:'
 \echo '  - Import billing_integration.csv into 1C'
@@ -124,6 +131,7 @@ SELECT 'Services without CODE_1C: ' || COUNT(*) FROM v_iridium_services_info WHE
 \echo ''
 \echo 'Billing integration data exported successfully!'
 \echo ''
+
 
 
 

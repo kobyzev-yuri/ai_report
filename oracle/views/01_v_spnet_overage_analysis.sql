@@ -4,14 +4,17 @@
 -- База данных: Oracle (production)
 -- ============================================================================
 
+SET SQLBLANKLINES ON
+SET DEFINE OFF
+
 CREATE OR REPLACE VIEW V_SPNET_OVERAGE_ANALYSIS AS
 SELECT 
     st.IMEI,
     st.CONTRACT_ID,
     st.BILL_MONTH,
     st.PLAN_NAME,
-    tp.PLAN_CODE,
-    tp.INCLUDED_KB,
+    MAX(tp.PLAN_CODE) AS PLAN_CODE,
+    MAX(tp.INCLUDED_KB) AS INCLUDED_KB,
     
     -- Разделение на трафик (bytes) и события (count)
     -- Трафик: только для SBD Data Usage в байтах
@@ -35,20 +38,21 @@ SELECT
     -- Превышение (только для SBD Data Usage)
     CASE 
         WHEN SUM(CASE WHEN st.USAGE_TYPE = 'SBD Data Usage' THEN st.USAGE_BYTES ELSE 0 END) > 0 
-             AND tp.ACTIVE = 'Y' THEN
+             AND MAX(tp.ACTIVE) = 'Y' THEN
             GREATEST(0, ROUND(
-                SUM(CASE WHEN st.USAGE_TYPE = 'SBD Data Usage' THEN st.USAGE_BYTES ELSE 0 END) / 1000 - tp.INCLUDED_KB, 
+                SUM(CASE WHEN st.USAGE_TYPE = 'SBD Data Usage' THEN st.USAGE_BYTES ELSE 0 END) / 1000 - MAX(tp.INCLUDED_KB), 
                 2
             ))
         ELSE 0
     END AS OVERAGE_KB,
     
     -- Расчет стоимости превышения через функцию (только для SBD Data Usage)
+    -- Используем MAX(st.PLAN_NAME) для корректной работы в агрегированном контексте
     CASE 
         WHEN SUM(CASE WHEN st.USAGE_TYPE = 'SBD Data Usage' THEN st.USAGE_BYTES ELSE 0 END) > 0 
-             AND tp.ACTIVE = 'Y' THEN
+             AND MAX(tp.ACTIVE) = 'Y' THEN
             CALCULATE_OVERAGE(
-                st.PLAN_NAME, 
+                MAX(st.PLAN_NAME), 
                 SUM(CASE WHEN st.USAGE_TYPE = 'SBD Data Usage' THEN st.USAGE_BYTES ELSE 0 END)
             )
         ELSE 0
@@ -63,9 +67,10 @@ GROUP BY
     st.IMEI,
     st.CONTRACT_ID,
     st.BILL_MONTH,
-    st.PLAN_NAME,
-    tp.PLAN_CODE,
-    tp.INCLUDED_KB,
-    tp.ACTIVE;
+    st.PLAN_NAME
+/
 
-COMMENT ON TABLE V_SPNET_OVERAGE_ANALYSIS IS 'Анализ превышения трафика по IMEI с расчетом стоимости. Разделение на трафик (bytes) и события (count)';
+COMMENT ON TABLE V_SPNET_OVERAGE_ANALYSIS IS 'Анализ превышения трафика по IMEI с расчетом стоимости. Разделение на трафик (bytes) и события (count)'
+/
+
+SET DEFINE ON

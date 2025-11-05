@@ -55,87 +55,52 @@ def get_main_report():
     if not conn:
         return None
     
-    # Oracle-адаптированный запрос
+    # Oracle-адаптированный запрос - используем V_CONSOLIDATED_REPORT_WITH_BILLING с fees
     query = """
     SELECT 
-        cor.IMEI,
-        cor.CONTRACT_ID,
-        se.ACTIVATION_DATE,
-        cor.PLAN_NAME AS tariff,
-        cor.BILL_MONTH,
-        
-        -- Из STECCOM
-        SUM(CASE WHEN se.DESCRIPTION = 'Activation Fee' THEN se.AMOUNT ELSE 0 END) AS activation_fee,
-        SUM(CASE WHEN se.DESCRIPTION = 'Advance Charge' THEN se.AMOUNT ELSE 0 END) AS advance_charge,
-        SUM(CASE WHEN se.DESCRIPTION = 'Prorated' THEN se.AMOUNT ELSE 0 END) AS prorated,
-        SUM(CASE WHEN se.DESCRIPTION = 'Credit' THEN se.AMOUNT ELSE 0 END) AS credit,
-        
-        -- Из SPNet
-        cor.TOTAL_USAGE_KB,
-        cor.INCLUDED_KB,
-        cor.OVERAGE_KB,
-        cor.CALCULATED_OVERAGE AS calculated_overage_charge,
-        
-        -- Итоги
-        cor.SPNET_TOTAL_AMOUNT AS spnet_total,
-        cor.STECCOM_TOTAL_AMOUNT AS steccom_total,
-        
-        -- Полная стоимость за период
-        (cor.CALCULATED_OVERAGE + 
-         SUM(CASE WHEN se.DESCRIPTION = 'Advance Charge' THEN se.AMOUNT ELSE 0 END)) AS total_charge
-        
-    FROM V_CONSOLIDATED_OVERAGE_REPORT cor
-    LEFT JOIN STECCOM_EXPENSES se 
-        ON cor.IMEI = se.ICC_ID_IMEI 
-        AND cor.CONTRACT_ID = se.CONTRACT_ID
-        AND TO_CHAR(se.INVOICE_DATE, 'YYYYMM') = (
-            LPAD(TO_CHAR(MOD(cor.BILL_MONTH, 10000)), 4, '0') || 
-            LPAD(TO_CHAR(TRUNC(cor.BILL_MONTH / 10000)), 2, '0')
-        )
-    WHERE cor.STECCOM_TOTAL_AMOUNT IS NOT NULL
-      AND cor.BILL_MONTH IS NOT NULL
-      AND cor.IMEI IS NOT NULL
-    GROUP BY 
-        cor.IMEI,
-        cor.CONTRACT_ID,
-        se.ACTIVATION_DATE,
-        cor.PLAN_NAME,
-        cor.BILL_MONTH,
-        cor.TOTAL_USAGE_KB,
-        cor.INCLUDED_KB,
-        cor.OVERAGE_KB,
-        cor.CALCULATED_OVERAGE,
-        cor.SPNET_TOTAL_AMOUNT,
-        cor.STECCOM_TOTAL_AMOUNT
-    ORDER BY cor.BILL_MONTH DESC, cor.CALCULATED_OVERAGE DESC
+        v.IMEI,
+        v.CONTRACT_ID,
+        v.BILL_MONTH,
+        v.STECCOM_PLAN_NAME_MONTHLY AS "Plan Monthly",
+        v.STECCOM_PLAN_NAME_SUSPENDED AS "Plan Suspended",
+        -- Разделение трафика и событий
+        ROUND(v.TRAFFIC_USAGE_BYTES / 1000, 2) AS "Traffic Usage (KB)",
+        v.EVENTS_COUNT AS "Events (Count)",
+        v.DATA_USAGE_EVENTS AS "Data Events",
+        v.MAILBOX_EVENTS AS "Mailbox Events",
+        v.REGISTRATION_EVENTS AS "Registration Events",
+        -- Превышения
+        v.INCLUDED_KB AS "Included (KB)",
+        v.OVERAGE_KB AS "Overage (KB)",
+        v.CALCULATED_OVERAGE AS "Calculated Overage ($)",
+        v.SPNET_TOTAL_AMOUNT AS "SPNet Total Amount ($)",
+        v.STECCOM_MONTHLY_AMOUNT AS "STECCOM Monthly ($)",
+        v.STECCOM_SUSPENDED_AMOUNT AS "STECCOM Suspended ($)",
+        v.STECCOM_TOTAL_AMOUNT AS "STECCOM Total Amount ($)",
+        -- Доп. поля из биллинга
+        COALESCE(v.ORGANIZATION_NAME, v.CUSTOMER_NAME, '') AS "Organization/Person",
+        v.CODE_1C AS "Code 1C",
+        v.SERVICE_ID AS "Service ID",
+        v.AGREEMENT_NUMBER AS "Agreement #",
+        -- Fees из STECCOM_EXPENSES
+        v.FEE_ACTIVATION_FEE AS "Fee: Activation Fee",
+        v.FEE_ADVANCE_CHARGE AS "Fee: Advance Charge",
+        v.FEE_CREDIT AS "Fee: Credit",
+        v.FEE_CREDITED AS "Fee: Credited",
+        v.FEE_PRORATED AS "Fee: Prorated",
+        v.FEES_TOTAL AS "Fees Total ($)",
+        v.DELTA_VS_STECCOM AS "Δ vs STECCOM ($)"
+    FROM V_CONSOLIDATED_REPORT_WITH_BILLING v
+    WHERE v.STECCOM_TOTAL_AMOUNT IS NOT NULL
+      AND v.BILL_MONTH IS NOT NULL
+      AND v.IMEI IS NOT NULL
+    ORDER BY v.BILL_MONTH_YYYMM DESC, v.CALCULATED_OVERAGE DESC NULLS LAST
     """
     
     try:
         df = pd.read_sql_query(query, conn)
         
-        # Форматирование
-        df['period'] = df['bill_month'].apply(convert_bill_month)
-        df['activation_date'] = pd.to_datetime(df['activation_date']).dt.strftime('%Y-%m-%d')
-        
-        # Переименование колонок для читаемости
-        df = df.rename(columns={
-            'imei': 'IMEI',
-            'contract_id': 'Contract ID',
-            'activation_date': 'Activation Date',
-            'tariff': 'Тариф',
-            'period': 'Период',
-            'activation_fee': 'Activation Fee',
-            'advance_charge': 'Advance Charge',
-            'prorated': 'Prorated',
-            'credit': 'Credit',
-            'total_usage_kb': 'Использование (КБ)',
-            'included_kb': 'Включено (КБ)',
-            'overage_kb': 'Превышение (КБ)',
-            'calculated_overage_charge': 'Стоимость превышения ($)',
-            'spnet_total': 'SPNet Total ($)',
-            'steccom_total': 'STECCOM Total ($)',
-            'total_charge': 'Итого к оплате ($)'
-        })
+        # Bill Month уже в формате YYYY-MM из VIEW, дополнительные действия не требуются
         
         return df
     

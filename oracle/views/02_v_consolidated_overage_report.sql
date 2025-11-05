@@ -5,6 +5,9 @@
 -- ВАЖНО: Периоды НЕ суммируются - каждая строка = отдельный период (BILL_MONTH)
 -- ============================================================================
 
+SET SQLBLANKLINES ON
+SET DEFINE OFF
+
 CREATE OR REPLACE VIEW V_CONSOLIDATED_OVERAGE_REPORT AS
 WITH spnet_data AS (
     SELECT 
@@ -118,6 +121,10 @@ FULL OUTER JOIN steccom_data st
     AND sp.BILL_MONTH = st.BILL_MONTH
 ORDER BY 
     NVL(sp.IMEI, st.IMEI),
-    NVL(sp.BILL_MONTH, st.BILL_MONTH) DESC;
+    NVL(sp.BILL_MONTH, st.BILL_MONTH) DESC
+/
 
-COMMENT ON TABLE V_CONSOLIDATED_OVERAGE_REPORT IS 'Сводный отчет по превышению с данными из SPNet и STECCOM. КАЖДАЯ СТРОКА = ОТДЕЛЬНЫЙ ПЕРИОД (BILL_MONTH). Периоды НЕ суммируются! STECCOM данные разделены: STECCOM_MONTHLY_AMOUNT/SUSPENDED_AMOUNT (суммы) и STECCOM_PLAN_NAME_MONTHLY/SUSPENDED (планы). Группировка: IMEI + CONTRACT_ID + BILL_MONTH - одна строка на период.';
+COMMENT ON TABLE V_CONSOLIDATED_OVERAGE_REPORT IS 'Сводный отчет по превышению с данными из SPNet и STECCOM. КАЖДАЯ СТРОКА = ОТДЕЛЬНЫЙ ПЕРИОД (BILL_MONTH). Периоды НЕ суммируются! STECCOM данные разделены: STECCOM_MONTHLY_AMOUNT/SUSPENDED_AMOUNT (суммы) и STECCOM_PLAN_NAME_MONTHLY/SUSPENDED (планы). Группировка: IMEI + CONTRACT_ID + BILL_MONTH - одна строка на период.'
+/
+
+SET DEFINE ON

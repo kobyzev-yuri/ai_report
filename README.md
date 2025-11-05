@@ -2,7 +2,168 @@
 
 Система отчетности по услугам Iridium M2M с расчетом превышений трафика и интеграцией с биллингом.
 
-## 🏗️ Структура проекта
+## 🚀 Быстрый старт
+
+### Установка Oracle базы данных
+
+Полная инструкция по установке: **[docs/INSTALLATION_ORACLE.md](docs/INSTALLATION_ORACLE.md)**
+
+**Краткая версия:**
+```bash
+# 1. Таблицы
+cd oracle/tables
+sqlplus $ORACLE_USER/$ORACLE_PASSWORD@$ORACLE_SERVICE @install_all_tables.sql
+
+# 2. Справочники
+cd ../data
+sqlplus $ORACLE_USER/$ORACLE_PASSWORD@$ORACLE_SERVICE @tariff_plans_data.sql
+
+# 3. Функции
+cd ../functions
+sqlplus $ORACLE_USER/$ORACLE_PASSWORD@$ORACLE_SERVICE @calculate_overage.sql
+
+# 4. Представления
+cd ../views
+sqlplus $ORACLE_USER/$ORACLE_PASSWORD@$ORACLE_SERVICE @install_all_views.sql
+
+# 5. Загрузка данных
+cd ../../../python
+python load_spnet_traffic.py
+python load_steccom_expenses.py
+```
+
+### Запуск веб-интерфейса
+
+```bash
+# Установка зависимостей (если еще не установлены)
+pip install -r requirements.txt
+
+# Запуск Streamlit приложения для Oracle
+streamlit run streamlit_report_oracle.py --server.port 8501
+```
+
+Приложение будет доступно по адресу: **http://localhost:8501**
+
+## 📊 Основные интерфейсы
+
+### 1. Streamlit Web Interface
+
+**Файл:** `streamlit_report_oracle.py`
+
+**Основные функции:**
+- **Главный отчет** - сводная таблица по IMEI с расчетом превышений
+- **Фильтры:**
+  - По IMEI
+  - По периоду (BILL_MONTH)
+  - По тарифному плану
+  - По клиенту (CODE_1C, CUSTOMER_NAME)
+- **Экспорт данных:**
+  - Excel (формат .xlsx)
+  - CSV
+- **Статистика:**
+  - Общая сумма по периодам
+  - Превышения трафика
+  - Сравнение SPNet и STECCOM сумм
+
+**Использование:**
+1. Откройте браузер: `http://localhost:8501`
+2. Выберите период в боковой панели
+3. Примените фильтры (опционально)
+4. Просмотрите данные в таблице
+5. Экспортируйте при необходимости
+
+### 2. Основные представления (VIEW) Oracle
+
+#### V_SPNET_OVERAGE_ANALYSIS
+Базовый анализ превышения трафика:
+- Группировка: IMEI, CONTRACT_ID, BILL_MONTH
+- Расчет: OVERAGE_KB, CALCULATED_OVERAGE_CHARGE
+- Только для SBD Data Usage
+
+**Пример запроса:**
+```sql
+SELECT imei, contract_id, bill_month, plan_name, 
+       total_usage_kb, overage_kb, calculated_overage_charge
+FROM V_SPNET_OVERAGE_ANALYSIS
+WHERE bill_month = 202510;
+```
+
+#### V_CONSOLIDATED_OVERAGE_REPORT
+Консолидированный отчет:
+- Данные SPNet (трафик, суммы)
+- Данные STECCOM (расходы)
+- Расчет превышений для SBD-1 и SBD-10
+- **ВАЖНО:** Каждая строка = отдельный период (BILL_MONTH)
+
+**Пример запроса:**
+```sql
+SELECT imei, contract_id, bill_month, plan_name,
+       spnet_total_amount, steccom_total_amount,
+       calculated_overage, overage_kb
+FROM V_CONSOLIDATED_OVERAGE_REPORT
+WHERE bill_month = '202510'
+ORDER BY imei;
+```
+
+#### V_IRIDIUM_SERVICES_INFO
+Информация о сервисах из биллинга (требует доступ к таблицам биллинга):
+- CUSTOMER_NAME (организация/ФИО)
+- AGREEMENT_NUMBER (номер договора)
+- ORDER_NUMBER (номер заказа)
+- CODE_1C (код клиента из 1С)
+
+**Пример запроса:**
+```sql
+SELECT contract_id, imei, customer_name, agreement_number, code_1c
+FROM V_IRIDIUM_SERVICES_INFO
+WHERE code_1c IS NOT NULL;
+```
+
+#### V_CONSOLIDATED_REPORT_WITH_BILLING
+Расширенный отчет с данными клиентов:
+- Все данные из V_CONSOLIDATED_OVERAGE_REPORT
+- + данные клиентов из биллинга
+- Используется для экспорта в 1С
+
+**Пример запроса:**
+```sql
+SELECT customer_name, code_1c, agreement_number,
+       imei, plan_name, bill_month,
+       spnet_total_amount, calculated_overage, steccom_total_amount
+FROM V_CONSOLIDATED_REPORT_WITH_BILLING
+WHERE bill_month = '202510'
+ORDER BY customer_name;
+```
+
+### 3. Python скрипты загрузки данных
+
+#### load_spnet_traffic.py
+Загрузка данных трафика из отчетов SPNet.
+
+**Источник:** `data/SPNet reports/*.xlsx` или `*.csv`
+
+**Назначение:** Заполнение таблицы `SPNET_TRAFFIC`
+
+**Использование:**
+```bash
+cd python
+python load_spnet_traffic.py
+```
+
+#### load_steccom_expenses.py
+Загрузка данных расходов из отчетов STECCOM.
+
+**Источник:** `data/STECCOMLLCRussiaSBD.AccessFees_reports/*.csv`
+
+**Назначение:** Заполнение таблицы `STECCOM_EXPENSES`
+
+**Использование:**
+```bash
+cd python
+python load_steccom_expenses.py
+```
+
+## 📁 Структура проекта
 
 ```
 ai_report/
@@ -11,210 +172,32 @@ ai_report/
 │   ├── views/                   # Представления для отчетов
 │   ├── functions/               # PL/SQL функции
 │   ├── data/                    # Справочные данные
-│   └── README.md               # Документация по Oracle
-│
-├── postgresql/                  # PostgreSQL (TESTING)
-│   ├── tables/                  # DDL таблиц (копия Oracle)
-│   ├── views/                   # Представления (PostgreSQL версии)
-│   ├── functions/               # PostgreSQL функции
-│   ├── data/                    # Тестовые данные
-│   ├── scripts/                 # Скрипты загрузки из Oracle
-│   └── README.md               # Документация по PostgreSQL
+│   └── README.md                # Документация по Oracle
 │
 ├── python/                      # Python модули
 │   ├── load_spnet_traffic.py   # Загрузка данных SPNet
 │   ├── load_steccom_expenses.py # Загрузка данных STECCOM
-│   ├── load_data_postgres.py   # Загрузка в PostgreSQL (для тестов)
 │   └── calculate_overage.py    # Python модуль расчета превышений
 │
 ├── docs/                        # Документация
-│   ├── INDEX.md                # 📋 Навигация по документам
-│   ├── TZ.md                   # Техническое задание
-│   ├── billing_integration.md   # Интеграция с биллингом (база знаний)
+│   ├── INSTALLATION_ORACLE.md   # Инструкция по установке Oracle
+│   ├── billing_integration.md   # Интеграция с биллингом
 │   ├── README_STREAMLIT.md     # Документация Streamlit
-│   └── ...
+│   └── TZ.md                   # Техническое задание
 │
-├── streamlit_report.py          # Streamlit приложение (PostgreSQL)
-├── streamlit_report_oracle.py   # Streamlit приложение (Oracle)
-├── run_streamlit.sh            # Скрипт запуска
+├── streamlit_report_oracle.py  # Streamlit приложение (Oracle)
 ├── requirements.txt            # Python зависимости
 └── README.md                   # Этот файл
 ```
 
-## 🎯 Назначение баз данных
-
-### Oracle (Production)
-- **Расположение**: Укажите свой Oracle connection string
-- **Назначение**: Основная production база данных
-- **Данные**: Реальные данные из SPNet и STECCOM
-- **Интеграция**: С биллингом (SERVICES, ACCOUNTS, CUSTOMERS)
-- **Использование**: Production Streamlit отчеты
-
-### PostgreSQL (Testing)
-- **Расположение**: localhost:5432/billing
-- **Назначение**: Локальная тестовая база данных
-- **Данные**: Копия из Oracle для тестирования
-- **Использование**: Разработка и отладка без доступа к Oracle
-
-## 🚀 Быстрый старт
-
-### Настройка конфигурации
-
-1. **Создайте файл `config.env`** на основе примера:
-```bash
-cp config.env.example config.env
-```
-
-2. **Заполните `config.env`** реальными значениями:
-```bash
-# PostgreSQL Configuration
-POSTGRES_HOST=localhost
-POSTGRES_PORT=5432
-POSTGRES_DB=billing
-POSTGRES_USER=cnn
-POSTGRES_PASSWORD=your-actual-password
-
-# Oracle Configuration (optional)
-ORACLE_USER=your-username
-ORACLE_PASSWORD=your-password
-ORACLE_HOST=your-oracle-host
-ORACLE_PORT=1521
-ORACLE_SERVICE=your-service-name
-```
-
-**Важно:** Файл `config.env` игнорируется git и не будет загружен в репозиторий.
-
-3. **Для Oracle команд** (если нужно), можно использовать переменные окружения напрямую:
-```bash
-export ORACLE_USER=your-username
-export ORACLE_PASSWORD=your-password
-export ORACLE_SERVICE=your-service-name
-sqlplus -s $ORACLE_USER/$ORACLE_PASSWORD@$ORACLE_SERVICE @script.sql
-```
-
-### Oracle (Production)
-
-```bash
-# 1. Создать таблицы
-cd oracle/tables
-sqlplus $ORACLE_USER/$ORACLE_PASSWORD@$ORACLE_SERVICE @install_all_tables.sql
-# или: sqlplus username/password@service_name @install_all_tables.sql
-
-# 2. Загрузить справочники
-cd ../data
-sqlplus $ORACLE_USER/$ORACLE_PASSWORD@$ORACLE_SERVICE @tariff_plans_data.sql
-
-# 3. Создать функции
-cd ../functions
-sqlplus $ORACLE_USER/$ORACLE_PASSWORD@$ORACLE_SERVICE @calculate_overage.sql
-
-# 4. Создать представления
-cd ../views
-sqlplus $ORACLE_USER/$ORACLE_PASSWORD@$ORACLE_SERVICE @install_all_views.sql
-
-# 5. Загрузить данные
-cd ../../../python
-python load_spnet_traffic.py
-python load_steccom_expenses.py
-
-# 6. Запустить Streamlit
-streamlit run ../streamlit_report_oracle.py --server.port 8501
-```
-
-### PostgreSQL (Testing)
-
-```bash
-# Использование переменных окружения (рекомендуется):
-export PGPASSWORD=$POSTGRES_PASSWORD
-# или установите в переменных окружения выше
-
-# 1. Создать структуру
-cd postgresql
-psql -h ${POSTGRES_HOST:-localhost} -p ${POSTGRES_PORT:-5432} -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-billing} -f tables/install_all_tables.sql
-psql -h ${POSTGRES_HOST:-localhost} -p ${POSTGRES_PORT:-5432} -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-billing} -f data/tariff_plans_data.sql
-psql -h ${POSTGRES_HOST:-localhost} -p ${POSTGRES_PORT:-5432} -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-billing} -f functions/calculate_overage.sql
-cd views && psql -h ${POSTGRES_HOST:-localhost} -p ${POSTGRES_PORT:-5432} -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-billing} -f install_all_views.sql
-
-# Или напрямую (не рекомендуется для production):
-# psql -U postgres -d billing -f tables/install_all_tables.sql
-
-# 2. Загрузить данные (вариант A: из CSV)
-cd ../../python
-python load_spnet_traffic.py
-python load_steccom_expenses.py
-
-# 2. Загрузить данные (вариант B: из Oracle)
-cd ../postgresql/scripts
-python load_from_oracle_views.py
-
-# 3. Запустить Streamlit
-cd ../..
-streamlit run streamlit_report.py --server.port 8502
-```
-
-## 📊 Основные представления
-
-### Для обеих БД (Oracle и PostgreSQL)
-
-#### V_SPNET_OVERAGE_ANALYSIS
-Базовый анализ превышений трафика:
-- Группировка по IMEI, CONTRACT_ID, BILL_MONTH
-- Расчет OVERAGE_KB и CALCULATED_OVERAGE_CHARGE
-- Только для SBD Data Usage
-
-#### V_CONSOLIDATED_OVERAGE_REPORT
-Консолидированный отчет:
-- Данные SPNet (трафик, суммы)
-- Данные STECCOM (расходы)
-- Расчет превышений для SBD-1 и SBD-10
-
-### Только для Oracle (требует billing7@bm7)
-
-#### V_IRIDIUM_SERVICES_INFO
-Информация о сервисах из биллинга:
-- CUSTOMER_NAME (организация/ФИО)
-- AGREEMENT_NUMBER (номер договора)
-- ORDER_NUMBER (номер заказа/приложения)
-- CODE_1C (код клиента из 1С)
-
-#### V_CONSOLIDATED_REPORT_WITH_BILLING
-Расширенный отчет с данными клиентов:
-- Все из V_CONSOLIDATED_OVERAGE_REPORT
-- + данные клиентов из биллинга
-
-## 📚 Документация
-
-### 🚀 Быстрый старт
-- **[docs/QUICK_START.md](docs/QUICK_START.md)** - Начало работы (выбор Oracle или PostgreSQL)
-- **[docs/QUICK_REFERENCE.md](docs/QUICK_REFERENCE.md)** - Шпаргалка команд
-
-### 🔴 Production (Oracle)
-- **[docs/PRODUCTION_OPERATIONS.md](docs/PRODUCTION_OPERATIONS.md)** - Ежедневные операции
-- **[docs/BILLING_EXPORT_GUIDE.md](docs/BILLING_EXPORT_GUIDE.md)** - Экспорт для 1С
-- **[oracle/queries/README.md](oracle/queries/README.md)** - Производственные запросы
-
-### 🟢 Testing (PostgreSQL)  
-- **[postgresql/SETUP_WITH_ORACLE_DATA.md](postgresql/SETUP_WITH_ORACLE_DATA.md)** - Настройка с данными из Oracle
-
-### 🏗️ Архитектура
-- **[docs/DUAL_CODEBASE_STRATEGY.md](docs/DUAL_CODEBASE_STRATEGY.md)** - Стратегия поддержки (Oracle + PostgreSQL)
-- **[docs/SIDE_BY_SIDE_COMPARISON.md](docs/SIDE_BY_SIDE_COMPARISON.md)** - Сравнение реализаций
-
-### 📋 Полная документация
-- **[docs/INDEX.md](docs/INDEX.md)** - Навигация по всем документам
-- **[docs/TZ.md](docs/TZ.md)** - Техническое задание
-- **[docs/billing_integration.md](docs/billing_integration.md)** - Интеграция с биллингом
-- **[docs/README_STREAMLIT.md](docs/README_STREAMLIT.md)** - Streamlit документация
-
 ## 🛠️ Технологии
 
 - **Oracle 11g+** - production база данных
-- **PostgreSQL 12+** - testing база данных
 - **Python 3.10+** - загрузка данных и расчеты
 - **Streamlit** - веб-интерфейс для отчетов
 - **Pandas** - обработка данных
 - **cx_Oracle** - Oracle драйвер
-- **psycopg2** - PostgreSQL драйвер
+- **openpyxl** - работа с Excel файлами
 
 ## 📦 Установка зависимостей
 
@@ -222,12 +205,11 @@ streamlit run streamlit_report.py --server.port 8502
 pip install -r requirements.txt
 ```
 
-Содержимое `requirements.txt`:
+**Зависимости:**
 - pandas
 - streamlit
-- cx_Oracle (для Oracle)
-- psycopg2-binary (для PostgreSQL)
-- openpyxl (для Excel export)
+- cx_Oracle
+- openpyxl
 
 ## 🔧 Тарифные планы
 
@@ -237,50 +219,67 @@ pip install -r requirements.txt
 
 Другие тарифы отображаются без расчета превышений.
 
-## 🔄 Синхронизация данных
+## 📚 Документация
 
-Для обновления тестовой БД PostgreSQL из production Oracle:
-
-```bash
-cd postgresql/scripts
-python load_from_oracle_views.py
-```
-
-## 📁 Дополнительные файлы
-
-- `oracle/test/import_iridium.py` - Python скрипт импорта данных из Oracle в PostgreSQL
-- Структура таблиц: см. `oracle/tables/` и `postgresql/tables/`
-
-## 🚦 Что использовать?
-
-| Ситуация | База данных | Streamlit |
-|----------|-------------|-----------|
-| Production отчеты | Oracle | streamlit_report_oracle.py |
-| Разработка | PostgreSQL (localhost) | streamlit_report.py |
-| Отладка без Oracle | PostgreSQL (localhost) | streamlit_report.py |
-| Полные данные + клиенты | Oracle | streamlit_report_oracle.py |
+- **[docs/INSTALLATION_ORACLE.md](docs/INSTALLATION_ORACLE.md)** - Полная инструкция по установке Oracle
+- **[docs/billing_integration.md](docs/billing_integration.md)** - Интеграция с биллингом
+- **[docs/README_STREAMLIT.md](docs/README_STREAMLIT.md)** - Документация Streamlit интерфейса
+- **[docs/TZ.md](docs/TZ.md)** - Техническое задание
+- **[docs/BILLING_EXPORT_GUIDE.md](docs/BILLING_EXPORT_GUIDE.md)** - Экспорт для 1С
+- **[oracle/README.md](oracle/README.md)** - Документация по Oracle скриптам
 
 ## ⚠️ Важные примечания
 
-1. **PostgreSQL** - только для тестирования, не имеет доступа к биллингу
-2. **Oracle** - production система, имеет интеграцию с биллингом
-3. Views с биллингом (`V_IRIDIUM_SERVICES_INFO`, `V_CONSOLIDATED_REPORT_WITH_BILLING`) работают только в Oracle
-4. Для синхронизации данных используйте `postgresql/scripts/load_from_oracle_views.py`
-5. **ВАЖНО**: Используйте переменные окружения для паролей Oracle:
+1. **Views с биллингом** (`V_IRIDIUM_SERVICES_INFO`, `V_CONSOLIDATED_REPORT_WITH_BILLING`) требуют доступ к таблицам биллинга
+2. Если доступа к биллингу нет, используйте только `V_CONSOLIDATED_OVERAGE_REPORT`
+3. Для синхронизации данных используйте соответствующие Python скрипты
+4. **ВАЖНО:** Используйте переменные окружения для паролей Oracle:
    ```bash
    export ORACLE_USER=your-username
    export ORACLE_PASSWORD=your-password
    export ORACLE_SERVICE=your-service-name
    ```
 
+## 🔄 Основные операции
+
+### Ежедневная загрузка данных
+
+```bash
+# 1. Загрузить новые данные SPNet
+cd python
+python load_spnet_traffic.py
+
+# 2. Загрузить новые данные STECCOM
+python load_steccom_expenses.py
+
+# 3. Проверить данные в Streamlit
+cd ..
+streamlit run streamlit_report_oracle.py
+```
+
+### Экспорт данных для 1С
+
+Используйте представление `V_CONSOLIDATED_REPORT_WITH_BILLING`:
+
+```sql
+-- Экспорт за период
+SELECT 
+    code_1c,
+    customer_name,
+    agreement_number,
+    imei,
+    plan_name,
+    bill_month,
+    spnet_total_amount,
+    calculated_overage,
+    steccom_total_amount
+FROM V_CONSOLIDATED_REPORT_WITH_BILLING
+WHERE bill_month = '202510'
+  AND code_1c IS NOT NULL
+ORDER BY code_1c, imei;
+```
+
 ## 📞 Контакты
 
 Проект: Iridium M2M Reporting  
-Дата создания: Октябрь 2025  
-Последнее обновление: 2025-10-29
-
-## 📖 См. также
-
-- [REORGANIZATION.md](REORGANIZATION.md) - история реорганизации проекта
-- [docs/CHANGELOG.md](docs/CHANGELOG.md) - история изменений
-- [docs/STATUS.md](docs/STATUS.md) - текущий статус проекта
+Дата создания: Октябрь 2025

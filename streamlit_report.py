@@ -1,66 +1,75 @@
 #!/usr/bin/env python3
 """
 Streamlit отчет по превышению трафика Iridium M2M
-Расчет только для SBD-1 и SBD-10
+Поддержка PostgreSQL и Oracle
 """
 
 import streamlit as st
 import pandas as pd
-import psycopg2
 from datetime import datetime
 import io
 import os
 from pathlib import Path
 
-# Попытка загрузить config.env если переменные окружения не установлены
-def load_config_env():
-    """Загрузка config.env если переменные окружения не установлены"""
-    if not os.getenv('POSTGRES_PASSWORD'):
-        config_file = Path(__file__).parent / 'config.env'
-        if config_file.exists():
-            with open(config_file, 'r') as f:
-                for line in f:
-                    line = line.strip()
-                    if line and not line.startswith('#') and '=' in line:
-                        key, value = line.split('=', 1)
-                        key = key.strip()
-                        value = value.strip().strip('"\'')
-                        if key.startswith('POSTGRES_') and not os.getenv(key):
-                            os.environ[key] = value
+# Импортируем абстракцию подключения к БД
+from db_connection import get_db_connection, get_postgres_config, get_oracle_config, get_db_type
 
-# Загружаем config.env если нужно
-load_config_env()
-
-# Конфигурация базы данных
-# Загружается из config.env через run_streamlit.sh или автоматически из config.env
-DB_CONFIG = {
-    'dbname': os.getenv('POSTGRES_DB', 'billing'),
-    'user': os.getenv('POSTGRES_USER', 'cnn'),
-    'password': os.getenv('POSTGRES_PASSWORD', ''),
-    'host': os.getenv('POSTGRES_HOST', 'localhost'),
-    'port': int(os.getenv('POSTGRES_PORT', '5432'))
-}
-
+# Получаем тип БД из config.env
+DB_TYPE = get_db_type()
 
 def get_connection():
-    """Создание подключения к базе данных"""
+    """Создание подключения к базе данных (PostgreSQL или Oracle)"""
     try:
-        if not DB_CONFIG['password']:
-            st.error("⚠️ Пароль не установлен! Убедитесь, что config.env загружен через run_streamlit.sh")
-            return None
-        conn = psycopg2.connect(**DB_CONFIG)
-        return conn
+        return get_db_connection(DB_TYPE)
     except Exception as e:
         st.error(f"Ошибка подключения к базе данных: {e}")
-        st.info(f"Проверьте конфигурацию: {DB_CONFIG['user']}@{DB_CONFIG['host']}:{DB_CONFIG['port']}/{DB_CONFIG['dbname']}")
+        config = get_postgres_config() if DB_TYPE == 'postgresql' else get_oracle_config()
+        if DB_TYPE == 'postgresql':
+            st.info(f"Проверьте конфигурацию: {config['user']}@{config['host']}:{config['port']}/{config['dbname']}")
+        else:
+            st.info(f"Проверьте конфигурацию: {config['user']}@{config['host']}:{config['port']}/{config['service_name']}")
         return None
 
 
 def get_main_report(period_filter=None, plan_filter=None):
-    """Получение основного отчета"""
+    """Получение основного отчета (работает для PostgreSQL и Oracle)"""
     conn = get_connection()
     if not conn:
         return None
+    
+    # Определяем имена полей в зависимости от БД
+    # PostgreSQL автоматически приводит имена без кавычек к нижнему регистру
+    # Oracle сохраняет регистр как в VIEW
+    if DB_TYPE == 'oracle':
+        # Oracle использует заглавные имена
+        imei_col = "v.IMEI"
+        contract_col = "v.CONTRACT_ID"
+        plan_monthly_col = "v.STECCOM_PLAN_NAME_MONTHLY"
+        plan_suspended_col = "v.STECCOM_PLAN_NAME_SUSPENDED"
+        bill_month_col = "v.BILL_MONTH"
+        bill_month_yyyymm_col = "v.BILL_MONTH_YYYMM"
+        display_name_col = "COALESCE(v.ORGANIZATION_NAME, v.CUSTOMER_NAME, '')"
+        code_1c_col = "v.CODE_1C"
+        service_id_col = "v.SERVICE_ID"
+        agreement_col = "v.AGREEMENT_NUMBER"
+        fee_prefix = "v.FEE_"
+        fees_total_col = "v.FEES_TOTAL"
+        delta_col = "v.DELTA_VS_STECCOM"
+    else:
+        # PostgreSQL - используем нижний регистр (PostgreSQL автоматически приведет)
+        imei_col = "v.imei"
+        contract_col = "v.contract_id"
+        plan_monthly_col = "v.steccom_plan_name_monthly"
+        plan_suspended_col = "v.steccom_plan_name_suspended"
+        bill_month_col = "v.bill_month"
+        bill_month_yyyymm_col = "v.bill_month_yyyymm"
+        display_name_col = "v.display_name"
+        code_1c_col = "v.code_1c"
+        service_id_col = "v.service_id"
+        agreement_col = "v.agreement_number"
+        fee_prefix = "v.fee_"
+        fees_total_col = "v.fees_total"
+        delta_col = "v.delta_vs_steccom"
     
     # Фильтр по периодам
     period_condition = ""
@@ -68,44 +77,54 @@ def get_main_report(period_filter=None, plan_filter=None):
         # Конвертируем YYYY-MM в формат базы YYYYMM (например: 2025-09 -> 202509)
         year, month = period_filter.split('-')
         bill_month = int(year) * 100 + int(month)
-        period_condition = f"AND CAST(v.BILL_MONTH AS integer) = {bill_month}"
+        period_condition = f"AND {bill_month_yyyymm_col} = '{bill_month}'"
     
-    # Фильтр по тарифам (все тарифы)
+    # Фильтр по тарифам
     plan_condition = ""
     if plan_filter and plan_filter != "All Plans":
-        plan_condition = f"AND v.PLAN_NAME = '{plan_filter}'"
+        plan_name_col = "v.PLAN_NAME" if DB_TYPE == 'oracle' else "v.plan_name"
+        plan_condition = f"AND {plan_name_col} = '{plan_filter}'"
     
+    # Общий запрос (работает для обеих БД, так как VIEW одинаковые)
     query = f"""
     SELECT 
-        v.IMEI AS "IMEI",
-        v.CONTRACT_ID AS "Contract ID",
-        COALESCE(v.STECCOM_PLAN_NAME_MONTHLY, '') AS "Plan Monthly",
-        COALESCE(v.STECCOM_PLAN_NAME_SUSPENDED, '') AS "Plan Suspended",
-        CAST(v.BILL_MONTH AS integer) AS "Bill Month",
-        -- Разделение трафика и событий
-        ROUND(CAST(v.TRAFFIC_USAGE_BYTES AS NUMERIC) / 1000, 2) AS "Traffic Usage (KB)",
-        v.EVENTS_COUNT AS "Events (Count)",
-        v.DATA_USAGE_EVENTS AS "Data Events",
-        v.MAILBOX_EVENTS AS "Mailbox Events",
-        v.REGISTRATION_EVENTS AS "Registration Events",
+        {imei_col} AS "IMEI",
+        {contract_col} AS "Contract ID",
+        COALESCE({plan_monthly_col}, '') AS "Plan Monthly",
+        COALESCE({plan_suspended_col}, '') AS "Plan Suspended",
+        {bill_month_col} AS "Bill Month",
+        -- Разделение трафика и событий (PostgreSQL приводит к нижнему регистру автоматически)
+        ROUND(CAST(v.traffic_usage_bytes AS NUMERIC) / 1000, 2) AS "Traffic Usage (KB)",
+        v.events_count AS "Events (Count)",
+        v.data_usage_events AS "Data Events",
+        v.mailbox_events AS "Mailbox Events",
+        v.registration_events AS "Registration Events",
         -- Превышения
-        v.INCLUDED_KB AS "Included (KB)",
-        v.OVERAGE_KB AS "Overage (KB)",
-        v.CALCULATED_OVERAGE AS "Calculated Overage ($)",
-        v.SPNET_TOTAL_AMOUNT AS "SPNet Total Amount ($)",
-        v.STECCOM_MONTHLY_AMOUNT AS "STECCOM Monthly ($)",
-        v.STECCOM_SUSPENDED_AMOUNT AS "STECCOM Suspended ($)",
-        v.STECCOM_TOTAL_AMOUNT AS "STECCOM Total Amount ($)",
+        v.included_kb AS "Included (KB)",
+        v.overage_kb AS "Overage (KB)",
+        v.calculated_overage AS "Calculated Overage ($)",
+        v.spnet_total_amount AS "SPNet Total Amount ($)",
+        v.steccom_monthly_amount AS "STECCOM Monthly ($)",
+        v.steccom_suspended_amount AS "STECCOM Suspended ($)",
+        v.steccom_total_amount AS "STECCOM Total Amount ($)",
         -- Доп. поля из биллинга
-        v.display_name         AS "Organization/Person",
-        v.code_1c              AS "Code 1C",
-        v.service_id           AS "Service ID",
-        v.agreement_number     AS "Agreement #"
-    FROM v_consolidated_report_with_billing v
+        {display_name_col} AS "Organization/Person",
+        {code_1c_col} AS "Code 1C",
+        {service_id_col} AS "Service ID",
+        {agreement_col} AS "Agreement #",
+        -- Fees из STECCOM_EXPENSES
+        {fee_prefix}ACTIVATION_FEE AS "Fee: Activation Fee",
+        {fee_prefix}ADVANCE_CHARGE AS "Fee: Advance Charge",
+        {fee_prefix}CREDIT AS "Fee: Credit",
+        {fee_prefix}CREDITED AS "Fee: Credited",
+        {fee_prefix}PRORATED AS "Fee: Prorated",
+        {fees_total_col} AS "Fees Total ($)",
+        {delta_col} AS "Δ vs STECCOM ($)"
+    FROM V_CONSOLIDATED_REPORT_WITH_BILLING v
     WHERE 1=1
         {plan_condition}
         {period_condition}
-    ORDER BY CAST(v.BILL_MONTH AS integer) DESC, "Calculated Overage ($)" DESC NULLS LAST
+    ORDER BY {bill_month_yyyymm_col} DESC, "Calculated Overage ($)" DESC NULLS LAST
     """
     
     try:
@@ -114,131 +133,102 @@ def get_main_report(period_filter=None, plan_filter=None):
         if df.empty:
             return df
         
-        # Bill Month в базе уже в формате YYYYMM, для merge используем напрямую
-        df['bill_month_num'] = df['Bill Month'].apply(lambda x: int(x) if pd.notna(x) else None)
-        
-        # Загружаем fees и делаем pivot по категориям
-        # Группируем по IMEI и bill_month (периоду), чтобы не суммировать по всем периодам
-        fees_query = f"""
-        SELECT bill_month, contract_id, imei, category, SUM(amount) AS total_amount
-        FROM v_steccom_access_fees_norm
-        WHERE bill_month IS NOT NULL AND imei IS NOT NULL
-        GROUP BY bill_month, contract_id, imei, category
-        """
-        
-        try:
-            fees_df = pd.read_sql_query(fees_query, conn)
-            
-            if not fees_df.empty:
-                # Pivot: категории -> колонки (группируем по IMEI и bill_month, НЕ суммируем все периоды!)
-                fees_pivot = fees_df.pivot_table(
-                    index=['imei', 'bill_month', 'contract_id'],
-                    columns='category',
-                    values='total_amount',
-                    aggfunc='sum',
-                    fill_value=0
-                ).reset_index()
-                
-                # Переименовываем колонки категорий
-                fees_pivot.columns = [f"Fee: {col}" if col not in ['imei', 'bill_month', 'contract_id'] else col 
-                                      for col in fees_pivot.columns]
-                
-                # Merge с основным отчетом по IMEI и bill_month (а не только по contract_id)
-                df = df.merge(
-                    fees_pivot,
-                    left_on=['IMEI', 'bill_month_num'],
-                    right_on=['imei', 'bill_month'],
-                    how='left'
-                )
-                
-                # Заполняем отсутствующие суммы нулями для колонок Fee:*
-                fee_cols = [c for c in fees_pivot.columns if c.startswith('Fee: ')]
-                for c in fee_cols:
-                    if c in df.columns:
-                        df[c] = pd.to_numeric(df[c], errors='coerce').fillna(0)
-
-                # Удаляем служебные колонки
-                df = df.drop(columns=['contract_id', 'imei', 'bill_month', 'bill_month_num'], errors='ignore')
-            
-        except Exception as e:
-            st.warning(f"Не удалось загрузить категории плат: {e}")
-            df = df.drop(columns=['bill_month_num'], errors='ignore')
-        
-        # Итог по платам и дельта к STECCOM Total
-        fee_cols_all = [c for c in df.columns if c.startswith('Fee: ')]
-        if fee_cols_all:
-            df['Fees Total ($)'] = df[fee_cols_all].sum(axis=1, numeric_only=True)
-            if 'STECCOM Total Amount ($)' in df.columns:
-                df['Δ vs STECCOM ($)'] = df['STECCOM Total Amount ($)'] - df['Fees Total ($)']
-
-        # Форматируем Bill Month для отображения (YYYY-MM) из YYYYMM
-        if 'Bill Month' in df.columns:
-            df['Bill Month'] = df['Bill Month'].apply(lambda x: 
-                f"{int(x) // 100:04d}-{int(x) % 100:02d}" if pd.notna(x) and pd.notnull(x) else ""
-            )
-        
         return df
     except Exception as e:
         st.error(f"Ошибка получения отчета: {e}")
+        import traceback
+        st.error(traceback.format_exc())
         return None
     finally:
-        conn.close()
+        if conn:
+            conn.close()
 
 
 def get_periods():
-    """Получение списка периодов"""
+    """Получение списка периодов (работает для PostgreSQL и Oracle)"""
     conn = get_connection()
     if not conn:
         return []
     
-    query = """
-    SELECT DISTINCT BILL_MONTH
-    FROM V_CONSOLIDATED_OVERAGE_REPORT
-    WHERE BILL_MONTH IS NOT NULL
-    ORDER BY BILL_MONTH DESC
+    # PostgreSQL использует нижний регистр, Oracle - верхний
+    if DB_TYPE == 'oracle':
+        col_name = "BILL_MONTH_YYYMM"
+    else:
+        col_name = "bill_month_yyyymm"
+    
+    query = f"""
+    SELECT DISTINCT {col_name}
+    FROM V_CONSOLIDATED_REPORT_WITH_BILLING
+    WHERE {col_name} IS NOT NULL
+    ORDER BY {col_name} DESC
     """
     
     try:
-        cursor = conn.cursor()
-        cursor.execute(query)
+        df = pd.read_sql_query(query, conn)
         periods = []
-        for row in cursor.fetchall():
-            if row[0]:
-                bill_month = int(row[0])  # YYYYMM
-                year = bill_month // 100
-                month = bill_month % 100
-                periods.append(f"{year:04d}-{month:02d}")
+        # pandas может привести имена столбцов к нижнему регистру для PostgreSQL
+        # Пробуем найти столбец в любом регистре
+        col_key = None
+        for col in df.columns:
+            if col.lower() == col_name.lower():
+                col_key = col
+                break
+        if col_key is None:
+            col_key = col_name.lower()  # Fallback
+        
+        for bill_month in df[col_key].dropna():
+            if isinstance(bill_month, str):
+                bill_month = int(bill_month)
+            elif isinstance(bill_month, (int, float)):
+                bill_month = int(bill_month)
+            else:
+                continue
+            year = bill_month // 100
+            month = bill_month % 100
+            periods.append(f"{year:04d}-{month:02d}")
         return periods
     except Exception as e:
         st.error(f"Ошибка получения периодов: {e}")
         return []
     finally:
-        conn.close()
+        if conn:
+            conn.close()
 
 
 def get_plans():
-    """Получение списка тарифных планов"""
+    """Получение списка тарифных планов (работает для PostgreSQL и Oracle)"""
     conn = get_connection()
     if not conn:
         return []
     
-    query = """
-    SELECT DISTINCT PLAN_NAME
-    FROM V_CONSOLIDATED_OVERAGE_REPORT
-    WHERE PLAN_NAME IS NOT NULL
-    ORDER BY PLAN_NAME
+    plan_name_col = "PLAN_NAME" if DB_TYPE == 'oracle' else "plan_name"
+    query = f"""
+    SELECT DISTINCT {plan_name_col}
+    FROM V_CONSOLIDATED_REPORT_WITH_BILLING
+    WHERE {plan_name_col} IS NOT NULL
+    ORDER BY {plan_name_col}
     """
     
     try:
-        cursor = conn.cursor()
-        cursor.execute(query)
-        plans = [row[0] for row in cursor.fetchall() if row[0]]
-        return plans
+        df = pd.read_sql_query(query, conn)
+        # pandas может привести имена столбцов к нижнему регистру для PostgreSQL
+        # Пробуем найти столбец в любом регистре
+        col_key = None
+        for col in df.columns:
+            if col.lower() == plan_name_col.lower():
+                col_key = col
+                break
+        if col_key is None:
+            col_key = plan_name_col.lower()  # Fallback
+        
+        plans = [row for row in df[col_key].dropna().unique() if row]
+        return sorted(plans)
     except Exception as e:
         st.error(f"Ошибка получения планов: {e}")
         return []
     finally:
-        conn.close()
+        if conn:
+            conn.close()
 
 
 def export_to_csv(df):
@@ -261,27 +251,36 @@ def main():
     
     # Настройка страницы
     st.set_page_config(
-        page_title="Iridium M2M Overage Report (SBD-1, SBD-10)",
+        page_title="Iridium M2M Overage Report",
         page_icon="📊",
         layout="wide"
     )
     
-    # Проверка загрузки конфигурации
-    if not DB_CONFIG.get('password'):
-        st.error("⚠️ **Конфигурация не загружена!**")
-        st.warning("""
-        Запустите приложение через скрипт:
-        ```bash
-        ./run_streamlit.sh
-        ```
-        
-        Скрипт автоматически загрузит `config.env` с настройками базы данных.
-        """)
-        st.stop()
+    # Проверка конфигурации
+    if DB_TYPE == 'postgresql':
+        config = get_postgres_config()
+        if not config.get('password'):
+            st.error("⚠️ **PostgreSQL конфигурация не загружена!**")
+            st.warning("""
+            Запустите приложение через скрипт:
+            ```bash
+            ./run_streamlit.sh
+            ```
+            
+            Или установите переменные окружения POSTGRES_* в config.env
+            """)
+            st.stop()
+    else:
+        config = get_oracle_config()
+        if not config.get('password'):
+            st.error("⚠️ **Oracle конфигурация не загружена!**")
+            st.warning("Установите переменные окружения ORACLE_* в config.env")
+            st.stop()
     
     # Заголовок
     st.title("📊 Iridium M2M Overage Report")
-    st.markdown("**All Plans (Calculated Overage for SBD-1 and SBD-10 only)**")
+    db_badge = "🟢 PostgreSQL" if DB_TYPE == 'postgresql' else "🔵 Oracle"
+    st.markdown(f"**{db_badge}** | All Plans (Calculated Overage for SBD-1 and SBD-10 only)")
     st.markdown("---")
     
     # Создаем вкладки для отчета и загрузки данных
@@ -305,7 +304,11 @@ def main():
         
         st.markdown("---")
         st.header("🔐 Database Connection")
-        st.caption(f"📡 {DB_CONFIG['user']}@{DB_CONFIG['host']}:{DB_CONFIG['port']}/{DB_CONFIG['dbname']}")
+        config = get_postgres_config() if DB_TYPE == 'postgresql' else get_oracle_config()
+        if DB_TYPE == 'postgresql':
+            st.caption(f"📡 {config['user']}@{config['host']}:{config['port']}/{config['dbname']}")
+        else:
+            st.caption(f"📡 {config['user']}@{config['host']}:{config['port']}/{config['service_name']}")
         
         # Кнопка тестирования подключения
         if st.button("🔌 Test Connection"):
@@ -513,18 +516,27 @@ def main():
                         loaded_files = set()
                         if conn_status:
                             try:
-                                cursor = conn_status.cursor()
-                                cursor.execute("""
+                                if DB_TYPE == 'oracle':
+                                    query = """
+                                    SELECT LOWER(FILE_NAME) FROM LOAD_LOGS 
+                                    WHERE LOWER(TABLE_NAME) = LOWER('SPNET_TRAFFIC') 
+                                    AND LOAD_STATUS = 'SUCCESS'
+                                    """
+                                else:
+                                    query = """
                                     SELECT LOWER(file_name) FROM load_logs 
                                     WHERE LOWER(table_name) = LOWER('spnet_traffic') 
                                     AND load_status = 'SUCCESS'
-                                """)
+                                    """
+                                cursor = conn_status.cursor()
+                                cursor.execute(query)
                                 loaded_files = {row[0] for row in cursor.fetchall()}
                                 cursor.close()
                             except:
                                 pass
                             finally:
-                                conn_status.close()
+                                if conn_status:
+                                    conn_status.close()
                         
                         st.markdown(f"**Found files: {len(spnet_files)}**")
                         files_info = []
@@ -557,9 +569,19 @@ def main():
                 if uploaded_file:
                     # Определяем тип файла автоматически
                     try:
-                        from python.load_data_postgres import PostgresDataLoader
-                        temp_loader = PostgresDataLoader(DB_CONFIG)
-                        file_type = temp_loader.detect_file_type(uploaded_file)
+                        if DB_TYPE == 'postgresql':
+                            from python.load_data_postgres import PostgresDataLoader
+                            temp_loader = PostgresDataLoader(get_postgres_config())
+                            file_type = temp_loader.detect_file_type(uploaded_file)
+                        else:
+                            # Для Oracle используем простую проверку по имени файла
+                            file_name_lower = uploaded_file.name.lower()
+                            if 'spnet' in file_name_lower or 'traffic' in file_name_lower:
+                                file_type = 'SPNet'
+                            elif 'steccom' in file_name_lower or 'access' in file_name_lower or 'fee' in file_name_lower:
+                                file_type = 'STECCOM'
+                            else:
+                                file_type = None
                     except:
                         file_type = None
                     
@@ -605,18 +627,27 @@ def main():
                         loaded_files = set()
                         if conn_status:
                             try:
-                                cursor = conn_status.cursor()
-                                cursor.execute("""
+                                if DB_TYPE == 'oracle':
+                                    query = """
+                                    SELECT LOWER(FILE_NAME) FROM LOAD_LOGS 
+                                    WHERE LOWER(TABLE_NAME) = LOWER('STECCOM_EXPENSES') 
+                                    AND LOAD_STATUS = 'SUCCESS'
+                                    """
+                                else:
+                                    query = """
                                     SELECT LOWER(file_name) FROM load_logs 
                                     WHERE LOWER(table_name) = LOWER('steccom_expenses') 
                                     AND load_status = 'SUCCESS'
-                                """)
+                                    """
+                                cursor = conn_status.cursor()
+                                cursor.execute(query)
                                 loaded_files = {row[0] for row in cursor.fetchall()}
                                 cursor.close()
                             except:
                                 pass
                             finally:
-                                conn_status.close()
+                                if conn_status:
+                                    conn_status.close()
                         
                         st.markdown(f"**Found files: {len(steccom_files)}**")
                         files_info = []
@@ -650,21 +681,29 @@ def main():
                     # Определяем тип файла автоматически
                     file_type = None
                     try:
-                        import tempfile
-                        import io
-                        from python.load_data_postgres import PostgresDataLoader
-                        
-                        # Сохраняем во временный файл для определения типа
-                        with tempfile.NamedTemporaryFile(mode='wb', suffix='.csv', delete=False) as tmp_file:
-                            tmp_file.write(uploaded_file.getbuffer())
-                            tmp_path = tmp_file.name
-                        
-                        temp_loader = PostgresDataLoader(DB_CONFIG)
-                        file_type = temp_loader.detect_file_type(tmp_path)
-                        
-                        # Удаляем временный файл
-                        import os
-                        os.unlink(tmp_path)
+                        if DB_TYPE == 'postgresql':
+                            import tempfile
+                            import io
+                            from python.load_data_postgres import PostgresDataLoader
+                            
+                            # Сохраняем во временный файл для определения типа
+                            with tempfile.NamedTemporaryFile(mode='wb', suffix='.csv', delete=False) as tmp_file:
+                                tmp_file.write(uploaded_file.getbuffer())
+                                tmp_path = tmp_file.name
+                            
+                            temp_loader = PostgresDataLoader(get_postgres_config())
+                            file_type = temp_loader.detect_file_type(tmp_path)
+                            
+                            # Удаляем временный файл
+                            import os
+                            os.unlink(tmp_path)
+                        else:
+                            # Для Oracle используем простую проверку по имени файла
+                            file_name_lower = uploaded_file.name.lower()
+                            if 'spnet' in file_name_lower or 'traffic' in file_name_lower:
+                                file_type = 'SPNet'
+                            elif 'steccom' in file_name_lower or 'access' in file_name_lower or 'fee' in file_name_lower:
+                                file_type = 'STECCOM'
                     except Exception as e:
                         # Если не удалось определить, пробуем по имени файла
                         file_name_lower = uploaded_file.name.lower()
@@ -706,19 +745,28 @@ def main():
         col_imp1, col_imp2 = st.columns(2)
         
         with col_imp1:
+            db_name = "PostgreSQL" if DB_TYPE == 'postgresql' else "Oracle"
             if st.button("📥 Import SPNet Files", use_container_width=True, type="primary"):
-                with st.spinner("Импорт данных SPNet в PostgreSQL..."):
+                with st.spinner(f"Импорт данных SPNet в {db_name}..."):
                     try:
-                        from python.load_data_postgres import PostgresDataLoader
+                        if DB_TYPE == 'postgresql':
+                            from python.load_data_postgres import PostgresDataLoader
+                            loader = PostgresDataLoader(get_postgres_config())
+                            connect_method = loader.connect
+                        else:
+                            from python.load_spnet_traffic import SPNetDataLoader
+                            loader = SPNetDataLoader(get_oracle_config())
+                            connect_method = loader.connect_to_oracle
+                            loader.gdrive_path = str(SPNET_DIR)
                         
-                        loader = PostgresDataLoader(DB_CONFIG)
-                        if loader.connect():
+                        if connect_method():
                             import io
                             from contextlib import redirect_stdout, redirect_stderr
                             import sys
                             
                             # Обновляем путь к директории
-                            loader.spnet_path = str(SPNET_DIR)
+                            if DB_TYPE == 'postgresql':
+                                loader.spnet_path = str(SPNET_DIR)
                             
                             # Перехватываем вывод
                             log_capture = io.StringIO()
@@ -734,7 +782,7 @@ def main():
                                 log_output = log_capture.getvalue()
                                 
                                 if result:
-                                    st.success("✅ Импорт SPNet завершен успешно!")
+                                    st.success(f"✅ Импорт SPNet в {db_name} завершен успешно!")
                                     st.text_area("Log output", log_output, height=200, key='spnet_log')
                                 else:
                                     st.error(f"❌ Ошибка импорта SPNet")
@@ -742,8 +790,11 @@ def main():
                             finally:
                                 sys.stdout = old_stdout
                                 sys.stderr = old_stderr
-                                if loader.connection:
-                                    loader.close()
+                                if hasattr(loader, 'connection') and loader.connection:
+                                    if hasattr(loader, 'close'):
+                                        loader.close()
+                                    else:
+                                        loader.connection.close()
                         else:
                             st.error("❌ Не удалось подключиться к базе данных")
                     except Exception as e:
@@ -752,19 +803,25 @@ def main():
                         st.text_area("Error details", traceback.format_exc(), height=200)
         
         with col_imp2:
+            db_name = "PostgreSQL" if DB_TYPE == 'postgresql' else "Oracle"
             if st.button("📥 Import STECCOM Files", use_container_width=True, type="primary"):
-                with st.spinner("Импорт данных STECCOM в PostgreSQL..."):
+                with st.spinner(f"Импорт данных STECCOM в {db_name}..."):
                     try:
-                        from python.load_data_postgres import PostgresDataLoader
+                        if DB_TYPE == 'postgresql':
+                            from python.load_data_postgres import PostgresDataLoader
+                            loader = PostgresDataLoader(get_postgres_config())
+                            connect_method = loader.connect
+                            loader.steccom_path = str(STECCOM_DIR)
+                        else:
+                            from python.load_steccom_expenses import STECCOMDataLoader
+                            loader = STECCOMDataLoader(get_oracle_config())
+                            connect_method = loader.connect_to_oracle
+                            loader.gdrive_path = str(STECCOM_DIR)
                         
-                        loader = PostgresDataLoader(DB_CONFIG)
-                        if loader.connect():
+                        if connect_method():
                             import io
                             from contextlib import redirect_stdout, redirect_stderr
                             import sys
-                            
-                            # Обновляем путь к директории
-                            loader.steccom_path = str(STECCOM_DIR)
                             
                             # Перехватываем вывод
                             log_capture = io.StringIO()
@@ -780,7 +837,7 @@ def main():
                                 log_output = log_capture.getvalue()
                                 
                                 if result:
-                                    st.success("✅ Импорт STECCOM завершен успешно!")
+                                    st.success(f"✅ Импорт STECCOM в {db_name} завершен успешно!")
                                     st.text_area("Log output", log_output, height=200, key='steccom_log')
                                 else:
                                     st.error(f"❌ Ошибка импорта STECCOM")
@@ -788,8 +845,11 @@ def main():
                             finally:
                                 sys.stdout = old_stdout
                                 sys.stderr = old_stderr
-                                if loader.connection:
-                                    loader.close()
+                                if hasattr(loader, 'connection') and loader.connection:
+                                    if hasattr(loader, 'close'):
+                                        loader.close()
+                                    else:
+                                        loader.connection.close()
                         else:
                             st.error("❌ Не удалось подключиться к базе данных")
                     except Exception as e:

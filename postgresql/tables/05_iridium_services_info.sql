@@ -21,9 +21,10 @@ CREATE TABLE IRIDIUM_SERVICES_INFO (
     PERSON_NAME VARCHAR(500),
     CUSTOMER_NAME VARCHAR(500),
     CREATE_DATE TIMESTAMP,
-    START_DATE TIMESTAMP,
-    STOP_DATE TIMESTAMP,
+    START_DATE TIMESTAMP,  -- open_date: начало предоставления услуги
+    STOP_DATE TIMESTAMP,   -- stop_date: конец предоставления услуги
     ACCOUNT_ID INTEGER,
+    IS_SUSPENDED VARCHAR(1),  -- Y=есть активная услуга приостановления (TYPE_ID=9008), N=нет
     CODE_1C VARCHAR(100)
 );
 
@@ -44,7 +45,10 @@ COMMENT ON COLUMN IRIDIUM_SERVICES_INFO.CUSTOMER_NAME IS 'Название ор�
 COMMENT ON COLUMN IRIDIUM_SERVICES_INFO.AGREEMENT_NUMBER IS 'Номер договора';
 COMMENT ON COLUMN IRIDIUM_SERVICES_INFO.ORDER_NUMBER IS 'Номер заказа/приложения (бланк)';
 COMMENT ON COLUMN IRIDIUM_SERVICES_INFO.CODE_1C IS 'Код клиента из 1С';
-COMMENT ON COLUMN IRIDIUM_SERVICES_INFO.STATUS IS 'Статус сервиса (1=активный, 0=неактивный, -10=закрыт)';
+COMMENT ON COLUMN IRIDIUM_SERVICES_INFO.STATUS IS 'Статус сервиса (10=активный, -10=приостановленный)';
+COMMENT ON COLUMN IRIDIUM_SERVICES_INFO.START_DATE IS 'Начало предоставления услуги (open_date)';
+COMMENT ON COLUMN IRIDIUM_SERVICES_INFO.STOP_DATE IS 'Конец предоставления услуги (stop_date)';
+COMMENT ON COLUMN IRIDIUM_SERVICES_INFO.IS_SUSPENDED IS 'Признак приостановки: Y=есть активная услуга приостановления (TYPE_ID=9008), N=нет';
 
 \echo 'Table IRIDIUM_SERVICES_INFO created successfully!'
 
