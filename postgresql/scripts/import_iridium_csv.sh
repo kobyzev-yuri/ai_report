@@ -62,34 +62,51 @@ fi
 echo "Начинаем импорт..."
 echo ""
 
-# Сначала очищаем таблицу (опционально, можно закомментировать)
-# psql -h "${PG_HOST}" -p "${PG_PORT}" -U "${PG_USER}" -d "${PG_DB}" -c "TRUNCATE TABLE iridium_services_info;"
+# Проверяем и добавляем столбец is_suspended если его нет
+echo "Проверка столбца is_suspended..."
+psql -h "${PG_HOST}" -p "${PG_PORT}" -U "${PG_USER}" -d "${PG_DB}" << 'SQL_EOF'
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns 
+        WHERE table_name = 'iridium_services_info' 
+        AND column_name = 'is_suspended'
+    ) THEN
+        ALTER TABLE iridium_services_info ADD COLUMN is_suspended VARCHAR(1);
+        COMMENT ON COLUMN iridium_services_info.is_suspended IS 'Признак приостановки: Y=есть активная услуга приостановления (TYPE_ID=9008), N=нет';
+    END IF;
+END $$;
+SQL_EOF
 
-# Импорт с использованием COPY
+# Очистка таблицы
+echo "Очистка таблицы..."
+psql -h "${PG_HOST}" -p "${PG_PORT}" -U "${PG_USER}" -d "${PG_DB}" -c "TRUNCATE TABLE iridium_services_info;"
+
+# Импорт с использованием \copy (клиентская команда, работает с любыми правами)
+echo "Импорт данных..."
+# Используем абсолютный путь к файлу
+ABS_CSV_FILE=$(cd "$(dirname "${CSV_FILE}")" && pwd)/$(basename "${CSV_FILE}")
+
+# Создаем временный SQL файл с правильным путем
+TEMP_SQL=$(mktemp)
+cat > "${TEMP_SQL}" << EOF
+\copy iridium_services_info (service_id, contract_id, imei, tariff_id, agreement_number, order_number, status, actual_status, customer_id, organization_name, person_name, customer_name, create_date, start_date, stop_date, account_id, is_suspended, code_1c) FROM '${ABS_CSV_FILE}' WITH (FORMAT csv, DELIMITER '|', NULL '')
+EOF
+
+# Выполняем импорт
+psql -h "${PG_HOST}" -p "${PG_PORT}" -U "${PG_USER}" -d "${PG_DB}" -f "${TEMP_SQL}"
+IMPORT_EXIT_CODE=$?
+rm -f "${TEMP_SQL}"
+
+if [ ${IMPORT_EXIT_CODE} -ne 0 ]; then
+    echo "ERROR: Импорт завершился с ошибкой (код: ${IMPORT_EXIT_CODE})"
+    exit ${IMPORT_EXIT_CODE}
+fi
+
+# Статистика
 psql -h "${PG_HOST}" -p "${PG_PORT}" -U "${PG_USER}" -d "${PG_DB}" << EOF
--- Импорт данных (разделитель |, без заголовка)
-\copy iridium_services_info (
-    service_id,
-    contract_id,
-    imei,
-    tariff_id,
-    agreement_number,
-    order_number,
-    status,
-    actual_status,
-    customer_id,
-    organization_name,
-    person_name,
-    customer_name,
-    create_date,
-    start_date,
-    stop_date,
-    account_id,
-    is_suspended,
-    code_1c
-) FROM '${CSV_FILE}' WITH (FORMAT csv, DELIMITER '|', NULL '');
 
--- Проверка загруженных данных
+-- Статистика
 \echo ''
 \echo '============================================================================'
 \echo 'Проверка импорта:'

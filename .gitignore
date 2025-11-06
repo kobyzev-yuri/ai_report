@@ -60,6 +60,9 @@ ENV/
 *.dump
 *.backup
 
+# Archive directory - exclude from git
+archive/
+
 # Secrets and configs with passwords
 config.env
 *.env

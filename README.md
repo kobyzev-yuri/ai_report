@@ -6,8 +6,6 @@
 
 ### Установка Oracle базы данных
 
-Полная инструкция по установке: **[docs/INSTALLATION_ORACLE.md](docs/INSTALLATION_ORACLE.md)**
-
 **Краткая версия:**
 ```bash
 # 1. Таблицы
@@ -35,23 +33,43 @@ python load_steccom_expenses.py
 ### Запуск веб-интерфейса
 
 ```bash
-# Установка зависимостей (если еще не установлены)
+# Установка зависимостей
 pip install -r requirements.txt
 
-# Запуск Streamlit приложения для Oracle
-streamlit run streamlit_report_oracle.py --server.port 8501
+# Запуск в фоновом режиме (Oracle)
+./run_streamlit_background.sh
+
+# Или запуск напрямую
+streamlit run streamlit_report_oracle_backup.py \
+  --server.port 8504 \
+  --server.headless true \
+  --server.baseUrlPath=/ai_report \
+  --server.enableCORS false \
+  --server.enableXsrfProtection false
 ```
 
-Приложение будет доступно по адресу: **http://localhost:8501**
+**Управление:**
+```bash
+# Проверка статуса
+./status_streamlit.sh
+
+# Остановка
+./stop_streamlit.sh
+```
+
+Приложение доступно через Nginx: **stat.steccom.ru:7776/ai_report**
 
 ## 📊 Основные интерфейсы
 
 ### 1. Streamlit Web Interface
 
-**Файл:** `streamlit_report_oracle.py`
+**Файлы:**
+- `streamlit_report_oracle_backup.py` - Oracle версия (production)
+- `streamlit_report_postgresql_backup.py` - PostgreSQL версия
 
 **Основные функции:**
 - **Главный отчет** - сводная таблица по IMEI с расчетом превышений
+- **Data Loader** - загрузка CSV/Excel файлов (SPNet Traffic и STECCOM Access Fees)
 - **Фильтры:**
   - По IMEI
   - По периоду (BILL_MONTH)
@@ -63,14 +81,14 @@ streamlit run streamlit_report_oracle.py --server.port 8501
 - **Статистика:**
   - Общая сумма по периодам
   - Превышения трафика
-  - Сравнение SPNet и STECCOM сумм
 
 **Использование:**
-1. Откройте браузер: `http://localhost:8501`
+1. Откройте браузер: `stat.steccom.ru:7776/ai_report`
 2. Выберите период в боковой панели
 3. Примените фильтры (опционально)
 4. Просмотрите данные в таблице
 5. Экспортируйте при необходимости
+6. Используйте вкладку "Data Loader" для загрузки новых файлов
 
 ### 2. Основные представления (VIEW) Oracle
 
@@ -185,9 +203,16 @@ ai_report/
 │   ├── README_STREAMLIT.md     # Документация Streamlit
 │   └── TZ.md                   # Техническое задание
 │
-├── streamlit_report_oracle.py  # Streamlit приложение (Oracle)
-├── requirements.txt            # Python зависимости
-└── README.md                   # Этот файл
+├── streamlit_report_oracle_backup.py      # Streamlit приложение (Oracle)
+├── streamlit_report_postgresql_backup.py # Streamlit приложение (PostgreSQL)
+├── streamlit_data_loader.py              # Модуль загрузки данных
+├── db_connection.py                      # Модуль подключения к БД
+├── run_streamlit_background.sh           # Скрипт запуска в фоне
+├── stop_streamlit.sh                     # Скрипт остановки
+├── status_streamlit.sh                   # Скрипт проверки статуса
+├── requirements.txt                      # Python зависимости
+├── config.env.example                   # Пример конфигурации
+└── README.md                             # Этот файл
 ```
 
 ## 🛠️ Технологии
@@ -221,12 +246,7 @@ pip install -r requirements.txt
 
 ## 📚 Документация
 
-- **[docs/INSTALLATION_ORACLE.md](docs/INSTALLATION_ORACLE.md)** - Полная инструкция по установке Oracle
-- **[docs/billing_integration.md](docs/billing_integration.md)** - Интеграция с биллингом
-- **[docs/README_STREAMLIT.md](docs/README_STREAMLIT.md)** - Документация Streamlit интерфейса
-- **[docs/TZ.md](docs/TZ.md)** - Техническое задание
-- **[docs/BILLING_EXPORT_GUIDE.md](docs/BILLING_EXPORT_GUIDE.md)** - Экспорт для 1С
-- **[oracle/README.md](oracle/README.md)** - Документация по Oracle скриптам
+Дополнительная документация находится в `archive/docs/`
 
 ## ⚠️ Важные примечания
 
@@ -244,6 +264,12 @@ pip install -r requirements.txt
 
 ### Ежедневная загрузка данных
 
+**Через веб-интерфейс:**
+1. Откройте вкладку "Data Loader" в Streamlit
+2. Загрузите файлы SPNet Traffic или STECCOM Access Fees
+3. Файлы автоматически обработаются и загрузятся в базу
+
+**Через Python скрипты:**
 ```bash
 # 1. Загрузить новые данные SPNet
 cd python
@@ -251,10 +277,6 @@ python load_spnet_traffic.py
 
 # 2. Загрузить новые данные STECCOM
 python load_steccom_expenses.py
-
-# 3. Проверить данные в Streamlit
-cd ..
-streamlit run streamlit_report_oracle.py
 ```
 
 ### Экспорт данных для 1С

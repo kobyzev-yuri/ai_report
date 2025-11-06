@@ -51,7 +51,7 @@ SELECT
             SELECT 1 
             FROM SERVICES s_suspend 
             WHERE s_suspend.VSAT = s.VSAT  -- Связь по VSAT (IMEI)
-              AND s_suspend.ACCOUNT_ID = s.ACCOUNT_ID  -- Связь по ACCOUNT_ID
+              AND s_suspend.ACCOUNT_ID = a.ACCOUNT_ID  -- Связь по ACCOUNT_ID (используем a.ACCOUNT_ID из GROUP BY)
               AND s_suspend.TYPE_ID = 9008  -- iridium_sbd_suspend
               AND s_suspend.STATUS = 10  -- активная услуга приостановления
               AND (s_suspend.STOP_DATE IS NULL OR s_suspend.STOP_DATE > SYSDATE)  -- не завершена
