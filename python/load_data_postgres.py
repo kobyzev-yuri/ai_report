@@ -45,23 +45,72 @@ class PostgresDataLoader:
             logger.error(f"Ошибка подключения к PostgreSQL: {e}")
             return False
     
-    def is_file_loaded(self, file_name, table_name='spnet_traffic'):
-        """Проверка, загружен ли файл уже"""
+    def is_file_loaded(self, file_name, table_name='spnet_traffic', file_path=None):
+        """Проверка, загружен ли файл уже и полностью ли загружен
+        
+        Args:
+            file_name: имя файла
+            table_name: имя таблицы
+            file_path: путь к файлу (опционально, для проверки количества записей)
+        
+        Returns:
+            tuple: (is_loaded: bool, records_in_file: int, records_in_db: int)
+        """
         if not self.connection:
-            return False
+            return (False, 0, 0)
+        
         cursor = self.connection.cursor()
+        records_in_file = 0
+        records_in_db = 0
+        
         try:
+            # Проверяем наличие записи в load_logs
             cursor.execute("""
                 SELECT COUNT(*) FROM load_logs 
-                WHERE LOWER(file_name) = LOWER(%s) 
+                WHERE LOWER(source_file) = LOWER(%s) 
                 AND LOWER(table_name) = LOWER(%s)
                 AND load_status = 'SUCCESS'
             """, (file_name, table_name))
-            count = cursor.fetchone()[0]
-            return count > 0
+            has_log_entry = cursor.fetchone()[0] > 0
+            
+            # Проверяем количество записей в базе
+            cursor.execute(f"""
+                SELECT COUNT(*) FROM {table_name}
+                WHERE LOWER(source_file) = LOWER(%s)
+            """, (file_name,))
+            records_in_db = cursor.fetchone()[0]
+            
+            # Если есть путь к файлу, проверяем количество записей в файле
+            if file_path and Path(file_path).exists():
+                try:
+                    file_ext = Path(file_path).suffix.lower()
+                    if file_ext == '.xlsx':
+                        df = pd.read_excel(file_path, dtype=str, na_filter=False, engine='openpyxl')
+                    else:
+                        df = pd.read_csv(file_path, dtype=str, na_filter=False)
+                    df = df.dropna(how='all')
+                    records_in_file = len(df)
+                except Exception as e:
+                    logger.warning(f"Не удалось подсчитать записи в файле {file_name}: {e}")
+            
+            # Файл считается загруженным, если:
+            # 1. Есть запись в load_logs
+            # 2. Есть данные в таблице
+            # 3. Количество записей в базе >= количеству записей в файле (если удалось подсчитать)
+            if has_log_entry and records_in_db > 0:
+                if records_in_file > 0:
+                    # Если удалось подсчитать записи в файле, сравниваем
+                    is_loaded = records_in_db >= records_in_file
+                else:
+                    # Если не удалось подсчитать, считаем загруженным
+                    is_loaded = True
+            else:
+                is_loaded = False
+            
+            return (is_loaded, records_in_file, records_in_db)
         except Exception as e:
             logger.warning(f"Ошибка проверки load_logs: {e}")
-            return False
+            return (False, 0, 0)
         finally:
             cursor.close()
     
@@ -73,8 +122,8 @@ class PostgresDataLoader:
         try:
             cursor.execute("""
                 INSERT INTO load_logs (
-                    table_name, file_name, records_loaded, load_status, 
-                    error_message, load_start_time, load_end_time, loaded_by
+                    table_name, source_file, records_loaded, load_status, 
+                    error_message, load_start_time, load_end_time, created_by
                 ) VALUES (
                     %s, %s, %s, %s, %s, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, %s
                 )
@@ -91,10 +140,24 @@ class PostgresDataLoader:
         logger.info("="*80)
         logger.info("Начинаем загрузку данных SPNet...")
         logger.info("="*80)
+        logger.info(f"Путь к директории SPNet: {self.spnet_path}")
+        
+        # Проверяем существование директории
+        if not Path(self.spnet_path).exists():
+            logger.error(f"Директория не существует: {self.spnet_path}")
+            return False
         
         csv_files = glob.glob(f"{self.spnet_path}/*.csv") + glob.glob(f"{self.spnet_path}/*.xlsx")
+        logger.info(f"Найдено файлов: {len(csv_files)} (CSV + XLSX)")
+        
         if not csv_files:
             logger.warning(f"Файлы SPNet не найдены в {self.spnet_path}")
+            # Показываем содержимое директории для отладки
+            try:
+                dir_contents = list(Path(self.spnet_path).glob("*"))
+                logger.info(f"Содержимое директории: {[f.name for f in dir_contents]}")
+            except Exception as e:
+                logger.error(f"Ошибка при чтении директории: {e}")
             return False
         
         total_records = 0
@@ -103,26 +166,47 @@ class PostgresDataLoader:
         
         for file_path in csv_files:
             file_name = Path(file_path).name
+            file_ext = Path(file_path).suffix.lower()
+            logger.info(f"\n{'='*60}")
+            logger.info(f"Файл: {file_name} (тип: {file_ext})")
+            logger.info(f"Полный путь: {file_path}")
+            
             try:
-                # Проверяем, загружен ли файл уже
-                if self.is_file_loaded(file_name, 'spnet_traffic'):
-                    logger.info(f"\n⏭ Пропускаем файл (уже загружен): {file_name}")
-                    skipped_files += 1
+                # Проверяем существование файла
+                if not Path(file_path).exists():
+                    logger.error(f"Файл не существует: {file_path}")
+                    self.log_load_result('spnet_traffic', file_name, 0, 'FAILED', f"File not found: {file_path}")
                     continue
                 
-                logger.info(f"\nОбрабатываем файл: {file_name}")
+                # Проверяем, загружен ли файл уже
+                is_loaded, records_in_file, records_in_db = self.is_file_loaded(file_name, 'spnet_traffic', file_path)
+                if is_loaded:
+                    logger.info(f"⏭ Пропускаем файл (уже загружен полностью): {file_name}")
+                    if records_in_file > 0 and records_in_db > 0:
+                        logger.info(f"   Записей в файле: {records_in_file:,}, в базе: {records_in_db:,}")
+                    skipped_files += 1
+                    continue
+                elif records_in_db > 0:
+                    logger.info(f"⚠️ Файл загружен не полностью: {file_name}")
+                    logger.info(f"   Записей в файле: {records_in_file:,}, в базе: {records_in_db:,} (не хватает {records_in_file - records_in_db:,})")
+                    logger.info(f"   Перезагружаем файл...")
+                
+                logger.info(f"🔄 Начинаем обработку файла: {file_name}")
                 load_start = datetime.now()
                 records_loaded = self.load_spnet_file(file_path)
                 load_end = datetime.now()
+                duration = (load_end - load_start).total_seconds()
                 total_records += records_loaded
                 
                 # Логируем успешную загрузку
                 self.log_load_result('spnet_traffic', file_name, records_loaded, 'SUCCESS')
-                logger.info(f"✓ Загружено {records_loaded} записей")
+                logger.info(f"✅ Загружено {records_loaded} записей за {duration:.2f} сек")
                 
             except Exception as e:
                 error_msg = str(e)
-                logger.error(f"✗ Ошибка при обработке файла {file_path}: {error_msg}")
+                logger.error(f"❌ Ошибка при обработке файла {file_path}: {error_msg}")
+                import traceback
+                logger.error(traceback.format_exc())
                 # Логируем ошибку
                 self.log_load_result('spnet_traffic', file_name, 0, 'FAILED', error_msg)
         
@@ -139,41 +223,168 @@ class PostgresDataLoader:
         return True
     
     def load_spnet_file(self, file_path):
-        """Загрузка одного SPNet CSV файла"""
-        # Читаем CSV
-        df = pd.read_csv(file_path, dtype=str, na_filter=False)
+        """Загрузка одного SPNet CSV или XLSX файла"""
+        file_ext = Path(file_path).suffix.lower()
+        
+        # Читаем XLSX файлы
+        if file_ext == '.xlsx':
+            try:
+                # Пробуем прочитать XLSX файл с явным указанием движка
+                # Пробуем разные варианты: с заголовком в первой строке или без
+                df = None
+                for header_row in [0, None]:
+                    try:
+                        if header_row is not None:
+                            df = pd.read_excel(file_path, dtype=str, na_filter=False, engine='openpyxl', header=header_row)
+                        else:
+                            # Пробуем без заголовка, потом назначим заголовки вручную
+                            df = pd.read_excel(file_path, dtype=str, na_filter=False, engine='openpyxl', header=None)
+                            # Если первая строка похожа на заголовки, используем её
+                            if not df.empty and len(df) > 0:
+                                first_row = df.iloc[0].astype(str).tolist()
+                                # Проверяем, похожи ли значения первой строки на названия колонок
+                                if any('contract' in str(v).lower() or 'imei' in str(v).lower() or 'total' in str(v).lower() for v in first_row):
+                                    df.columns = first_row
+                                    df = df.iloc[1:].reset_index(drop=True)
+                        break
+                    except Exception as e:
+                        logger.warning(f"Не удалось прочитать с header={header_row}: {e}")
+                        continue
+                
+                if df is None:
+                    raise Exception("Не удалось прочитать XLSX файл ни с одним вариантом заголовков")
+                
+                logger.info(f"Успешно прочитан XLSX файл {file_path}: {len(df)} строк, {len(df.columns)} колонок")
+                logger.info(f"Колонки в файле: {list(df.columns)}")
+                
+                # Нормализуем названия колонок (убираем лишние пробелы, приводим к стандартному виду)
+                df.columns = [str(col).strip() for col in df.columns]
+                
+                # Проверяем, что файл не пустой
+                if df.empty:
+                    logger.warning(f"XLSX файл {file_path} пуст")
+                    return 0
+                
+                # Удаляем полностью пустые строки
+                df = df.dropna(how='all')
+                if df.empty:
+                    logger.warning(f"XLSX файл {file_path} содержит только пустые строки")
+                    return 0
+                
+                logger.info(f"После удаления пустых строк: {len(df)} строк")
+                
+            except ImportError as e:
+                logger.error(f"Не установлена библиотека openpyxl для чтения XLSX файлов: {e}")
+                logger.error("Установите: pip install openpyxl")
+                raise
+            except Exception as e:
+                logger.error(f"Ошибка чтения XLSX файла {file_path}: {e}")
+                import traceback
+                logger.error(traceback.format_exc())
+                raise
+        else:
+            # Читаем CSV файлы
+            try:
+                df = pd.read_csv(file_path, dtype=str, na_filter=False)
+                logger.info(f"Успешно прочитан CSV файл {file_path}: {len(df)} строк, {len(df.columns)} колонок")
+            except Exception as e:
+                logger.error(f"Ошибка чтения CSV файла {file_path}: {e}")
+                raise
+        
+        # Функция для поиска колонки по различным вариантам названия
+        def find_column(df, possible_names):
+            """Ищет колонку по различным вариантам названия (с учетом пробелов, регистра и т.д.)"""
+            df_cols_lower = {str(col).lower().strip(): col for col in df.columns}
+            for name in possible_names:
+                name_lower = name.lower().strip()
+                # Точное совпадение
+                if name_lower in df_cols_lower:
+                    return df_cols_lower[name_lower]
+                # Частичное совпадение (убираем пробелы, скобки и т.д.)
+                name_normalized = name_lower.replace(' ', '').replace('(', '').replace(')', '').replace('-', '').replace('_', '')
+                for col_name, col_orig in df_cols_lower.items():
+                    col_normalized = col_name.replace(' ', '').replace('(', '').replace(')', '').replace('-', '').replace('_', '')
+                    if name_normalized in col_normalized or col_normalized in name_normalized:
+                        return col_orig
+            return None
+        
+        # Проверяем наличие необходимых колонок и логируем
+        required_columns = ['Contract ID', 'IMEI', 'Total Amount']
+        missing_columns = []
+        for col_name in required_columns:
+            if find_column(df, [col_name]) is None:
+                missing_columns.append(col_name)
+        
+        if missing_columns:
+            logger.warning(f"Отсутствуют некоторые колонки в файле {file_path}: {missing_columns}")
+            logger.info(f"Доступные колонки: {list(df.columns)}")
         
         df['source_file'] = Path(file_path).name
         df['load_date'] = datetime.now()
         df['created_by'] = 'SPNET_LOADER'
         
-        # Подготавливаем записи
+        # Подготавливаем записи с гибким поиском колонок
         records = []
-        for _, row in df.iterrows():
-            record = (
-                self.parse_number(row.get('Total Rows')),
-                row.get('Contract ID') or None,
-                row.get('IMEI') or None,
-                row.get('SIM (ICCID)') or None,
-                row.get('Service') or None,
-                row.get('Usage Type') or None,
-                self.parse_number(row.get('Usage')),
-                row.get('Usage Unit') or None,
-                self.parse_number(row.get('Total Amount')),
-                self.parse_number(row.get('Bill Month')),
-                row.get('Plan Name') or None,
-                row.get('IMSI') or None,
-                row.get('MSISDN') or None,
-                self.parse_number(row.get('Actual Usage')),
-                self.parse_number(row.get('Call/Session Count')),
-                self.parse_number(row.get('SP Account No')),
-                row.get('SP Name') or None,
-                row.get('SP Reference') or None,
-                row.get('source_file'),
-                row.get('load_date'),
-                row.get('created_by')
-            )
-            records.append(record)
+        skipped_rows = 0
+        for idx, row in df.iterrows():
+            try:
+                # Используем гибкий поиск колонок
+                total_rows_col = find_column(df, ['Total Rows', 'TotalRows', 'total_rows'])
+                contract_id_col = find_column(df, ['Contract ID', 'ContractID', 'Contract_Id', 'contract_id'])
+                imei_col = find_column(df, ['IMEI', 'imei'])
+                sim_iccid_col = find_column(df, ['SIM (ICCID)', 'SIM(ICCID)', 'SIM_ICCID', 'sim_iccid', 'ICCID'])
+                service_col = find_column(df, ['Service', 'service'])
+                usage_type_col = find_column(df, ['Usage Type', 'UsageType', 'usage_type'])
+                usage_col = find_column(df, ['Usage', 'usage'])
+                usage_unit_col = find_column(df, ['Usage Unit', 'UsageUnit', 'usage_unit'])
+                total_amount_col = find_column(df, ['Total Amount', 'TotalAmount', 'total_amount', 'Amount', 'amount'])
+                bill_month_col = find_column(df, ['Bill Month', 'BillMonth', 'bill_month'])
+                plan_name_col = find_column(df, ['Plan Name', 'PlanName', 'plan_name'])
+                imsi_col = find_column(df, ['IMSI', 'imsi'])
+                msisdn_col = find_column(df, ['MSISDN', 'msisdn'])
+                actual_usage_col = find_column(df, ['Actual Usage', 'ActualUsage', 'actual_usage'])
+                call_session_count_col = find_column(df, ['Call/Session Count', 'CallSessionCount', 'call_session_count'])
+                sp_account_no_col = find_column(df, ['SP Account No', 'SPAccountNo', 'sp_account_no'])
+                sp_name_col = find_column(df, ['SP Name', 'SPName', 'sp_name'])
+                sp_reference_col = find_column(df, ['SP Reference', 'SPReference', 'sp_reference'])
+                
+                record = (
+                    self.parse_number(row.get(total_rows_col) if total_rows_col else None),
+                    row.get(contract_id_col) if contract_id_col else None,
+                    row.get(imei_col) if imei_col else None,
+                    row.get(sim_iccid_col) if sim_iccid_col else None,
+                    row.get(service_col) if service_col else None,
+                    row.get(usage_type_col) if usage_type_col else None,
+                    self.parse_number(row.get(usage_col) if usage_col else None),
+                    row.get(usage_unit_col) if usage_unit_col else None,
+                    self.parse_number(row.get(total_amount_col) if total_amount_col else None),
+                    self.parse_number(row.get(bill_month_col) if bill_month_col else None),
+                    row.get(plan_name_col) if plan_name_col else None,
+                    row.get(imsi_col) if imsi_col else None,
+                    row.get(msisdn_col) if msisdn_col else None,
+                    self.parse_number(row.get(actual_usage_col) if actual_usage_col else None),
+                    self.parse_number(row.get(call_session_count_col) if call_session_count_col else None),
+                    self.parse_number(row.get(sp_account_no_col) if sp_account_no_col else None),
+                    row.get(sp_name_col) if sp_name_col else None,
+                    row.get(sp_reference_col) if sp_reference_col else None,
+                    row.get('source_file'),
+                    row.get('load_date'),
+                    row.get('created_by')
+                )
+                records.append(record)
+            except Exception as e:
+                skipped_rows += 1
+                logger.warning(f"Ошибка обработки строки {idx} в файле {file_path}: {e}")
+                continue
+        
+        if skipped_rows > 0:
+            logger.warning(f"Пропущено строк при обработке: {skipped_rows}")
+        
+        if not records:
+            logger.error(f"Не удалось подготовить ни одной записи из файла {file_path}")
+            return 0
+        
+        logger.info(f"Подготовлено {len(records)} записей для вставки")
         
         # Вставляем данные
         return self.insert_spnet_records(records)
@@ -226,10 +437,17 @@ class PostgresDataLoader:
             file_name = Path(file_path).name
             try:
                 # Проверяем, загружен ли файл уже
-                if self.is_file_loaded(file_name, 'steccom_expenses'):
-                    logger.info(f"\n⏭ Пропускаем файл (уже загружен): {file_name}")
+                is_loaded, records_in_file, records_in_db = self.is_file_loaded(file_name, 'steccom_expenses', file_path)
+                if is_loaded:
+                    logger.info(f"\n⏭ Пропускаем файл (уже загружен полностью): {file_name}")
+                    if records_in_file > 0 and records_in_db > 0:
+                        logger.info(f"   Записей в файле: {records_in_file:,}, в базе: {records_in_db:,}")
                     skipped_files += 1
                     continue
+                elif records_in_db > 0:
+                    logger.info(f"\n⚠️ Файл загружен не полностью: {file_name}")
+                    logger.info(f"   Записей в файле: {records_in_file:,}, в базе: {records_in_db:,} (не хватает {records_in_file - records_in_db:,})")
+                    logger.info(f"   Перезагружаем файл...")
                 
                 logger.info(f"\nОбрабатываем файл: {file_name}")
                 load_start = datetime.now()

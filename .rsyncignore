@@ -1,0 +1,79 @@
+# Git
+.git/
+.gitignore
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.so
+.Python
+*.egg-info/
+dist/
+build/
+
+# Virtual environments
+venv/
+env/
+ENV/
+.venv
+
+# Data directories
+data/
+**/data/
+oracle/data/
+postgresql/data/
+python/data/
+
+# Data files
+*.csv
+*.xlsx
+*.txt
+!requirements.txt
+!docs/**/*.txt
+!docs/**/*.md
+
+# Logs and process files
+*.log
+**/*.log
+load_*.log
+import_*.log
+streamlit.log
+*.pid
+
+# Config files with passwords
+config.env
+*.env
+.env.*
+!config.env.example
+config.local.*
+secrets.*
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Temporary files
+*.tmp
+*.bak
+*.backup
+*.old
+
+# Database dumps
+*.sql.gz
+*.dump
+
+# Archive directory
+archive/
+
+# PostgreSQL (не нужен на Oracle сервере)
+postgresql/
+
+# OS files
+Thumbs.db
+.DS_Store
+

@@ -56,6 +56,65 @@ def get_connection():
         return None
 
 
+def count_file_records(file_path):
+    """Подсчет количества записей в файле (CSV или XLSX)"""
+    try:
+        file_ext = Path(file_path).suffix.lower()
+        
+        if not Path(file_path).exists():
+            return None
+        
+        if file_ext == '.xlsx':
+            try:
+                df = pd.read_excel(file_path, dtype=str, na_filter=False, engine='openpyxl')
+                df = df.dropna(how='all')
+                df = df[~df.apply(lambda x: x.astype(str).str.strip().eq('').all(), axis=1)]
+                return len(df)
+            except Exception as e:
+                try:
+                    df = pd.read_excel(file_path, dtype=str, na_filter=False)
+                    df = df.dropna(how='all')
+                    return len(df)
+                except:
+                    return None
+        else:
+            # CSV файл
+            try:
+                df = pd.read_csv(file_path, dtype=str, na_filter=False)
+                return len(df)
+            except Exception as e:
+                # Пробуем разные кодировки
+                for encoding in ['utf-8', 'latin-1', 'cp1252', 'iso-8859-1']:
+                    try:
+                        df = pd.read_csv(file_path, dtype=str, na_filter=False, encoding=encoding)
+                        return len(df)
+                    except:
+                        continue
+                return None
+    except Exception as e:
+        return None
+
+
+def get_records_in_db(file_name, table_name='spnet_traffic'):
+    """Получить количество записей в базе для файла"""
+    conn = get_connection()
+    if not conn:
+        return None
+    try:
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT COUNT(*) FROM {} 
+            WHERE LOWER(source_file) = LOWER(%s)
+        """.format(table_name), (file_name,))
+        count = cursor.fetchone()[0]
+        cursor.close()
+        return count
+    except Exception as e:
+        return None
+    finally:
+        conn.close()
+
+
 def get_main_report(period_filter=None, plan_filter=None):
     """Получение основного отчета"""
     conn = get_connection()
@@ -246,13 +305,9 @@ def main():
     st.markdown("---")
     
     # Создаем вкладки для отчета и загрузки данных
-    tab_report, tab_loader = st.tabs(["📊 Report", "📥 Data Loader"])
-    
-    # ========== REPORT TAB ==========
-    with tab_report:
-        # Фильтры в боковой панели
-        with st.sidebar:
-            st.header("⚙️ Filters")
+    # Фильтры в боковой панели (вне вкладок, чтобы были доступны всегда)
+    with st.sidebar:
+        st.header("⚙️ Filters")
         
         # Период
         periods = get_periods()
@@ -276,14 +331,14 @@ def main():
         # Тарифный план
         plans = get_plans()
         plan_options = ["All Plans"] + plans
-        selected_plan = st.selectbox("Plan", plan_options)
+        selected_plan = st.selectbox("Plan", plan_options, key='plan_selectbox')
         
         st.markdown("---")
         st.header("🔐 Database Connection")
         st.caption(f"📡 {DB_CONFIG['user']}@{DB_CONFIG['host']}:{DB_CONFIG['port']}/{DB_CONFIG['dbname']}")
         
         # Кнопка тестирования подключения
-        if st.button("🔌 Test Connection"):
+        if st.button("🔌 Test Connection", key='test_connection_btn'):
             test_conn = get_connection()
             if test_conn:
                 st.success("✅ Подключение успешно!")
@@ -292,6 +347,11 @@ def main():
                 st.error("❌ Ошибка подключения. Проверьте config.env")
         
         st.info("💡 Конфигурация загружается из config.env при запуске через run_streamlit.sh")
+    
+    tab_report, tab_loader = st.tabs(["📊 Report", "📥 Data Loader"])
+    
+    # ========== REPORT TAB ==========
+    with tab_report:
         
         period_filter = None if selected_period == "All Periods" else selected_period
         plan_filter = None if selected_plan == "All Plans" else selected_plan
@@ -314,8 +374,15 @@ def main():
             st.info("ℹ️ Выберите период для загрузки отчета")
         
         if df is not None and not df.empty:
-            # Информация о выборке
-            st.info(f"📊 Records: **{len(df)}** | IMEI: **{df['IMEI'].nunique()}**")
+            st.success(f"✅ Загружено записей: {len(df):,}")
+            
+            # Метрики
+            col1, col2 = st.columns(2)
+            with col1:
+                st.metric("Всего записей", f"{len(df):,}")
+            with col2:
+                total_overage = df["Calculated Overage ($)"].sum()
+                st.metric("Total Overage", f"${total_overage:,.2f}")
             
             # Убеждаемся, что все колонки видны, даже если они NULL
             display_df = df.copy()
@@ -469,14 +536,14 @@ def main():
     # ========== DATA LOADER TAB ==========
     with tab_loader:
         st.header("📥 Data Loader")
-        st.markdown("Загрузка и импорт данных SPNet и STECCOM в базу данных")
+        st.markdown("Загрузка и импорт данных Иридиум (трафик и финансовые файлы)")
         st.markdown("---")
         
         # Директории для данных
         from pathlib import Path
         DATA_DIR = Path(__file__).parent / 'data'
         SPNET_DIR = DATA_DIR / 'SPNet reports'
-        STECCOM_DIR = DATA_DIR / 'STECCOMLLCRussiaSBD.AccessFees_reports'
+        ACCESS_FEES_DIR = DATA_DIR / 'STECCOMLLCRussiaSBD.AccessFees_reports'
         
         # Функция для определения типа файла по имени
         def detect_file_type(filename):
@@ -507,13 +574,13 @@ def main():
                 target_dir = SPNET_DIR
                 file_type_msg = "✅ **Определен как SPNet файл** - будет сохранен в SPNet reports"
             elif file_type == 'STECCOM':
-                target_dir = STECCOM_DIR
-                file_type_msg = "✅ **Определен как STECCOM файл** - будет сохранен в STECCOM directory"
+                target_dir = ACCESS_FEES_DIR
+                file_type_msg = "✅ **Определен как Access Fees файл** - будет сохранен в Access Fees directory"
             else:
                 # Если не удалось определить, спрашиваем пользователя
                 file_type = st.radio(
                     "Не удалось определить тип файла. Выберите тип:",
-                    ["SPNet Traffic", "STECCOM Access Fees"],
+                    ["SPNet Traffic", "Access Fees (Financial)"],
                     horizontal=True,
                     key='file_type_selector'
                 )
@@ -521,8 +588,8 @@ def main():
                     target_dir = SPNET_DIR
                     file_type_msg = "⚠️ **Выбран SPNet** - будет сохранен в SPNet reports"
                 else:
-                    target_dir = STECCOM_DIR
-                    file_type_msg = "⚠️ **Выбран STECCOM** - будет сохранен в STECCOM directory"
+                    target_dir = ACCESS_FEES_DIR
+                    file_type_msg = "⚠️ **Выбран Access Fees** - будет сохранен в Access Fees directory"
             
             if file_type:
                 st.info(file_type_msg)
@@ -566,7 +633,7 @@ def main():
                             try:
                                 cursor = conn_status.cursor()
                                 cursor.execute("""
-                                    SELECT LOWER(file_name) FROM load_logs 
+                                    SELECT LOWER(source_file) FROM load_logs 
                                     WHERE LOWER(table_name) = LOWER('spnet_traffic') 
                                     AND load_status = 'SUCCESS'
                                 """)
@@ -586,9 +653,22 @@ def main():
                     files_info = []
                     for f in sorted(spnet_files, key=lambda x: x.stat().st_mtime, reverse=True)[:10]:
                         is_loaded = f.name.lower() in loaded_files
+                        
+                        # Подсчитываем записи в файле
+                        records_in_file = count_file_records(f)
+                        records_in_file_str = f"{records_in_file:,}" if records_in_file is not None else "N/A"
+                        
+                        # Получаем количество записей в базе
+                        records_in_db = None
+                        if is_loaded:
+                            records_in_db = get_records_in_db(f.name, 'spnet_traffic')
+                        records_in_db_str = f"{records_in_db:,}" if records_in_db is not None and records_in_db > 0 else "-"
+                        
                         files_info.append({
                             'File Name': f.name,
                             'Size (MB)': round(f.stat().st_size / (1024 * 1024), 2),
+                            'Records in File': records_in_file_str,
+                            'Records in DB': records_in_db_str,
                             'Modified': datetime.fromtimestamp(f.stat().st_mtime).strftime('%Y-%m-%d %H:%M:%S'),
                             'Status': '✅ Loaded' if is_loaded else '⏳ Not loaded'
                         })
@@ -606,12 +686,12 @@ def main():
                 st.info(f"📁 Directory does not exist: {SPNET_DIR}")
         
         with col2:
-            st.subheader("💰 STECCOM Access Fees Reports")
-            st.markdown(f"**Directory:** `{STECCOM_DIR}`")
+            st.subheader("💰 Access Fees (Financial)")
+            st.markdown(f"**Directory:** `{ACCESS_FEES_DIR}`")
             
             # Список существующих файлов с статусом загрузки
-            if STECCOM_DIR.exists():
-                steccom_files = list(STECCOM_DIR.glob("*.csv"))
+            if ACCESS_FEES_DIR.exists():
+                steccom_files = list(ACCESS_FEES_DIR.glob("*.csv"))
                 if steccom_files:
                     # Кэшируем список загруженных файлов, чтобы не делать запрос при каждом rerun
                     cache_key = 'steccom_loaded_files'
@@ -623,7 +703,7 @@ def main():
                             try:
                                 cursor = conn_status.cursor()
                                 cursor.execute("""
-                                    SELECT LOWER(file_name) FROM load_logs 
+                                    SELECT LOWER(source_file) FROM load_logs 
                                     WHERE LOWER(table_name) = LOWER('steccom_expenses') 
                                     AND load_status = 'SUCCESS'
                                 """)
@@ -643,9 +723,22 @@ def main():
                     files_info = []
                     for f in sorted(steccom_files, key=lambda x: x.stat().st_mtime, reverse=True)[:10]:
                         is_loaded = f.name.lower() in loaded_files
+                        
+                        # Подсчитываем записи в файле
+                        records_in_file = count_file_records(f)
+                        records_in_file_str = f"{records_in_file:,}" if records_in_file is not None else "N/A"
+                        
+                        # Получаем количество записей в базе
+                        records_in_db = None
+                        if is_loaded:
+                            records_in_db = get_records_in_db(f.name, 'steccom_expenses')
+                        records_in_db_str = f"{records_in_db:,}" if records_in_db is not None and records_in_db > 0 else "-"
+                        
                         files_info.append({
                             'File Name': f.name,
                             'Size (MB)': round(f.stat().st_size / (1024 * 1024), 2),
+                            'Records in File': records_in_file_str,
+                            'Records in DB': records_in_db_str,
                             'Modified': datetime.fromtimestamp(f.stat().st_mtime).strftime('%Y-%m-%d %H:%M:%S'),
                             'Status': '✅ Loaded' if is_loaded else '⏳ Not loaded'
                         })
@@ -660,105 +753,87 @@ def main():
                 else:
                     st.info("📁 Directory is empty")
             else:
-                st.info(f"📁 Directory does not exist: {STECCOM_DIR}")
+                st.info(f"📁 Directory does not exist: {ACCESS_FEES_DIR}")
         
         st.markdown("---")
         st.subheader("🔄 Import to Database")
         
-        # Импорт данных в базу
-        col_imp1, col_imp2 = st.columns(2)
-        
-        with col_imp1:
-            if st.button("📥 Import SPNet Files", use_container_width=True, type="primary"):
-                with st.spinner("Импорт данных SPNet в PostgreSQL..."):
-                    try:
-                        from python.load_data_postgres import PostgresDataLoader
+        # Импорт данных в базу - одна кнопка для обоих типов файлов
+        if st.button("📥 Import All Files", use_container_width=True, type="primary"):
+            import io
+            import sys
+            all_logs = []
+            
+            # Импорт SPNet
+            with st.spinner("Импорт данных SPNet в PostgreSQL..."):
+                try:
+                    from python.load_data_postgres import PostgresDataLoader
+                    
+                    loader = PostgresDataLoader(DB_CONFIG)
+                    if loader.connect():
+                        loader.spnet_path = str(SPNET_DIR)
                         
-                        loader = PostgresDataLoader(DB_CONFIG)
-                        if loader.connect():
-                            import io
-                            from contextlib import redirect_stdout, redirect_stderr
-                            import sys
-                            
-                            # Обновляем путь к директории
-                            loader.spnet_path = str(SPNET_DIR)
-                            
-                            # Перехватываем вывод
-                            log_capture = io.StringIO()
-                            old_stdout = sys.stdout
-                            old_stderr = sys.stderr
-                            
-                            try:
-                                sys.stdout = log_capture
-                                sys.stderr = log_capture
-                                
-                                result = loader.load_spnet_files()
-                                
-                                log_output = log_capture.getvalue()
-                                
-                                if result:
-                                    st.success("✅ Импорт SPNet завершен успешно!")
-                                    st.text_area("Log output", log_output, height=200, key='spnet_log')
-                                else:
-                                    st.error(f"❌ Ошибка импорта SPNet")
-                                    st.text_area("Log output", log_output, height=200, key='spnet_log_err')
-                            finally:
-                                sys.stdout = old_stdout
-                                sys.stderr = old_stderr
-                                if loader.connection:
-                                    loader.close()
-                        else:
-                            st.error("❌ Не удалось подключиться к базе данных")
-                    except Exception as e:
-                        import traceback
-                        st.error(f"❌ Ошибка: {e}")
-                        st.text_area("Error details", traceback.format_exc(), height=200)
-        
-        with col_imp2:
-            if st.button("📥 Import STECCOM Files", use_container_width=True, type="primary"):
-                with st.spinner("Импорт данных STECCOM в PostgreSQL..."):
-                    try:
-                        from python.load_data_postgres import PostgresDataLoader
+                        log_capture = io.StringIO()
+                        old_stdout = sys.stdout
+                        old_stderr = sys.stderr
                         
-                        loader = PostgresDataLoader(DB_CONFIG)
-                        if loader.connect():
-                            import io
-                            from contextlib import redirect_stdout, redirect_stderr
-                            import sys
+                        try:
+                            sys.stdout = log_capture
+                            sys.stderr = log_capture
                             
-                            # Обновляем путь к директории
-                            loader.steccom_path = str(STECCOM_DIR)
+                            result = loader.load_spnet_files()
+                            log_output = log_capture.getvalue()
+                            all_logs.append(("SPNet", result, log_output))
+                        finally:
+                            sys.stdout = old_stdout
+                            sys.stderr = old_stderr
+                            if loader.connection:
+                                loader.close()
+                    else:
+                        all_logs.append(("SPNet", False, "❌ Не удалось подключиться к базе данных"))
+                except Exception as e:
+                    import traceback
+                    all_logs.append(("SPNet", False, f"❌ Ошибка: {e}\n{traceback.format_exc()}"))
+            
+            # Импорт Access Fees
+            with st.spinner("Импорт данных Access Fees в PostgreSQL..."):
+                try:
+                    from python.load_data_postgres import PostgresDataLoader
+                    
+                    loader = PostgresDataLoader(DB_CONFIG)
+                    if loader.connect():
+                        loader.steccom_path = str(ACCESS_FEES_DIR)
+                        
+                        log_capture = io.StringIO()
+                        old_stdout = sys.stdout
+                        old_stderr = sys.stderr
+                        
+                        try:
+                            sys.stdout = log_capture
+                            sys.stderr = log_capture
                             
-                            # Перехватываем вывод
-                            log_capture = io.StringIO()
-                            old_stdout = sys.stdout
-                            old_stderr = sys.stderr
-                            
-                            try:
-                                sys.stdout = log_capture
-                                sys.stderr = log_capture
-                                
-                                result = loader.load_steccom_files()
-                                
-                                log_output = log_capture.getvalue()
-                                
-                                if result:
-                                    st.success("✅ Импорт STECCOM завершен успешно!")
-                                    st.text_area("Log output", log_output, height=200, key='steccom_log')
-                                else:
-                                    st.error(f"❌ Ошибка импорта STECCOM")
-                                    st.text_area("Log output", log_output, height=200, key='steccom_log_err')
-                            finally:
-                                sys.stdout = old_stdout
-                                sys.stderr = old_stderr
-                                if loader.connection:
-                                    loader.close()
-                        else:
-                            st.error("❌ Не удалось подключиться к базе данных")
-                    except Exception as e:
-                        import traceback
-                        st.error(f"❌ Ошибка: {e}")
-                        st.text_area("Error details", traceback.format_exc(), height=200)
+                            result = loader.load_steccom_files()
+                            log_output = log_capture.getvalue()
+                            all_logs.append(("Access Fees", result, log_output))
+                        finally:
+                            sys.stdout = old_stdout
+                            sys.stderr = old_stderr
+                            if loader.connection:
+                                loader.close()
+                    else:
+                        all_logs.append(("Access Fees", False, "❌ Не удалось подключиться к базе данных"))
+                except Exception as e:
+                    import traceback
+                    all_logs.append(("Access Fees", False, f"❌ Ошибка: {e}\n{traceback.format_exc()}"))
+            
+            # Показываем результаты
+            for file_type, success, log_output in all_logs:
+                if success:
+                    st.success(f"✅ Импорт {file_type} завершен успешно!")
+                else:
+                    st.error(f"❌ Ошибка импорта {file_type}")
+                if log_output:
+                    st.text_area(f"{file_type} Log", log_output, height=150, key=f'log_{file_type.lower().replace(" ", "_")}')
         
         st.markdown("---")
         st.caption("💡 **Tip:** After importing, refresh the Report tab to see updated data")

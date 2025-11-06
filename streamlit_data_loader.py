@@ -108,18 +108,110 @@ def get_loaded_files_info(table_name, source_file_column='SOURCE_FILE', db_type=
         conn.close()
 
 
+def get_records_in_db(file_name, table_name='spnet_traffic', db_type='postgresql', conn=None):
+    """Получить количество записей в базе для конкретного файла
+    
+    Args:
+        file_name: имя файла
+        table_name: имя таблицы
+        db_type: тип БД ('postgresql' или 'oracle')
+        conn: существующее подключение (опционально, если не передано - создается новое)
+    """
+    should_close = False
+    if conn is None:
+        conn = get_db_connection(db_type)
+        if not conn:
+            return None
+        should_close = True
+    
+    try:
+        if db_type == 'oracle':
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT COUNT(*) FROM {} 
+                WHERE UPPER(SOURCE_FILE) = UPPER(:1)
+            """.format(table_name), (file_name,))
+            count = cursor.fetchone()[0]
+            cursor.close()
+        else:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT COUNT(*) FROM {} 
+                WHERE LOWER(source_file) = LOWER(%s)
+            """.format(table_name), (file_name,))
+            count = cursor.fetchone()[0]
+            cursor.close()
+        return count
+    except Exception as e:
+        return None
+    finally:
+        if should_close and conn:
+            conn.close()
+
+
+def count_file_records(file_path):
+    """Подсчет количества записей в файле (CSV или XLSX)"""
+    try:
+        import pandas as pd
+        file_ext = Path(file_path).suffix.lower()
+        
+        if not Path(file_path).exists():
+            return None
+        
+        if file_ext == '.xlsx':
+            try:
+                df = pd.read_excel(file_path, dtype=str, na_filter=False, engine='openpyxl')
+                # Удаляем полностью пустые строки
+                df = df.dropna(how='all')
+                # Удаляем строки, где все значения пустые или пробелы
+                df = df[~df.apply(lambda x: x.astype(str).str.strip().eq('').all(), axis=1)]
+                return len(df)
+            except Exception as e:
+                # Пробуем без указания движка
+                try:
+                    df = pd.read_excel(file_path, dtype=str, na_filter=False)
+                    df = df.dropna(how='all')
+                    return len(df)
+                except:
+                    return None
+        else:
+            # CSV файл
+            try:
+                df = pd.read_csv(file_path, dtype=str, na_filter=False)
+                return len(df)
+            except Exception as e:
+                # Пробуем разные кодировки
+                for encoding in ['utf-8', 'latin-1', 'cp1252', 'iso-8859-1']:
+                    try:
+                        df = pd.read_csv(file_path, dtype=str, na_filter=False, encoding=encoding)
+                        return len(df)
+                    except:
+                        continue
+                return None
+    except Exception as e:
+        return None  # Не удалось прочитать
+
+
 def list_data_files(directory):
-    """Список файлов в директории"""
+    """Список файлов в директории с подсчетом записей"""
     if not directory.exists():
         return []
     files = []
     for f in directory.iterdir():
-        if f.is_file():
+        if f.is_file() and f.suffix.lower() in ['.csv', '.xlsx']:
+            # Подсчитываем записи в файле
+            try:
+                record_count = count_file_records(f)
+            except Exception as e:
+                # Если ошибка при подсчете, все равно добавляем файл
+                record_count = None
+            
             files.append({
                 'name': f.name,
                 'size': f.stat().st_size,
                 'modified': datetime.fromtimestamp(f.stat().st_mtime),
-                'path': str(f)
+                'path': str(f),
+                'records': record_count  # Может быть None, int или None при ошибке
             })
     return sorted(files, key=lambda x: x['modified'], reverse=True)
 
@@ -228,15 +320,22 @@ def main():
     st.markdown("Загрузка и импорт данных SPNet и STECCOM")
     st.markdown("---")
     
+    # Инициализация session_state для db_type
+    if 'db_type' not in st.session_state:
+        st.session_state.db_type = DEFAULT_DB_TYPE
+    
     # Выбор типа БД и конфигурация в сайдбаре
     with st.sidebar:
         st.markdown("### 🗄️ Database Type")
         db_type = st.radio(
             "Select Database",
             ["postgresql", "oracle"],
-            index=0 if DEFAULT_DB_TYPE == 'postgresql' else 1,
-            help="PostgreSQL для тестирования, Oracle для production"
+            index=0 if st.session_state.db_type == 'postgresql' else 1,
+            help="PostgreSQL для тестирования, Oracle для production",
+            key='db_type_radio'
         )
+        # Сохраняем в session_state
+        st.session_state.db_type = db_type
         
         st.markdown("---")
         
@@ -248,7 +347,7 @@ def main():
             oracle_user = st.text_input("Username", value=ORACLE_CONFIG['username'], key='oracle_user')
             oracle_pass = st.text_input("Password", type="password", value=ORACLE_CONFIG['password'], key='oracle_pass')
             
-            if st.button("🔄 Update Oracle Config"):
+            if st.button("🔄 Update Oracle Config", key='update_oracle_btn'):
                 ORACLE_CONFIG.update({
                     'host': oracle_host,
                     'port': int(oracle_port),
@@ -265,7 +364,7 @@ def main():
             pg_user = st.text_input("Username", value=POSTGRES_CONFIG['user'], key='pg_user')
             pg_pass = st.text_input("Password", type="password", value=POSTGRES_CONFIG['password'], key='pg_pass')
             
-            if st.button("🔄 Update PostgreSQL Config"):
+            if st.button("🔄 Update PostgreSQL Config", key='update_postgres_btn'):
                 POSTGRES_CONFIG.update({
                     'host': pg_host,
                     'port': int(pg_port),
@@ -276,17 +375,84 @@ def main():
                 st.success("PostgreSQL configuration updated!")
         
         st.markdown("---")
-        st.caption(f"📡 Current DB: **{db_type.upper()}**")
+        st.caption(f"📡 Current DB: **{st.session_state.db_type.upper()}**")
+        
+        # Кнопка импорта в sidebar (только кнопка, результаты в основном контенте)
+        st.markdown("---")
+        st.markdown("### 🔄 Import All Files")
+        import_clicked = st.button("📥 Import All Files (SPNet + Access Fees)", use_container_width=True, type="primary", key='import_all_files_btn')
+    
+    # Получаем db_type из session_state
+    db_type = st.session_state.db_type
+    
+    # Основной контент - результаты импорта
+    if import_clicked:
+        st.markdown("---")
+        st.subheader("🔄 Import Results")
+        all_logs = []
+        
+        # Импорт SPNet
+        with st.spinner(f"Импорт данных SPNet в {db_type.upper()}..."):
+            success, message = run_import_script('spnet', db_type)
+            all_logs.append(("SPNet", success, message))
+        
+        # Импорт Access Fees
+        with st.spinner(f"Импорт данных Access Fees в {db_type.upper()}..."):
+            success, message = run_import_script('steccom', db_type)
+            all_logs.append(("Access Fees", success, message))
+        
+        # Показываем результаты с детальной статистикой
+        for file_type, success, message in all_logs:
+            st.markdown(f"### {file_type}")
+            if success:
+                st.success(f"✅ Импорт {file_type} завершен успешно!")
+                
+                # Парсим логи для извлечения статистики
+                if message:
+                    import re
+                    # Ищем количество загруженных записей
+                    records_match = re.search(r'Всего загружено:\s*([\d,]+)\s*записей', message, re.IGNORECASE)
+                    if records_match:
+                        records_count = records_match.group(1).replace(',', '')
+                        st.metric("📊 Загружено записей", f"{int(records_count):,}")
+                    
+                    # Ищем количество пропущенных файлов
+                    skipped_match = re.search(r'Пропущено файлов.*?(\d+)', message, re.IGNORECASE)
+                    if skipped_match:
+                        skipped_count = skipped_match.group(1)
+                        st.metric("⏭ Пропущено файлов", skipped_count)
+                    
+                    # Ищем время выполнения
+                    duration_match = re.search(r'Время выполнения:\s*([\d.]+)\s*сек', message, re.IGNORECASE)
+                    if duration_match:
+                        duration = duration_match.group(1)
+                        st.metric("⏱ Время выполнения", f"{float(duration):.2f} сек")
+                    
+                    # Показываем детальные логи
+                    with st.expander(f"📋 Детальные логи {file_type}"):
+                        st.text_area("", message, height=200, key=f'log_{file_type.lower().replace(" ", "_")}')
+            else:
+                st.error(f"❌ Ошибка импорта {file_type}")
+                if message:
+                    st.text_area(f"{file_type} Log", message, height=200, key=f'log_{file_type.lower().replace(" ", "_")}')
+        
+        # Обновляем информацию о загруженных файлах
+        st.markdown("---")
+        st.info("💡 **Обновите страницу или перейдите на вкладку '📊 SPNet Traffic' / '💰 Access Fees (Financial)' чтобы увидеть обновленную статистику загруженных файлов.**")
+        st.markdown("---")
     
     # Табы для разных типов данных
     tab1, tab2, tab3 = st.tabs([
         "📊 SPNet Traffic", 
-        "💰 STECCOM Access Fees",
+        "💰 Access Fees (Financial)",
         "📋 Load History"
     ])
     
     # ========== SPNet Traffic Tab ==========
     with tab1:
+        # Используем db_type из session_state
+        tab_db_type = st.session_state.db_type
+        
         st.subheader("SPNet Traffic Reports")
         st.markdown("**Директория:** `data/SPNet reports/`")
         
@@ -300,20 +466,65 @@ def main():
                 st.markdown(f"**Найдено файлов: {len(spnet_files)}**")
                 
                 files_df = pd.DataFrame(spnet_files)
+                
+                # Убеждаемся, что колонка records существует
+                if 'records' not in files_df.columns:
+                    files_df['records'] = None
+                
+                # Заполняем None значениями, если их нет
+                files_df['records'] = files_df['records'].fillna(None)
+                
                 files_df['size_mb'] = files_df['size'] / (1024 * 1024)
                 files_df['modified'] = files_df['modified'].dt.strftime('%Y-%m-%d %H:%M:%S')
                 
-                display_df = files_df[['name', 'size_mb', 'modified']].copy()
-                display_df.columns = ['File Name', 'Size (MB)', 'Modified']
+                # Форматируем количество записей
+                def format_records(x):
+                    if x is None:
+                        return "⏳ Calculating..."
+                    try:
+                        if pd.isna(x):
+                            return "⏳ Calculating..."
+                        return f"{int(x):,}"
+                    except (ValueError, TypeError):
+                        return "N/A"
+                
+                files_df['records'] = files_df['records'].apply(format_records)
+                
+                # Получаем количество записей в базе для каждого файла (одно подключение для всех)
+                records_in_db_list = []
+                conn_check = get_db_connection(tab_db_type)
+                if conn_check:
+                    try:
+                        for _, row in files_df.iterrows():
+                            file_name = row['name']
+                            try:
+                                records_in_db = get_records_in_db(file_name, 'spnet_traffic', tab_db_type, conn=conn_check)
+                                records_in_db_list.append(f"{records_in_db:,}" if records_in_db is not None and records_in_db > 0 else "-")
+                            except:
+                                records_in_db_list.append("-")
+                    finally:
+                        conn_check.close()
+                else:
+                    # Если не удалось подключиться, показываем "-" для всех
+                    records_in_db_list = ["-"] * len(files_df)
+                
+                # Создаем display_df с обязательными колонками
+                display_df = pd.DataFrame()
+                display_df['File Name'] = files_df['name']
+                display_df['Size (MB)'] = files_df['size_mb'].round(2)
+                display_df['Records in File'] = files_df['records']
+                display_df['Records in DB'] = records_in_db_list
+                display_df['Modified'] = files_df['modified']
                 
                 st.dataframe(
                     display_df,
                     use_container_width=True,
                     hide_index=True,
-                    height=300
+                    height=300,
+                    key='spnet_files_df'
                 )
             else:
-                st.info("📁 Директория пуста или не найдена")
+                st.info("📁 Директория пуста или не найдена", icon="📁")
         
         with col2:
             st.markdown("### Действия")
@@ -342,66 +553,228 @@ def main():
             
             st.markdown("---")
             
-            # Импорт данных
-            if st.button("🔄 Import All SPNet Files", use_container_width=True, type="primary"):
-                with st.spinner(f"Импорт данных SPNet в {db_type.upper()}..."):
-                    success, message = run_import_script('spnet', db_type)
-                    if success:
-                        st.success("✅ Импорт завершен успешно")
-                        st.text_area("Log output", message, height=200)
-                    else:
-                        st.error(f"❌ Ошибка импорта: {message}")
+            # Проверка уже загруженных файлов перед импортом
+            already_loaded = []
+            new_files = []
+            orphaned_logs = []  # Файлы с записью в load_logs, но без данных в таблице
+            files_to_reload = []  # Файлы, где записей в базе меньше, чем в файле
+            if spnet_files:
+                conn = get_db_connection(tab_db_type)
+                if conn:
+                    try:
+                        for file_info in spnet_files:
+                            file_name = file_info['name']
+                            records_in_file = file_info.get('records')  # Количество записей в файле
+                            has_log_entry = False
+                            has_data = False
+                            records_in_db = 0
+                            
+                            if tab_db_type == 'postgresql':
+                                cursor = conn.cursor()
+                                # Проверяем load_logs
+                                cursor.execute("""
+                                    SELECT COUNT(*) FROM load_logs 
+                                    WHERE LOWER(source_file) = LOWER(%s) 
+                                    AND LOWER(table_name) = 'spnet_traffic'
+                                    AND load_status = 'SUCCESS'
+                                """, (file_name,))
+                                has_log_entry = cursor.fetchone()[0] > 0
+                                
+                                # Проверяем наличие данных в таблице и количество записей
+                                cursor.execute("""
+                                    SELECT COUNT(*) FROM spnet_traffic 
+                                    WHERE LOWER(source_file) = LOWER(%s)
+                                """, (file_name,))
+                                records_in_db = cursor.fetchone()[0]
+                                has_data = records_in_db > 0
+                                cursor.close()
+                            else:
+                                # Oracle - определяем структуру таблицы
+                                cursor = conn.cursor()
+                                # Проверяем, какой столбец используется
+                                try:
+                                    test_query = "SELECT FILE_NAME FROM LOAD_LOGS WHERE ROWNUM = 1"
+                                    cursor.execute(test_query)
+                                    file_col = "FILE_NAME"
+                                except:
+                                    try:
+                                        test_query = "SELECT SOURCE_FILE FROM LOAD_LOGS WHERE ROWNUM = 1"
+                                        cursor.execute(test_query)
+                                        file_col = "SOURCE_FILE"
+                                    except:
+                                        file_col = "FILE_NAME"  # по умолчанию
+                                
+                                # Проверяем load_logs
+                                cursor.execute(f"""
+                                    SELECT COUNT(*) FROM LOAD_LOGS 
+                                    WHERE UPPER({file_col}) = UPPER(:1) 
+                                    AND UPPER(TABLE_NAME) = 'SPNET_TRAFFIC'
+                                    AND LOAD_STATUS = 'SUCCESS'
+                                """, (file_name,))
+                                has_log_entry = cursor.fetchone()[0] > 0
+                                
+                                # Проверяем наличие данных в таблице и количество записей
+                                cursor.execute("""
+                                    SELECT COUNT(*) FROM SPNET_TRAFFIC 
+                                    WHERE UPPER(SOURCE_FILE) = UPPER(:1)
+                                """, (file_name,))
+                                records_in_db = cursor.fetchone()[0]
+                                has_data = records_in_db > 0
+                                cursor.close()
+                            
+                            # Определяем статус файла с учетом количества записей
+                            if has_log_entry and has_data:
+                                # Проверяем, все ли записи загружены
+                                if records_in_file is not None and records_in_file > 0:
+                                    if records_in_db < records_in_file:
+                                        # В базе меньше записей, чем в файле - нужно перезагрузить
+                                        files_to_reload.append((file_name, records_in_file, records_in_db))
+                                        new_files.append(file_name)
+                                    else:
+                                        # Все записи загружены
+                                        already_loaded.append(file_name)
+                                else:
+                                    # Не удалось подсчитать записи в файле, но данные есть - считаем загруженным
+                                    already_loaded.append(file_name)
+                            elif has_log_entry and not has_data:
+                                # Ошибочная запись в load_logs без данных в таблице
+                                orphaned_logs.append(file_name)
+                                new_files.append(file_name)  # Разрешаем перезагрузку
+                            else:
+                                new_files.append(file_name)
+                    except Exception as e:
+                        st.warning(f"Не удалось проверить загруженные файлы: {e}")
+                    finally:
+                        conn.close()
+            
+            # Показываем информацию о статусе файлов
+            if orphaned_logs:
+                st.error(f"⚠️ **Обнаружены несоответствия:** {len(orphaned_logs)} файл(ов) имеют запись в логах, но данных в таблице нет:")
+                for orphan in orphaned_logs[:5]:
+                    st.text(f"  - {orphan}")
+                if len(orphaned_logs) > 5:
+                    st.caption(f"  ... и еще {len(orphaned_logs) - 5} файл(ов)")
+                st.info("💡 Эти файлы будут загружены заново, чтобы исправить несоответствие.")
+            
+            if files_to_reload:
+                st.warning(f"⚠️ **Неполная загрузка:** {len(files_to_reload)} файл(ов) имеют меньше записей в базе, чем в файле:")
+                for file_name, in_file, in_db in files_to_reload[:5]:
+                    st.text(f"  - {file_name}: {in_file:,} в файле → {in_db:,} в базе (не хватает {in_file - in_db:,})")
+                if len(files_to_reload) > 5:
+                    st.caption(f"  ... и еще {len(files_to_reload) - 5} файл(ов)")
+                st.info("💡 Эти файлы будут загружены заново, чтобы дополнить недостающие записи.")
+            
+            if already_loaded:
+                if len(already_loaded) == len(spnet_files) and not orphaned_logs and not files_to_reload:
+                    st.success(f"✅ **Все файлы уже загружены полностью!** Загружать нечего.")
+                    st.info(f"Всего файлов: {len(already_loaded)}")
+                else:
+                    st.info(f"✅ {len(already_loaded)} из {len(spnet_files)} файл(ов) полностью загружены и будут пропущены:\n- " + "\n- ".join(already_loaded[:5]))
+                    if len(already_loaded) > 5:
+                        st.caption(f"... и еще {len(already_loaded) - 5} файл(ов)")
+                    if new_files:
+                        st.info(f"📥 Будет загружено новых/неполных файлов: {len(new_files)}")
+            
         
         # Информация о загруженных файлах
         st.markdown("---")
         st.subheader("📊 Загруженные в базу файлы")
-        table_name = 'SPNET_TRAFFIC' if db_type == 'oracle' else 'spnet_traffic'
-        source_col = 'SOURCE_FILE' if db_type == 'oracle' else 'source_file'
-        loaded_spnet = get_loaded_files_info(table_name, source_col, db_type)
+        table_name = 'SPNET_TRAFFIC' if tab_db_type == 'oracle' else 'spnet_traffic'
+        source_col = 'SOURCE_FILE' if tab_db_type == 'oracle' else 'source_file'
+        loaded_spnet = get_loaded_files_info(table_name, source_col, tab_db_type)
         if not loaded_spnet.empty:
             loaded_spnet.columns = ['File Name', 'Last Load Date', 'Records Count']
-            st.dataframe(loaded_spnet, use_container_width=True, hide_index=True)
+            st.dataframe(loaded_spnet, use_container_width=True, hide_index=True, key='loaded_spnet_df')
         else:
-            st.info("Нет информации о загруженных файлах")
+            st.info("Нет информации о загруженных файлах", icon="ℹ️")
     
-    # ========== STECCOM Access Fees Tab ==========
+    # ========== Access Fees (Financial) Tab ==========
     with tab2:
-        st.subheader("STECCOM Access Fees Reports")
+        # Используем db_type из session_state
+        tab_db_type = st.session_state.db_type
+        
+        st.subheader("Access Fees Reports (Financial Files)")
         st.markdown("**Директория:** `data/STECCOMLLCRussiaSBD.AccessFees_reports/`")
         
         col1, col2 = st.columns([2, 1])
         
         with col1:
             # Список файлов
-            steccom_files = list_data_files(STECCOM_DIR)
+            access_fees_files = list_data_files(STECCOM_DIR)
             
-            if steccom_files:
-                st.markdown(f"**Найдено файлов: {len(steccom_files)}**")
+            if access_fees_files:
+                st.markdown(f"**Найдено файлов: {len(access_fees_files)}**")
                 
-                files_df = pd.DataFrame(steccom_files)
+                files_df = pd.DataFrame(access_fees_files)
+                
+                # Убеждаемся, что колонка records существует
+                if 'records' not in files_df.columns:
+                    files_df['records'] = None
+                
+                # Заполняем None значениями, если их нет
+                files_df['records'] = files_df['records'].fillna(None)
+                
                 files_df['size_mb'] = files_df['size'] / (1024 * 1024)
                 files_df['modified'] = files_df['modified'].dt.strftime('%Y-%m-%d %H:%M:%S')
                 
-                display_df = files_df[['name', 'size_mb', 'modified']].copy()
-                display_df.columns = ['File Name', 'Size (MB)', 'Modified']
+                # Форматируем количество записей
+                def format_records(x):
+                    if x is None:
+                        return "⏳ Calculating..."
+                    try:
+                        import pandas as pd
+                        if pd.isna(x):
+                            return "⏳ Calculating..."
+                        return f"{int(x):,}"
+                    except (ValueError, TypeError):
+                        return "N/A"
+                
+                files_df['records'] = files_df['records'].apply(format_records)
+                
+                # Получаем количество записей в базе для каждого файла (одно подключение для всех)
+                records_in_db_list = []
+                conn_check = get_db_connection(tab_db_type)
+                if conn_check:
+                    try:
+                        for _, row in files_df.iterrows():
+                            file_name = row['name']
+                            try:
+                                records_in_db = get_records_in_db(file_name, 'steccom_expenses', tab_db_type, conn=conn_check)
+                                records_in_db_list.append(f"{records_in_db:,}" if records_in_db is not None and records_in_db > 0 else "-")
+                            except:
+                                records_in_db_list.append("-")
+                    finally:
+                        conn_check.close()
+                else:
+                    # Если не удалось подключиться, показываем "-" для всех
+                    records_in_db_list = ["-"] * len(files_df)
+                
+                # Создаем display_df с обязательными колонками
+                display_df = pd.DataFrame()
+                display_df['File Name'] = files_df['name']
+                display_df['Size (MB)'] = files_df['size_mb'].round(2)
+                display_df['Records in File'] = files_df['records']
+                display_df['Records in DB'] = records_in_db_list
+                display_df['Modified'] = files_df['modified']
                 
                 st.dataframe(
                     display_df,
                     use_container_width=True,
                     hide_index=True,
-                    height=300
+                    height=300,
+                    key='access_fees_files_df'
                 )
             else:
-                st.info("📁 Директория пуста или не найдена")
+                st.info("📁 Директория пуста или не найдена", icon="📁")
         
         with col2:
             st.markdown("### Действия")
             
             # Загрузка нового файла
             uploaded_file = st.file_uploader(
-                "Upload STECCOM file",
+                "Upload Access Fees file",
                 type=['csv'],
-                key='steccom_upload'
+                key='access_fees_upload'
             )
             
             if uploaded_file:
@@ -409,7 +782,7 @@ def main():
                 if save_path.exists():
                     st.warning(f"⚠️ Файл `{uploaded_file.name}` уже существует")
                 else:
-                    if st.button("💾 Save File", key='save_steccom'):
+                    if st.button("💾 Save File", key='save_access_fees'):
                         try:
                             STECCOM_DIR.mkdir(parents=True, exist_ok=True)
                             with open(save_path, 'wb') as f:
@@ -421,25 +794,138 @@ def main():
             
             st.markdown("---")
             
-            # Импорт данных
-            if st.button("🔄 Import All STECCOM Files", use_container_width=True, type="primary"):
-                with st.spinner(f"Импорт данных STECCOM в {db_type.upper()}..."):
-                    success, message = run_import_script('steccom', db_type)
-                    if success:
-                        st.success("✅ Импорт завершен успешно")
-                        st.text_area("Log output", message, height=200)
-                    else:
-                        st.error(f"❌ Ошибка импорта: {message}")
+            # Проверка уже загруженных файлов перед импортом
+            already_loaded = []
+            new_files = []
+            orphaned_logs = []  # Файлы с записью в load_logs, но без данных в таблице
+            files_to_reload = []  # Файлы, где записей в базе меньше, чем в файле
+            if access_fees_files:
+                conn = get_db_connection(tab_db_type)
+                if conn:
+                    try:
+                        for file_info in access_fees_files:
+                            file_name = file_info['name']
+                            records_in_file = file_info.get('records')  # Количество записей в файле
+                            has_log_entry = False
+                            has_data = False
+                            records_in_db = 0
+                            
+                            if tab_db_type == 'postgresql':
+                                cursor = conn.cursor()
+                                # Проверяем load_logs
+                                cursor.execute("""
+                                    SELECT COUNT(*) FROM load_logs 
+                                    WHERE LOWER(source_file) = LOWER(%s) 
+                                    AND LOWER(table_name) = 'steccom_expenses'
+                                    AND load_status = 'SUCCESS'
+                                """, (file_name,))
+                                has_log_entry = cursor.fetchone()[0] > 0
+                                
+                                # Проверяем наличие данных в таблице и количество записей
+                                cursor.execute("""
+                                    SELECT COUNT(*) FROM steccom_expenses 
+                                    WHERE LOWER(source_file) = LOWER(%s)
+                                """, (file_name,))
+                                records_in_db = cursor.fetchone()[0]
+                                has_data = records_in_db > 0
+                                cursor.close()
+                            else:
+                                # Oracle - определяем структуру таблицы
+                                cursor = conn.cursor()
+                                # Проверяем, какой столбец используется
+                                try:
+                                    test_query = "SELECT FILE_NAME FROM LOAD_LOGS WHERE ROWNUM = 1"
+                                    cursor.execute(test_query)
+                                    file_col = "FILE_NAME"
+                                except:
+                                    try:
+                                        test_query = "SELECT SOURCE_FILE FROM LOAD_LOGS WHERE ROWNUM = 1"
+                                        cursor.execute(test_query)
+                                        file_col = "SOURCE_FILE"
+                                    except:
+                                        file_col = "FILE_NAME"  # по умолчанию
+                                
+                                # Проверяем load_logs
+                                cursor.execute(f"""
+                                    SELECT COUNT(*) FROM LOAD_LOGS 
+                                    WHERE UPPER({file_col}) = UPPER(:1) 
+                                    AND UPPER(TABLE_NAME) = 'STECCOM_EXPENSES'
+                                    AND LOAD_STATUS = 'SUCCESS'
+                                """, (file_name,))
+                                has_log_entry = cursor.fetchone()[0] > 0
+                                
+                                # Проверяем наличие данных в таблице и количество записей
+                                cursor.execute("""
+                                    SELECT COUNT(*) FROM STECCOM_EXPENSES 
+                                    WHERE UPPER(SOURCE_FILE) = UPPER(:1)
+                                """, (file_name,))
+                                records_in_db = cursor.fetchone()[0]
+                                has_data = records_in_db > 0
+                                cursor.close()
+                            
+                            # Определяем статус файла с учетом количества записей
+                            if has_log_entry and has_data:
+                                # Проверяем, все ли записи загружены
+                                if records_in_file is not None and records_in_file > 0:
+                                    if records_in_db < records_in_file:
+                                        # В базе меньше записей, чем в файле - нужно перезагрузить
+                                        files_to_reload.append((file_name, records_in_file, records_in_db))
+                                        new_files.append(file_name)
+                                    else:
+                                        # Все записи загружены
+                                        already_loaded.append(file_name)
+                                else:
+                                    # Не удалось подсчитать записи в файле, но данные есть - считаем загруженным
+                                    already_loaded.append(file_name)
+                            elif has_log_entry and not has_data:
+                                # Ошибочная запись в load_logs без данных в таблице
+                                orphaned_logs.append(file_name)
+                                new_files.append(file_name)  # Разрешаем перезагрузку
+                            else:
+                                new_files.append(file_name)
+                    except Exception as e:
+                        st.warning(f"Не удалось проверить загруженные файлы: {e}")
+                    finally:
+                        conn.close()
+            
+            # Показываем информацию о статусе файлов
+            if orphaned_logs:
+                st.error(f"⚠️ **Обнаружены несоответствия:** {len(orphaned_logs)} файл(ов) имеют запись в логах, но данных в таблице нет:")
+                for orphan in orphaned_logs[:5]:
+                    st.text(f"  - {orphan}")
+                if len(orphaned_logs) > 5:
+                    st.caption(f"  ... и еще {len(orphaned_logs) - 5} файл(ов)")
+                st.info("💡 Эти файлы будут загружены заново, чтобы исправить несоответствие.")
+            
+            if files_to_reload:
+                st.warning(f"⚠️ **Неполная загрузка:** {len(files_to_reload)} файл(ов) имеют меньше записей в базе, чем в файле:")
+                for file_name, in_file, in_db in files_to_reload[:5]:
+                    st.text(f"  - {file_name}: {in_file:,} в файле → {in_db:,} в базе (не хватает {in_file - in_db:,})")
+                if len(files_to_reload) > 5:
+                    st.caption(f"  ... и еще {len(files_to_reload) - 5} файл(ов)")
+                st.info("💡 Эти файлы будут загружены заново, чтобы дополнить недостающие записи.")
+            
+            if already_loaded:
+                if len(already_loaded) == len(access_fees_files) and not orphaned_logs and not files_to_reload:
+                    st.success(f"✅ **Все файлы уже загружены полностью!** Загружать нечего.")
+                    st.info(f"Всего файлов: {len(already_loaded)}")
+                else:
+                    st.info(f"✅ {len(already_loaded)} из {len(access_fees_files)} файл(ов) полностью загружены и будут пропущены:\n- " + "\n- ".join(already_loaded[:5]))
+                    if len(already_loaded) > 5:
+                        st.caption(f"... и еще {len(already_loaded) - 5} файл(ов)")
+                    if new_files:
+                        st.info(f"📥 Будет загружено новых/неполных файлов: {len(new_files)}")
+            
         
         # Информация о загруженных файлах
         st.markdown("---")
         st.subheader("📊 Загруженные в базу файлы")
-        table_name = 'STECCOM_EXPENSES' if db_type == 'oracle' else 'steccom_expenses'
-        source_col = 'SOURCE_FILE' if db_type == 'oracle' else 'source_file'
-        loaded_steccom = get_loaded_files_info(table_name, source_col, db_type)
-        if not loaded_steccom.empty:
-            loaded_steccom.columns = ['File Name', 'Last Load Date', 'Records Count']
-            st.dataframe(loaded_steccom, use_container_width=True, hide_index=True)
+        table_name = 'STECCOM_EXPENSES' if tab_db_type == 'oracle' else 'steccom_expenses'
+        source_col = 'SOURCE_FILE' if tab_db_type == 'oracle' else 'source_file'
+        loaded_access_fees = get_loaded_files_info(table_name, source_col, tab_db_type)
+        if not loaded_access_fees.empty:
+            loaded_access_fees.columns = ['File Name', 'Last Load Date', 'Records Count']
+            st.dataframe(loaded_access_fees, use_container_width=True, hide_index=True)
         else:
             st.info("Нет информации о загруженных файлах")
     
@@ -452,33 +938,53 @@ def main():
             try:
                 # История из load_logs
                 if db_type == 'oracle':
-                    query = """
+                    # Определяем структуру таблицы
+                    test_cursor = conn.cursor()
+                    try:
+                        test_query = "SELECT FILE_NAME FROM LOAD_LOGS WHERE ROWNUM = 1"
+                        test_cursor.execute(test_query)
+                        file_col = "FILE_NAME"
+                    except:
+                        try:
+                            test_query = "SELECT SOURCE_FILE FROM LOAD_LOGS WHERE ROWNUM = 1"
+                            test_cursor.execute(test_query)
+                            file_col = "SOURCE_FILE"
+                        except:
+                            file_col = "FILE_NAME"  # по умолчанию
+                    test_cursor.close()
+                    
+                    query = f"""
                     SELECT 
                         TABLE_NAME,
-                        LOAD_DATE,
-                        RECORDS_COUNT,
-                        STATUS,
+                        {file_col} AS FILE_NAME,
+                        LOAD_START_TIME,
+                        RECORDS_LOADED,
+                        LOAD_STATUS,
                         ERROR_MESSAGE
                     FROM LOAD_LOGS
-                    ORDER BY LOAD_DATE DESC
+                    ORDER BY LOAD_START_TIME DESC
                     FETCH FIRST 50 ROWS ONLY
                     """
                 else:
                     query = """
                     SELECT 
                         table_name,
-                        load_date,
-                        records_count,
-                        status,
+                        source_file,
+                        load_start_time,
+                        records_loaded,
+                        load_status,
                         error_message
                     FROM load_logs
-                    ORDER BY load_date DESC
+                    ORDER BY load_start_time DESC
                     LIMIT 50
                     """
                 history_df = pd.read_sql(query, conn)
                 
                 if not history_df.empty:
-                    history_df.columns = ['Table Name', 'Load Date', 'Records Count', 'Status', 'Error Message']
+                    if db_type == 'oracle':
+                        history_df.columns = ['Table Name', 'File Name', 'Load Date', 'Records Count', 'Status', 'Error Message']
+                    else:
+                        history_df.columns = ['Table Name', 'File Name', 'Load Date', 'Records Count', 'Status', 'Error Message']
                     history_df['Load Date'] = pd.to_datetime(history_df['Load Date']).dt.strftime('%Y-%m-%d %H:%M:%S')
                     st.dataframe(history_df, use_container_width=True, hide_index=True)
                 else:

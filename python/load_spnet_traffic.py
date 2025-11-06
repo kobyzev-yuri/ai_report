@@ -37,13 +37,27 @@ class SPNetDataLoader:
         self.gdrive_path = "SPNet reports"
         
     def connect_to_oracle(self):
-        """Подключение к Oracle базе данных (прямое подключение без TNS)"""
+        """Подключение к Oracle базе данных (с поддержкой SID и SERVICE_NAME)"""
         try:
-            # Прямое подключение без TNS
+            # Используем SID если задан, иначе SERVICE_NAME
+            if self.oracle_config.get('sid'):
+                dsn = cx_Oracle.makedsn(
+                    self.oracle_config['host'],
+                    self.oracle_config['port'],
+                    sid=self.oracle_config['sid']
+                )
+            else:
+                service_name = self.oracle_config.get('service_name', 'bm7')
+                dsn = cx_Oracle.makedsn(
+                    self.oracle_config['host'],
+                    self.oracle_config['port'],
+                    service_name=service_name
+                )
+            
             self.connection = cx_Oracle.connect(
-                self.oracle_config['username'],
-                self.oracle_config['password'],
-                f"{self.oracle_config['host']}:{self.oracle_config['port']}/{self.oracle_config['service_name']}"
+                user=self.oracle_config['username'],
+                password=self.oracle_config['password'],
+                dsn=dsn
             )
             logger.info("Успешное подключение к Oracle")
             return True
@@ -52,64 +66,102 @@ class SPNetDataLoader:
             return False
     
     def load_spnet_files(self):
-        """Загрузка всех CSV файлов SPNet"""
+        """Загрузка всех CSV и XLSX файлов SPNet (пропускает уже загруженные)"""
         logger.info("Начинаем загрузку данных SPNet...")
         
         csv_files = glob.glob(f"{self.gdrive_path}/*.csv")
-        if not csv_files:
-            logger.warning("CSV файлы SPNet не найдены")
+        xlsx_files = glob.glob(f"{self.gdrive_path}/*.xlsx")
+        all_files = csv_files + xlsx_files
+        
+        if not all_files:
+            logger.warning("CSV/XLSX файлы SPNet не найдены")
             return False
         
         total_records = 0
+        skipped_files = 0
         load_start_time = datetime.now()
         
-        for file_path in csv_files:
+        for file_path in all_files:
+            file_name = Path(file_path).name
             try:
-                logger.info(f"Обрабатываем файл: {file_path}")
+                # Проверяем, загружен ли файл уже
+                is_loaded, records_in_file, records_in_db = self.is_file_loaded(file_name, 'SPNET_TRAFFIC', file_path)
+                if is_loaded:
+                    logger.info(f"⏭ Пропускаем файл (уже загружен полностью): {file_name}")
+                    if records_in_file > 0 and records_in_db > 0:
+                        logger.info(f"   Записей в файле: {records_in_file:,}, в базе: {records_in_db:,}")
+                    skipped_files += 1
+                    continue
+                elif records_in_db > 0:
+                    logger.info(f"⚠️ Файл загружен не полностью: {file_name}")
+                    logger.info(f"   Записей в файле: {records_in_file:,}, в базе: {records_in_db:,} (не хватает {records_in_file - records_in_db:,})")
+                    logger.info(f"   Перезагружаем файл...")
+                
+                logger.info(f"Обрабатываем файл: {file_name}")
+                file_start_time = datetime.now()
                 records_loaded = self.load_single_file(file_path)
+                file_end_time = datetime.now()
+                file_duration = (file_end_time - file_start_time).total_seconds()
                 total_records += records_loaded
-                logger.info(f"Загружено {records_loaded} записей из {file_path}")
+                
+                # Логируем успешную загрузку файла
+                self.log_load_success('SPNET_TRAFFIC', file_name, records_loaded, file_start_time, file_end_time, file_duration)
+                logger.info(f"✓ Загружено {records_loaded} записей из {file_name}")
                 
             except Exception as e:
-                logger.error(f"Ошибка при обработке файла {file_path}: {e}")
-                self.log_load_error('SPNET_TRAFFIC', file_path, str(e))
+                logger.error(f"✗ Ошибка при обработке файла {file_path}: {e}")
+                self.log_load_error('SPNET_TRAFFIC', file_name, str(e))
         
         load_end_time = datetime.now()
         duration = (load_end_time - load_start_time).total_seconds()
         
-        # Логируем общий результат
-        self.log_load_success('SPNET_TRAFFIC', 'ALL_FILES', total_records, load_start_time, load_end_time, duration)
+        logger.info(f"\n{'='*80}")
+        logger.info(f"Загрузка SPNet завершена")
+        logger.info(f"Всего загружено: {total_records:,} записей")
+        logger.info(f"Пропущено файлов (уже загружены): {skipped_files}")
+        logger.info(f"Время выполнения: {duration:.2f} сек")
+        logger.info(f"{'='*80}\n")
         
-        logger.info(f"Загрузка SPNet завершена. Всего загружено: {total_records} записей")
         return True
     
     def load_single_file(self, file_path):
-        """Загрузка одного CSV файла"""
+        """Загрузка одного CSV или XLSX файла"""
         try:
-            # Пробуем разные кодировки для чтения файла
-            encodings = ['utf-8', 'latin-1', 'cp1252', 'iso-8859-1']
+            file_ext = Path(file_path).suffix.lower()
             df = None
             
-            for encoding in encodings:
+            # Читаем XLSX файлы
+            if file_ext == '.xlsx':
                 try:
-                    # Пробуем разные разделители
-                    separators = [';', '\t', ',']
-                    for sep in separators:
-                        try:
-                            df = pd.read_csv(file_path, sep=sep, encoding=encoding, 
-                                           dtype=str,  # Читаем все как строки
-                                           na_filter=False)  # Не конвертируем в NaN
-                            if len(df.columns) > 1:
-                                logger.info(f"Успешно прочитан файл {file_path} с разделителем '{sep}' и кодировкой {encoding}")
-                                break
-                        except Exception as e:
-                            logger.warning(f"Ошибка чтения {file_path} с разделителем '{sep}' и кодировкой {encoding}: {e}")
-                            continue
-                    if len(df.columns) > 1:
-                        break
+                    df = pd.read_excel(file_path, dtype=str, na_filter=False)
+                    logger.info(f"Успешно прочитан XLSX файл {file_path}")
                 except Exception as e:
-                    logger.warning(f"Ошибка чтения {file_path} с кодировкой {encoding}: {e}")
-                    continue
+                    logger.error(f"Ошибка чтения XLSX файла {file_path}: {e}")
+                    return 0
+            else:
+                # Читаем CSV файлы - пробуем разные кодировки и разделители
+                encodings = ['utf-8', 'latin-1', 'cp1252', 'iso-8859-1']
+                
+                for encoding in encodings:
+                    try:
+                        # Пробуем разные разделители
+                        separators = [';', '\t', ',']
+                        for sep in separators:
+                            try:
+                                df = pd.read_csv(file_path, sep=sep, encoding=encoding, 
+                                               dtype=str,  # Читаем все как строки
+                                               na_filter=False)  # Не конвертируем в NaN
+                                if len(df.columns) > 1:
+                                    logger.info(f"Успешно прочитан файл {file_path} с разделителем '{sep}' и кодировкой {encoding}")
+                                    break
+                            except Exception as e:
+                                logger.warning(f"Ошибка чтения {file_path} с разделителем '{sep}' и кодировкой {encoding}: {e}")
+                                continue
+                        if len(df.columns) > 1:
+                            break
+                    except Exception as e:
+                        logger.warning(f"Ошибка чтения {file_path} с кодировкой {encoding}: {e}")
+                        continue
             
             if df is None or len(df.columns) <= 1:
                 logger.error(f"Не удалось прочитать файл {file_path}")
@@ -190,14 +242,128 @@ class SPNetDataLoader:
         finally:
             cursor.close()
     
+    def _get_load_logs_columns(self):
+        """Определение структуры таблицы LOAD_LOGS (динамически)"""
+        cursor = self.connection.cursor()
+        try:
+            # Проверяем FILE_NAME vs SOURCE_FILE
+            try:
+                test_query = "SELECT FILE_NAME FROM LOAD_LOGS WHERE ROWNUM = 1"
+                cursor.execute(test_query)
+                file_col = "FILE_NAME"
+            except:
+                try:
+                    test_query = "SELECT SOURCE_FILE FROM LOAD_LOGS WHERE ROWNUM = 1"
+                    cursor.execute(test_query)
+                    file_col = "SOURCE_FILE"
+                except:
+                    logger.warning("Не удалось определить структуру LOAD_LOGS, используем SOURCE_FILE по умолчанию")
+                    file_col = "SOURCE_FILE"
+            
+            # Проверяем LOADED_BY vs CREATED_BY
+            try:
+                test_query = "SELECT LOADED_BY FROM LOAD_LOGS WHERE ROWNUM = 1"
+                cursor.execute(test_query)
+                loaded_by_col = "LOADED_BY"
+            except:
+                try:
+                    test_query = "SELECT CREATED_BY FROM LOAD_LOGS WHERE ROWNUM = 1"
+                    cursor.execute(test_query)
+                    loaded_by_col = "CREATED_BY"
+                except:
+                    logger.warning("Не удалось определить столбец для created_by, используем CREATED_BY по умолчанию")
+                    loaded_by_col = "CREATED_BY"
+            
+            return file_col, loaded_by_col
+        except Exception as e:
+            logger.warning(f"Ошибка при определении структуры LOAD_LOGS: {e}, используем значения по умолчанию")
+            return "SOURCE_FILE", "CREATED_BY"
+        finally:
+            cursor.close()
+    
+    def is_file_loaded(self, file_name, table_name='SPNET_TRAFFIC', file_path=None):
+        """Проверка, загружен ли файл уже и полностью ли загружен
+        
+        Args:
+            file_name: имя файла
+            table_name: имя таблицы
+            file_path: путь к файлу (опционально, для проверки количества записей)
+        
+        Returns:
+            tuple: (is_loaded: bool, records_in_file: int, records_in_db: int)
+        """
+        if not self.connection:
+            return (False, 0, 0)
+        
+        cursor = self.connection.cursor()
+        records_in_file = 0
+        records_in_db = 0
+        
+        try:
+            file_col, _ = self._get_load_logs_columns()
+            # Проверяем наличие записи в load_logs
+            cursor.execute(f"""
+                SELECT COUNT(*) FROM LOAD_LOGS 
+                WHERE UPPER({file_col}) = UPPER(:1) 
+                AND UPPER(TABLE_NAME) = UPPER(:2)
+                AND LOAD_STATUS = 'SUCCESS'
+            """, (file_name, table_name))
+            has_log_entry = cursor.fetchone()[0] > 0
+            
+            # Проверяем количество записей в базе
+            cursor.execute(f"""
+                SELECT COUNT(*) FROM {table_name}
+                WHERE UPPER(SOURCE_FILE) = UPPER(:1)
+            """, (file_name,))
+            records_in_db = cursor.fetchone()[0]
+            
+            # Если есть путь к файлу, проверяем количество записей в файле
+            if file_path and Path(file_path).exists():
+                try:
+                    file_ext = Path(file_path).suffix.lower()
+                    if file_ext == '.xlsx':
+                        import pandas as pd
+                        df = pd.read_excel(file_path, dtype=str, na_filter=False, engine='openpyxl')
+                    else:
+                        import pandas as pd
+                        df = pd.read_csv(file_path, dtype=str, na_filter=False)
+                    df = df.dropna(how='all')
+                    records_in_file = len(df)
+                except Exception as e:
+                    logger.warning(f"Не удалось подсчитать записи в файле {file_name}: {e}")
+            
+            # Файл считается загруженным, если:
+            # 1. Есть запись в load_logs
+            # 2. Есть данные в таблице
+            # 3. Количество записей в базе >= количеству записей в файле (если удалось подсчитать)
+            if has_log_entry and records_in_db > 0:
+                if records_in_file > 0:
+                    # Если удалось подсчитать записи в файле, сравниваем
+                    is_loaded = records_in_db >= records_in_file
+                else:
+                    # Если не удалось подсчитать, считаем загруженным
+                    is_loaded = True
+            else:
+                is_loaded = False
+            
+            return (is_loaded, records_in_file, records_in_db)
+        except Exception as e:
+            logger.warning(f"Ошибка проверки load_logs: {e}")
+            return (False, 0, 0)
+        finally:
+            cursor.close()
+    
     def log_load_success(self, table_name, source_file, records_count, start_time, end_time, duration):
         """Логирование успешной загрузки"""
         cursor = self.connection.cursor()
         try:
-            insert_sql = """
+            # Определяем структуру таблицы динамически
+            file_col, loaded_by_col = self._get_load_logs_columns()
+            
+            insert_sql = f"""
             INSERT INTO LOAD_LOGS (
-                TABLE_NAME, SOURCE_FILE, RECORDS_LOADED, LOAD_STATUS,
-                LOAD_START_TIME, LOAD_END_TIME, LOAD_DURATION_SECONDS, CREATED_BY
+                TABLE_NAME, {file_col}, RECORDS_LOADED, LOAD_STATUS,
+                LOAD_START_TIME, LOAD_END_TIME, LOAD_DURATION_SECONDS, {loaded_by_col}
             ) VALUES (
                 :table_name, :source_file, :records_count, 'SUCCESS',
                 :start_time, :end_time, :duration, 'SPNET_LOADER'
@@ -221,10 +387,13 @@ class SPNetDataLoader:
         """Логирование ошибки загрузки"""
         cursor = self.connection.cursor()
         try:
-            insert_sql = """
+            # Определяем структуру таблицы динамически
+            file_col, loaded_by_col = self._get_load_logs_columns()
+            
+            insert_sql = f"""
             INSERT INTO LOAD_LOGS (
-                TABLE_NAME, SOURCE_FILE, RECORDS_LOADED, LOAD_STATUS,
-                ERROR_MESSAGE, LOAD_START_TIME, LOAD_END_TIME, CREATED_BY
+                TABLE_NAME, {file_col}, RECORDS_LOADED, LOAD_STATUS,
+                ERROR_MESSAGE, LOAD_START_TIME, LOAD_END_TIME, {loaded_by_col}
             ) VALUES (
                 :table_name, :source_file, 0, 'ERROR',
                 :error_message, SYSDATE, SYSDATE, 'SPNET_LOADER'

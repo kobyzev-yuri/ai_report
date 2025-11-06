@@ -2,11 +2,17 @@
 oracledb
 cx_Oracle
 
+# PostgreSQL (optional, for testing)
+psycopg2-binary
+
 # Data processing and analysis
 pandas
 numpy
 sqlalchemy
 openpyxl
+
+# Web interface
+streamlit
 
 # CLI tools for database interaction
 click
