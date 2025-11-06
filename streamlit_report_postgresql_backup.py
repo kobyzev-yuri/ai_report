@@ -115,7 +115,7 @@ def get_records_in_db(file_name, table_name='spnet_traffic'):
         conn.close()
 
 
-def get_main_report(period_filter=None, plan_filter=None):
+def get_main_report(period_filter=None, plan_filter=None, contract_id_filter=None, imei_filter=None, customer_name_filter=None, code_1c_filter=None):
     """Получение основного отчета"""
     conn = get_connection()
     if not conn:
@@ -132,7 +132,36 @@ def get_main_report(period_filter=None, plan_filter=None):
     if plan_filter and plan_filter != "All Plans":
         plan_condition = f"AND v.plan_name = '{plan_filter}'"
     
-    query = f"""
+    # Собираем дополнительные условия и параметры
+    additional_conditions = []
+    params = []
+    
+    # Фильтр по CONTRACT_ID (SUB-*)
+    if contract_id_filter and contract_id_filter.strip():
+        additional_conditions.append("AND v.contract_id LIKE %s")
+        params.append(f"%{contract_id_filter.strip()}%")
+    
+    # Фильтр по IMEI
+    if imei_filter and imei_filter.strip():
+        additional_conditions.append("AND v.imei LIKE %s")
+        params.append(f"%{imei_filter.strip()}%")
+    
+    # Фильтр по названию клиента
+    if customer_name_filter and customer_name_filter.strip():
+        additional_conditions.append("AND UPPER(COALESCE(v.display_name, '')) LIKE UPPER(%s)")
+        params.append(f"%{customer_name_filter.strip()}%")
+    
+    # Фильтр по коду 1С
+    if code_1c_filter and code_1c_filter.strip():
+        additional_conditions.append("AND v.code_1c LIKE %s")
+        params.append(f"%{code_1c_filter.strip()}%")
+    
+    # Формируем WHERE условия
+    where_conditions = [plan_condition, period_condition] + additional_conditions
+    where_clause = "\n        ".join([c for c in where_conditions if c])
+    
+    # Формируем базовый запрос (без параметров в WHERE)
+    base_query = """
     SELECT 
         v.bill_month AS "Bill Month",
         v.imei AS "IMEI",
@@ -152,23 +181,23 @@ def get_main_report(period_filter=None, plan_filter=None):
         v.registration_events AS "Registration Events",
         -- Превышения: зануляем суммы Iridium для СТЭК.КОМ
         CASE 
-            WHEN UPPER(COALESCE(v.display_name, '')) LIKE '%СТЭК.КОМ%' 
-                 OR UPPER(COALESCE(v.display_name, '')) LIKE '%СТЭККОМ%'
-                 OR UPPER(COALESCE(v.display_name, '')) LIKE '%STECCOM%'
+            WHEN UPPER(COALESCE(v.display_name, '')) LIKE '%%СТЭК.КОМ%%' 
+                 OR UPPER(COALESCE(v.display_name, '')) LIKE '%%СТЭККОМ%%'
+                 OR UPPER(COALESCE(v.display_name, '')) LIKE '%%STECCOM%%'
             THEN 0
             ELSE v.overage_kb
         END AS "Overage (KB)",
         CASE 
-            WHEN UPPER(COALESCE(v.display_name, '')) LIKE '%СТЭК.КОМ%' 
-                 OR UPPER(COALESCE(v.display_name, '')) LIKE '%СТЭККОМ%'
-                 OR UPPER(COALESCE(v.display_name, '')) LIKE '%STECCOM%'
+            WHEN UPPER(COALESCE(v.display_name, '')) LIKE '%%СТЭК.КОМ%%' 
+                 OR UPPER(COALESCE(v.display_name, '')) LIKE '%%СТЭККОМ%%'
+                 OR UPPER(COALESCE(v.display_name, '')) LIKE '%%STECCOM%%'
             THEN 0
             ELSE v.calculated_overage
         END AS "Calculated Overage ($)",
         CASE 
-            WHEN UPPER(COALESCE(v.display_name, '')) LIKE '%СТЭК.КОМ%' 
-                 OR UPPER(COALESCE(v.display_name, '')) LIKE '%СТЭККОМ%'
-                 OR UPPER(COALESCE(v.display_name, '')) LIKE '%STECCOM%'
+            WHEN UPPER(COALESCE(v.display_name, '')) LIKE '%%СТЭК.КОМ%%' 
+                 OR UPPER(COALESCE(v.display_name, '')) LIKE '%%СТЭККОМ%%'
+                 OR UPPER(COALESCE(v.display_name, '')) LIKE '%%STECCOM%%'
             THEN 0
             ELSE v.spnet_total_amount
         END AS "SPNet Total Amount ($)",
@@ -180,13 +209,45 @@ def get_main_report(period_filter=None, plan_filter=None):
         COALESCE(v.fee_prorated, 0) AS "Prorated"
     FROM v_consolidated_report_with_billing v
     WHERE 1=1
-        {plan_condition}
-        {period_condition}
+        {where_clause}
     ORDER BY v.bill_month DESC, "Calculated Overage ($)" DESC NULLS LAST
     """
     
+    # Формируем финальный запрос с подстановкой where_clause
+    query = base_query.format(where_clause=where_clause)
+    
     try:
-        df = pd.read_sql_query(query, conn)
+        # Выполняем запрос с параметрами
+        # pandas.read_sql_query с psycopg2 требует параметры как список/кортеж
+        if params:
+            # Проверяем, что количество параметров совпадает с количеством плейсхолдеров
+            # Простой подсчет %s (psycopg2 сам разберется со строковыми литералами)
+            placeholder_count = query.count('%s')
+            
+            if len(params) != placeholder_count:
+                st.error(f"Ошибка: несоответствие количества параметров")
+                return None
+            
+            # Используем cursor напрямую - самый надежный способ для psycopg2
+            cursor = conn.cursor()
+            try:
+                # Выполняем запрос с параметрами (psycopg2 требует кортеж)
+                cursor.execute(query, tuple(params))
+                
+                # Получаем результаты
+                if cursor.description:
+                    columns = [desc[0] for desc in cursor.description]
+                    rows = cursor.fetchall()
+                    df = pd.DataFrame(rows, columns=columns)
+                else:
+                    df = pd.DataFrame()
+            except Exception as e:
+                st.error(f"Ошибка выполнения запроса: {e}")
+                df = pd.DataFrame()
+            finally:
+                cursor.close()
+        else:
+            df = pd.read_sql_query(query, conn)
         
         if df.empty:
             return df
@@ -201,7 +262,8 @@ def get_main_report(period_filter=None, plan_filter=None):
         st.error(f"Ошибка получения отчета: {e}")
         return None
     finally:
-        conn.close()
+        if conn:
+            conn.close()
 
 
 @st.cache_data(ttl=300)  # Кэшируем на 5 минут
@@ -334,6 +396,41 @@ def main():
         selected_plan = st.selectbox("Plan", plan_options, key='plan_selectbox')
         
         st.markdown("---")
+        st.subheader("🔍 Additional Filters")
+        
+        # Фильтр по CONTRACT_ID (SUB-*)
+        contract_id_filter = st.text_input(
+            "Contract ID (SUB-*)",
+            value="",
+            key='contract_id_filter',
+            help="Поиск по CONTRACT_ID (например: SUB-45439909011)"
+        )
+        
+        # Фильтр по IMEI
+        imei_filter = st.text_input(
+            "IMEI",
+            value="",
+            key='imei_filter',
+            help="Поиск по IMEI (например: 300215060074700)"
+        )
+        
+        # Фильтр по названию клиента
+        customer_name_filter = st.text_input(
+            "Organization/Person",
+            value="",
+            key='customer_name_filter',
+            help="Поиск по названию организации или ФИО клиента"
+        )
+        
+        # Фильтр по коду 1С
+        code_1c_filter = st.text_input(
+            "Code 1C",
+            value="",
+            key='code_1c_filter',
+            help="Поиск по коду 1С (например: 00007660)"
+        )
+        
+        st.markdown("---")
         st.header("🔐 Database Connection")
         st.caption(f"📡 {DB_CONFIG['user']}@{DB_CONFIG['host']}:{DB_CONFIG['port']}/{DB_CONFIG['dbname']}")
         
@@ -355,15 +452,26 @@ def main():
         
         period_filter = None if selected_period == "All Periods" else selected_period
         plan_filter = None if selected_plan == "All Plans" else selected_plan
+        contract_id_filter = contract_id_filter if contract_id_filter else None
+        imei_filter = imei_filter if imei_filter else None
+        customer_name_filter = customer_name_filter if customer_name_filter else None
+        code_1c_filter = code_1c_filter if code_1c_filter else None
         
         # Загружаем отчет ТОЛЬКО если выбран период (не "All Periods")
-        filter_key = f"{period_filter}_{plan_filter}"
+        filter_key = f"{period_filter}_{plan_filter}_{contract_id_filter}_{imei_filter}_{customer_name_filter}_{code_1c_filter}"
         
         # Проверяем, нужно ли загружать отчет
         if period_filter is not None:
             if 'last_report_key' not in st.session_state or st.session_state.last_report_key != filter_key:
                 with st.spinner("Loading report data..."):
-                    df = get_main_report(period_filter, plan_filter)
+                    df = get_main_report(
+                        period_filter, 
+                        plan_filter,
+                        contract_id_filter,
+                        imei_filter,
+                        customer_name_filter,
+                        code_1c_filter
+                    )
                     st.session_state.last_report_key = filter_key
                     st.session_state.last_report_df = df
             else:
