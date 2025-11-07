@@ -8,7 +8,43 @@
 DROP VIEW IF EXISTS V_CONSOLIDATED_OVERAGE_REPORT CASCADE;
 
 CREATE OR REPLACE VIEW V_CONSOLIDATED_OVERAGE_REPORT AS
-WITH spnet_data AS (
+WITH -- Маппинг plan_name по contract_id из других периодов SPNET_TRAFFIC (берем самый частый план)
+contract_plan_mapping AS (
+    SELECT DISTINCT ON (contract_id)
+        contract_id,
+        plan_name
+    FROM (
+        SELECT 
+            st.contract_id,
+            st.plan_name,
+            COUNT(*) AS plan_count
+        FROM spnet_traffic st
+        WHERE st.contract_id IS NOT NULL
+          AND st.plan_name IS NOT NULL
+          AND st.plan_name != ''
+        GROUP BY st.contract_id, st.plan_name
+    ) grouped_plans
+    ORDER BY contract_id, plan_count DESC, plan_name
+),
+-- Маппинг plan_name по IMEI из других периодов SPNET_TRAFFIC (берем самый частый план)
+imei_plan_mapping AS (
+    SELECT DISTINCT ON (imei)
+        imei,
+        plan_name
+    FROM (
+        SELECT 
+            st.imei,
+            st.plan_name,
+            COUNT(*) AS plan_count
+        FROM spnet_traffic st
+        WHERE st.imei IS NOT NULL
+          AND st.plan_name IS NOT NULL
+          AND st.plan_name != ''
+        GROUP BY st.imei, st.plan_name
+    ) grouped_plans
+    ORDER BY imei, plan_count DESC, plan_name
+),
+spnet_data AS (
     SELECT 
         ov.IMEI,
         ov.CONTRACT_ID,
@@ -86,8 +122,14 @@ SELECT
     COALESCE(sp.IMEI, st.IMEI) AS IMEI,
     COALESCE(sp.CONTRACT_ID, st.CONTRACT_ID) AS CONTRACT_ID,
     COALESCE(sp.BILL_MONTH, st.BILL_MONTH) AS BILL_MONTH,
-    -- PLAN_NAME для обратной совместимости: основной план (если нет - из SPNet)
-    COALESCE(sp.PLAN_NAME, st.STECCOM_PLAN_NAME_MONTHLY) AS PLAN_NAME,
+    -- PLAN_NAME: сначала из текущего периода, если нет - из STECCOM, если нет - из маппинга по contract_id, если нет - из маппинга по IMEI
+    -- Используем NULLIF для обработки пустых строк как NULL
+    COALESCE(
+        NULLIF(TRIM(sp.PLAN_NAME), ''),
+        NULLIF(TRIM(st.STECCOM_PLAN_NAME_MONTHLY), ''),
+        NULLIF(TRIM(cpm.plan_name), ''),
+        NULLIF(TRIM(ipm.plan_name), '')
+    ) AS PLAN_NAME,
     
     -- Разделение трафика и событий (по каждому периоду)
     COALESCE(sp.TRAFFIC_USAGE_BYTES, 0) AS TRAFFIC_USAGE_BYTES,
@@ -118,10 +160,14 @@ FULL OUTER JOIN steccom_data st
     ON sp.IMEI = st.IMEI 
     AND sp.CONTRACT_ID = st.CONTRACT_ID
     AND sp.BILL_MONTH = st.BILL_MONTH
+LEFT JOIN contract_plan_mapping cpm
+    ON COALESCE(sp.CONTRACT_ID, st.CONTRACT_ID) = cpm.contract_id
+LEFT JOIN imei_plan_mapping ipm
+    ON COALESCE(sp.IMEI, st.IMEI) = ipm.imei
 ORDER BY 
     COALESCE(sp.IMEI, st.IMEI),
     COALESCE(sp.BILL_MONTH, st.BILL_MONTH) DESC;
 
-COMMENT ON VIEW V_CONSOLIDATED_OVERAGE_REPORT IS 'Сводный отчет по превышению с данными из SPNet и STECCOM. КАЖДАЯ СТРОКА = ОТДЕЛЬНЫЙ ПЕРИОД (BILL_MONTH). Периоды НЕ суммируются! STECCOM данные разделены: STECCOM_MONTHLY_AMOUNT/SUSPENDED_AMOUNT (суммы) и STECCOM_PLAN_NAME_MONTHLY/SUSPENDED (планы). Группировка: IMEI + CONTRACT_ID + BILL_MONTH - одна строка на период.';
+COMMENT ON VIEW V_CONSOLIDATED_OVERAGE_REPORT IS 'Сводный отчет по превышению с данными из SPNet и STECCOM. КАЖДАЯ СТРОКА = ОТДЕЛЬНЫЙ ПЕРИОД (BILL_MONTH). Периоды НЕ суммируются! STECCOM данные разделены: STECCOM_MONTHLY_AMOUNT/SUSPENDED_AMOUNT (суммы) и STECCOM_PLAN_NAME_MONTHLY/SUSPENDED (планы). Группировка: IMEI + CONTRACT_ID + BILL_MONTH - одна строка на период. PLAN_NAME заполняется из текущего периода, если отсутствует - из маппинга по contract_id или IMEI из других периодов.';
 
 \echo 'View V_CONSOLIDATED_OVERAGE_REPORT создан успешно!'

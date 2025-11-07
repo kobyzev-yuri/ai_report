@@ -9,7 +9,45 @@ SET SQLBLANKLINES ON
 SET DEFINE OFF
 
 CREATE OR REPLACE VIEW V_CONSOLIDATED_OVERAGE_REPORT AS
-WITH spnet_data AS (
+WITH -- Маппинг plan_name по contract_id из других периодов SPNET_TRAFFIC (берем самый частый план)
+contract_plan_mapping AS (
+    SELECT 
+        CONTRACT_ID,
+        PLAN_NAME
+    FROM (
+        SELECT 
+            st.CONTRACT_ID,
+            st.PLAN_NAME,
+            COUNT(*) AS plan_count,
+            ROW_NUMBER() OVER (PARTITION BY st.CONTRACT_ID ORDER BY COUNT(*) DESC, st.PLAN_NAME) AS rn
+        FROM SPNET_TRAFFIC st
+        WHERE st.CONTRACT_ID IS NOT NULL
+          AND st.PLAN_NAME IS NOT NULL
+          AND st.PLAN_NAME != ''
+        GROUP BY st.CONTRACT_ID, st.PLAN_NAME
+    )
+    WHERE rn = 1
+),
+-- Маппинг plan_name по IMEI из других периодов SPNET_TRAFFIC (берем самый частый план)
+imei_plan_mapping AS (
+    SELECT 
+        IMEI,
+        PLAN_NAME
+    FROM (
+        SELECT 
+            st.IMEI,
+            st.PLAN_NAME,
+            COUNT(*) AS plan_count,
+            ROW_NUMBER() OVER (PARTITION BY st.IMEI ORDER BY COUNT(*) DESC, st.PLAN_NAME) AS rn
+        FROM SPNET_TRAFFIC st
+        WHERE st.IMEI IS NOT NULL
+          AND st.PLAN_NAME IS NOT NULL
+          AND st.PLAN_NAME != ''
+        GROUP BY st.IMEI, st.PLAN_NAME
+    )
+    WHERE rn = 1
+),
+spnet_data AS (
     SELECT 
         ov.IMEI,
         ov.CONTRACT_ID,
@@ -87,8 +125,18 @@ SELECT
     NVL(sp.IMEI, st.IMEI) AS IMEI,
     NVL(sp.CONTRACT_ID, st.CONTRACT_ID) AS CONTRACT_ID,
     NVL(sp.BILL_MONTH, st.BILL_MONTH) AS BILL_MONTH,
-    -- PLAN_NAME для обратной совместимости: основной план (если нет - из SPNet)
-    NVL(sp.PLAN_NAME, st.STECCOM_PLAN_NAME_MONTHLY) AS PLAN_NAME,
+    -- PLAN_NAME: сначала из текущего периода, если нет - из STECCOM, если нет - из маппинга по contract_id, если нет - из маппинга по IMEI
+    -- Используем NULLIF для обработки пустых строк как NULL
+    NVL(
+        NULLIF(TRIM(sp.PLAN_NAME), ''),
+        NVL(
+            NULLIF(TRIM(st.STECCOM_PLAN_NAME_MONTHLY), ''),
+            NVL(
+                NULLIF(TRIM(cpm.PLAN_NAME), ''),
+                NULLIF(TRIM(ipm.PLAN_NAME), '')
+            )
+        )
+    ) AS PLAN_NAME,
     
     -- Разделение трафика и событий (по каждому периоду)
     NVL(sp.TRAFFIC_USAGE_BYTES, 0) AS TRAFFIC_USAGE_BYTES,
@@ -119,12 +167,16 @@ FULL OUTER JOIN steccom_data st
     ON sp.IMEI = st.IMEI 
     AND sp.CONTRACT_ID = st.CONTRACT_ID
     AND sp.BILL_MONTH = st.BILL_MONTH
+LEFT JOIN contract_plan_mapping cpm
+    ON NVL(sp.CONTRACT_ID, st.CONTRACT_ID) = cpm.CONTRACT_ID
+LEFT JOIN imei_plan_mapping ipm
+    ON NVL(sp.IMEI, st.IMEI) = ipm.IMEI
 ORDER BY 
     NVL(sp.IMEI, st.IMEI),
     NVL(sp.BILL_MONTH, st.BILL_MONTH) DESC
 /
 
-COMMENT ON TABLE V_CONSOLIDATED_OVERAGE_REPORT IS 'Сводный отчет по превышению с данными из SPNet и STECCOM. КАЖДАЯ СТРОКА = ОТДЕЛЬНЫЙ ПЕРИОД (BILL_MONTH). Периоды НЕ суммируются! STECCOM данные разделены: STECCOM_MONTHLY_AMOUNT/SUSPENDED_AMOUNT (суммы) и STECCOM_PLAN_NAME_MONTHLY/SUSPENDED (планы). Группировка: IMEI + CONTRACT_ID + BILL_MONTH - одна строка на период.'
+COMMENT ON TABLE V_CONSOLIDATED_OVERAGE_REPORT IS 'Сводный отчет по превышению с данными из SPNet и STECCOM. КАЖДАЯ СТРОКА = ОТДЕЛЬНЫЙ ПЕРИОД (BILL_MONTH). Периоды НЕ суммируются! STECCOM данные разделены: STECCOM_MONTHLY_AMOUNT/SUSPENDED_AMOUNT (суммы) и STECCOM_PLAN_NAME_MONTHLY/SUSPENDED (планы). Группировка: IMEI + CONTRACT_ID + BILL_MONTH - одна строка на период. PLAN_NAME заполняется из текущего периода, если отсутствует - из маппинга по contract_id или IMEI из других периодов.'
 /
 
 SET DEFINE ON

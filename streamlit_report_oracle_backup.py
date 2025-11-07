@@ -193,6 +193,7 @@ def get_main_report(period_filter=None, plan_filter=None, contract_id_filter=Non
         v.CODE_1C AS "Code 1C",
         v.SERVICE_ID AS "Service ID",
         v.AGREEMENT_NUMBER AS "Agreement #",
+        COALESCE(v.PLAN_NAME, '') AS "Plan Name",
         COALESCE(v.STECCOM_PLAN_NAME_MONTHLY, '') AS "Plan Monthly",
         COALESCE(v.STECCOM_PLAN_NAME_SUSPENDED, '') AS "Plan Suspended",
         -- Разделение трафика и событий
