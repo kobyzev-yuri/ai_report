@@ -12,6 +12,10 @@ import io
 import os
 from pathlib import Path
 import warnings
+from auth_db import (
+    init_db, authenticate_user, create_user, list_users, 
+    delete_user, is_superuser
+)
 
 # Подавляем предупреждение pandas о cx_Oracle (работает корректно)
 warnings.filterwarnings('ignore', message='pandas only supports SQLAlchemy')
@@ -359,15 +363,132 @@ def export_to_excel(df):
     return output.getvalue()
 
 
+# Инициализация базы данных пользователей
+init_db()
+
+def show_login_page():
+    """Отображение страницы входа"""
+    st.title("🔐 Система отчетов по Iridium M2M")
+    st.markdown("---")
+    
+    st.info("💡 Для создания учетной записи обратитесь к администратору или используйте скрипт `create_user.py`")
+    
+    st.subheader("Вход")
+    with st.form("login_form"):
+        login_username = st.text_input("Имя пользователя", key="login_username")
+        login_password = st.text_input("Пароль", type="password", key="login_password")
+        login_submitted = st.form_submit_button("Войти", use_container_width=True)
+        
+        if login_submitted:
+            if not login_username or not login_password:
+                st.error("Заполните все поля")
+            else:
+                success, username, is_super = authenticate_user(login_username, login_password)
+                if success:
+                    st.session_state.authenticated = True
+                    st.session_state.username = username
+                    st.session_state.is_superuser = is_super
+                    st.success(f"Добро пожаловать, {username}! 👋")
+                    st.rerun()
+                else:
+                    st.error("Неверное имя пользователя или пароль")
+
+def show_user_management():
+    """Отображение управления пользователями (только для суперпользователей)"""
+    if not st.session_state.get('is_superuser', False):
+        return
+    
+    st.sidebar.markdown("---")
+    st.sidebar.subheader("👥 Управление пользователями")
+    
+    # Создание нового пользователя
+    with st.sidebar.expander("➕ Создать пользователя"):
+        with st.form("create_user_form"):
+            new_username = st.text_input("Имя пользователя")
+            new_password = st.text_input("Пароль", type="password")
+            new_is_super = st.checkbox("Суперпользователь")
+            create_submitted = st.form_submit_button("Создать")
+            
+            if create_submitted:
+                success, message = create_user(
+                    new_username, 
+                    new_password, 
+                    is_superuser=new_is_super,
+                    created_by=st.session_state.username
+                )
+                if success:
+                    st.sidebar.success(message)
+                    st.rerun()
+                else:
+                    st.sidebar.error(message)
+    
+    # Список пользователей
+    with st.sidebar.expander("📋 Список пользователей"):
+        users = list_users()
+        if users:
+            for user in users:
+                superuser_mark = " 👑" if user['is_superuser'] else ""
+                st.write(f"**{user['username']}**{superuser_mark}")
+                if user['last_login']:
+                    st.caption(f"Последний вход: {user['last_login'][:10]}")
+                
+                # Кнопка удаления (кроме текущего пользователя и суперпользователей)
+                if user['username'] != st.session_state.username and not user['is_superuser']:
+                    if st.button("🗑️ Удалить", key=f"delete_{user['username']}"):
+                        success, message = delete_user(user['username'])
+                        if success:
+                            st.sidebar.success(message)
+                            st.rerun()
+                        else:
+                            st.sidebar.error(message)
+        else:
+            st.write("Пользователи не найдены")
+
 def main():
     """Основная функция приложения"""
     
-    # Настройка страницы
+    # Инициализация session state для авторизации
+    if 'authenticated' not in st.session_state:
+        st.session_state.authenticated = False
+    if 'username' not in st.session_state:
+        st.session_state.username = None
+    if 'is_superuser' not in st.session_state:
+        st.session_state.is_superuser = False
+    
+    # Если не авторизован, показываем страницу входа
+    if not st.session_state.authenticated:
+        st.set_page_config(
+            page_title="Iridium M2M - Авторизация",
+            page_icon="🔐",
+            layout="centered"
+        )
+        show_login_page()
+        return
+    
+    # Основное приложение для авторизованных пользователей
     st.set_page_config(
         page_title="Iridium M2M Overage Report (Oracle)",
         page_icon="📊",
         layout="wide"
     )
+    
+    # Боковая панель с информацией о пользователе
+    st.sidebar.header("👤 Пользователь")
+    st.sidebar.write(f"**{st.session_state.username}**")
+    if st.session_state.is_superuser:
+        st.sidebar.write("👑 Суперпользователь")
+    
+    # Управление пользователями для суперпользователей
+    show_user_management()
+    
+    # Кнопка выхода
+    if st.sidebar.button("🚪 Выйти"):
+        st.session_state.authenticated = False
+        st.session_state.username = None
+        st.session_state.is_superuser = False
+        st.rerun()
+    
+    st.sidebar.markdown("---")
     
     # Проверка загрузки конфигурации
     if not ORACLE_PASSWORD:
