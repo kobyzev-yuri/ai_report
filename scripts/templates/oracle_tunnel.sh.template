@@ -1,0 +1,190 @@
+#!/bin/bash
+# ============================================================================
+# SSH туннель для доступа к Oracle серверу через vz2
+# Использование: ./oracle_tunnel.sh [start|stop|status|restart]
+# ============================================================================
+
+# Настройки подключения
+# ВАЖНО: Замените на реальные значения перед использованием
+SSH_HOST="your.ssh.server.com"
+SSH_PORT="22"
+SSH_USER="your_ssh_user"
+ORACLE_HOST="oracle.server.local"
+ORACLE_PORT="1521"
+LOCAL_PORT="15210"  # Локальный порт (можно изменить если занят)
+PID_FILE="/tmp/oracle_tunnel.pid"
+LOG_FILE="/tmp/oracle_tunnel.log"
+
+# Проверка аргументов
+ACTION="${1:-start}"
+
+# Функция проверки существования туннеля
+check_tunnel() {
+    if [ -f "$PID_FILE" ]; then
+        PID=$(cat "$PID_FILE")
+        if ps -p "$PID" > /dev/null 2>&1; then
+            return 0  # Туннель работает
+        else
+            rm -f "$PID_FILE"
+            return 1  # Туннель не работает
+        fi
+    else
+        return 1  # Файл PID не существует
+    fi
+}
+
+# Функция запуска туннеля
+start_tunnel() {
+    if check_tunnel; then
+        echo "⚠️  Туннель уже запущен (PID: $(cat $PID_FILE))"
+        echo "   Используйте './oracle_tunnel.sh stop' для остановки"
+        return 1
+    fi
+
+    echo "============================================================================"
+    echo "Запуск SSH туннеля для Oracle"
+    echo "============================================================================"
+    echo "Локальный порт:  localhost:$LOCAL_PORT"
+    echo "SSH сервер:      $SSH_USER@$SSH_HOST:$SSH_PORT"
+    echo "Oracle сервер:  $ORACLE_HOST:$ORACLE_PORT"
+    echo ""
+
+    # Проверка доступности SSH сервера
+    echo "🔍 Проверка доступности SSH сервера..."
+    if ! ssh -p "$SSH_PORT" -o ConnectTimeout=5 -o BatchMode=yes "$SSH_USER@$SSH_HOST" exit 2>/dev/null; then
+        echo "❌ Ошибка: Не удается подключиться к SSH серверу $SSH_USER@$SSH_HOST:$SSH_PORT"
+        echo "   Проверьте подключение к интернету и доступность сервера"
+        return 1
+    fi
+    echo "✅ SSH сервер доступен"
+
+    # Проверка занятости локального порта
+    if lsof -Pi :$LOCAL_PORT -sTCP:LISTEN -t >/dev/null 2>&1; then
+        echo "⚠️  Порт $LOCAL_PORT уже занят"
+        echo "   Используйте другой порт или освободите текущий"
+        return 1
+    fi
+
+    # Запуск туннеля в фоновом режиме
+    echo "🚀 Запуск туннеля..."
+    ssh -f -N -L "$LOCAL_PORT:$ORACLE_HOST:$ORACLE_PORT" \
+        -p "$SSH_PORT" \
+        -o ServerAliveInterval=60 \
+        -o ServerAliveCountMax=3 \
+        -o ExitOnForwardFailure=yes \
+        "$SSH_USER@$SSH_HOST" \
+        > "$LOG_FILE" 2>&1
+
+    sleep 1
+
+    # Проверка успешности запуска
+    SSH_PID=$(pgrep -f "ssh.*-L $LOCAL_PORT:$ORACLE_HOST:$ORACLE_PORT")
+    if [ -n "$SSH_PID" ]; then
+        echo "$SSH_PID" > "$PID_FILE"
+        echo "✅ Туннель успешно запущен (PID: $SSH_PID)"
+        echo ""
+        echo "📋 Использование:"
+        echo "   Подключение к Oracle через туннель:"
+        echo "   sqlplus your_user/your_password@localhost:$LOCAL_PORT/your_service"
+        echo ""
+        echo "   Или в Python:"
+        echo "   ORACLE_HOST=localhost"
+        echo "   ORACLE_PORT=$LOCAL_PORT"
+        echo ""
+        echo "📝 Логи: $LOG_FILE"
+        echo "🛑 Остановка: ./oracle_tunnel.sh stop"
+        return 0
+    else
+        echo "❌ Ошибка: Не удалось запустить туннель"
+        echo "   Проверьте логи: $LOG_FILE"
+        return 1
+    fi
+}
+
+# Функция остановки туннеля
+stop_tunnel() {
+    if ! check_tunnel; then
+        echo "⚠️  Туннель не запущен"
+        return 1
+    fi
+
+    PID=$(cat "$PID_FILE")
+    echo "🛑 Остановка туннеля (PID: $PID)..."
+    
+    kill "$PID" 2>/dev/null
+    sleep 1
+    
+    # Проверка, что процесс остановлен
+    if ps -p "$PID" > /dev/null 2>&1; then
+        echo "⚠️  Процесс не остановился, принудительное завершение..."
+        kill -9 "$PID" 2>/dev/null
+        sleep 1
+    fi
+    
+    rm -f "$PID_FILE"
+    
+    if ! ps -p "$PID" > /dev/null 2>&1; then
+        echo "✅ Туннель остановлен"
+        return 0
+    else
+        echo "❌ Ошибка: Не удалось остановить туннель"
+        return 1
+    fi
+}
+
+# Функция проверки статуса
+status_tunnel() {
+    if check_tunnel; then
+        PID=$(cat "$PID_FILE")
+        echo "✅ Туннель работает (PID: $PID)"
+        echo "   Локальный порт: localhost:$LOCAL_PORT"
+        echo "   Oracle сервер: $ORACLE_HOST:$ORACLE_PORT через $SSH_USER@$SSH_HOST:$SSH_PORT"
+        
+        # Проверка доступности локального порта
+        if lsof -Pi :$LOCAL_PORT -sTCP:LISTEN >/dev/null 2>&1; then
+            echo "   Порт $LOCAL_PORT слушается"
+        else
+            echo "   ⚠️  Порт $LOCAL_PORT не слушается"
+        fi
+        return 0
+    else
+        echo "❌ Туннель не запущен"
+        return 1
+    fi
+}
+
+# Обработка действий
+case "$ACTION" in
+    start)
+        start_tunnel
+        ;;
+    stop)
+        stop_tunnel
+        ;;
+    status)
+        status_tunnel
+        ;;
+    restart)
+        stop_tunnel
+        sleep 1
+        start_tunnel
+        ;;
+    *)
+        echo "Использование: $0 [start|stop|status|restart]"
+        echo ""
+        echo "Действия:"
+        echo "  start   - Запустить SSH туннель"
+        echo "  stop    - Остановить SSH туннель"
+        echo "  status  - Проверить статус туннеля"
+        echo "  restart - Перезапустить туннель"
+        echo ""
+        echo "Настройки:"
+        echo "  Локальный порт:  $LOCAL_PORT"
+        echo "  SSH сервер:      $SSH_USER@$SSH_HOST:$SSH_PORT"
+        echo "  Oracle сервер:   $ORACLE_HOST:$ORACLE_PORT"
+        exit 1
+        ;;
+esac
+
+exit $?
+

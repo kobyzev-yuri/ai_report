@@ -167,6 +167,7 @@ def get_main_report(period_filter=None, plan_filter=None, contract_id_filter=Non
     # Формируем базовый запрос (без параметров в WHERE)
     base_query = """
     SELECT 
+        v.financial_period AS "Отчетный Период",
         v.bill_month AS "Bill Month",
         v.imei AS "IMEI",
         v.contract_id AS "Contract ID",
@@ -199,16 +200,10 @@ def get_main_report(period_filter=None, plan_filter=None, contract_id_filter=Non
             THEN 0
             ELSE v.calculated_overage
         END AS "Calculated Overage ($)",
-        CASE 
-            WHEN UPPER(COALESCE(v.display_name, '')) LIKE '%%СТЭК.КОМ%%' 
-                 OR UPPER(COALESCE(v.display_name, '')) LIKE '%%СТЭККОМ%%'
-                 OR UPPER(COALESCE(v.display_name, '')) LIKE '%%STECCOM%%'
-            THEN 0
-            ELSE v.spnet_total_amount
-        END AS "SPNet Total Amount ($)",
         -- Fees из STECCOM_EXPENSES (убрали префикс "Fee:")
         COALESCE(v.fee_activation_fee, 0) AS "Activation Fee",
         COALESCE(v.fee_advance_charge, 0) AS "Advance Charge",
+        COALESCE(v.fee_advance_charge_previous_month, 0) AS "Advance Charge Previous Month",
         COALESCE(v.fee_credit, 0) AS "Credit",
         COALESCE(v.fee_credited, 0) AS "Credited",
         COALESCE(v.fee_prorated, 0) AS "Prorated"
@@ -273,16 +268,19 @@ def get_main_report(period_filter=None, plan_filter=None, contract_id_filter=Non
 
 @st.cache_data(ttl=300)  # Кэшируем на 5 минут
 def get_periods():
-    """Получение списка периодов"""
+    """Получение списка периодов (показываем financial_period, но возвращаем bill_month для фильтрации)"""
     conn = get_connection()
     if not conn:
         return []
     
-    # Используем v_consolidated_report_with_billing, где bill_month уже в формате "YYYY-MM"
+    # Используем financial_period для отображения, но bill_month для фильтрации
     query = """
-    SELECT DISTINCT bill_month
+    SELECT DISTINCT 
+        financial_period AS display_period,
+        bill_month AS filter_period
     FROM v_consolidated_report_with_billing
-    WHERE bill_month IS NOT NULL
+    WHERE financial_period IS NOT NULL
+      AND bill_month IS NOT NULL
     ORDER BY bill_month DESC
     """
     
@@ -291,15 +289,19 @@ def get_periods():
         cursor.execute(query)
         periods = []
         for row in cursor.fetchall():
-            if row[0]:
-                # bill_month уже в формате "YYYY-MM"
-                periods.append(str(row[0]))
+            if row[0] and row[1]:
+                # Возвращаем кортеж (display_period, filter_period)
+                # display_period - для отображения в фильтре (financial_period)
+                # filter_period - для фильтрации (bill_month)
+                periods.append((str(row[0]), str(row[1])))
+        cursor.close()
         return periods
     except Exception as e:
         st.error(f"Ошибка получения периодов: {e}")
         return []
     finally:
-        conn.close()
+        if conn:
+            conn.close()
 
 
 @st.cache_data(ttl=300)  # Кэшируем на 5 минут
@@ -486,6 +488,36 @@ def main():
     # Заголовок
     st.title("📊 Iridium M2M Overage Report")
     st.markdown("**All Plans (Calculated Overage for SBD-1 and SBD-10 only)**")
+    
+    # Expander с комментарием к отчету
+    with st.expander("ℹ️ О комментарии к отчету", expanded=False):
+        st.markdown("""
+        **Описание отчета:**
+        
+        Этот отчет объединяет данные из двух источников:
+        
+        1. **SPNet** - данные об использовании трафика:
+           - `Traffic Usage (KB)` - объем использованного трафика
+           - `Overage (KB)` - превышение включенного трафика
+           - `Calculated Overage ($)` - рассчитанная стоимость превышения (только для SBD-1 и SBD-10)
+        
+        2. **STECCOM** - данные из биллинга:
+           - `Plan Monthly` - название активного тарифного плана
+           - `Plan Suspended` - название приостановленного тарифного плана
+        
+        **Важно:**
+        - Каждая строка отчета = отдельный период (BILL_MONTH)
+        - Периоды НЕ суммируются
+        - Расчет превышения выполняется только для активных тарифов SBD-1 и SBD-10
+        - Данные группируются по IMEI + CONTRACT_ID + BILL_MONTH
+        
+        **Логика периодов STECCOM:**
+        - Файл `STECCOMLLCRussiaSBD.AccessFees.20250702.csv` содержит счета за период с 2 июня по 1 июля включительно
+        - Дата в имени файла (20250702) - это дата окончания периода
+        - Для отчета за июнь (202506) используется файл с датой 20250702
+        - Система автоматически вычитает один месяц из даты файла для правильного сопоставления периодов
+        """)
+    
     st.markdown("---")
     
     # Создаем вкладки для отчета и загрузки данных
@@ -494,23 +526,39 @@ def main():
         st.header("⚙️ Filters")
         
         # Период
-        periods = get_periods()
+        periods_data = get_periods()
+        
+        # periods_data теперь список кортежей (display_period, filter_period)
+        # Создаем словарь для маппинга display_period -> filter_period
+        period_mapping = {}
+        period_display_list = []
+        
+        for display_period, filter_period in periods_data:
+            period_mapping[display_period] = filter_period
+            period_display_list.append(display_period)
         
         # По умолчанию выбираем последний период (первый в отсортированном списке)
         if 'selected_period_index' not in st.session_state:
             st.session_state.selected_period_index = 0  # 0 = последний период (не "All Periods")
         
-        period_options = periods + ["All Periods"]  # Последний период первым, потом "All Periods"
-        selected_period = st.selectbox(
-            "Period", 
+        period_options = period_display_list + ["All Periods"]  # Последний период первым, потом "All Periods"
+        selected_period_display = st.selectbox(
+            "Отчетный Период (Financial Period)", 
             period_options,
             index=st.session_state.selected_period_index,
-            key='period_selectbox'
+            key='period_selectbox',
+            help="Выберите отчетный период для финансистов. Фильтрация выполняется по bill_month."
         )
         
+        # Преобразуем display_period в filter_period для фильтрации
+        if selected_period_display == "All Periods":
+            selected_period = None
+        else:
+            selected_period = period_mapping.get(selected_period_display, selected_period_display)
+        
         # Обновляем индекс при изменении
-        if selected_period in period_options:
-            st.session_state.selected_period_index = period_options.index(selected_period)
+        if selected_period_display in period_options:
+            st.session_state.selected_period_index = period_options.index(selected_period_display)
         
         # Тарифный план
         plans = get_plans()
@@ -572,7 +620,7 @@ def main():
     # ========== REPORT TAB ==========
     with tab_report:
         
-        period_filter = None if selected_period == "All Periods" else selected_period
+        period_filter = selected_period  # selected_period уже преобразован в filter_period (bill_month) или None
         plan_filter = None if selected_plan == "All Plans" else selected_plan
         contract_id_filter = contract_id_filter if contract_id_filter else None
         imei_filter = imei_filter if imei_filter else None
@@ -767,6 +815,38 @@ def main():
     with tab_loader:
         st.header("📥 Data Loader")
         st.markdown("Загрузка и импорт данных Иридиум (трафик и финансовые файлы)")
+        
+        # Expander с комментарием к процедуре загрузки
+        with st.expander("ℹ️ О процедуре загрузки документов (CSV) в базу", expanded=False):
+            st.markdown("""
+            **Процедура загрузки CSV файлов:**
+            
+            1. **Автоматическое определение типа файла:**
+               - Файлы с именами, содержащими "spnet" или "traffic" → загружаются как SPNet
+               - Файлы с именами, содержащими "steccom", "access" или "fee" → загружаются как STECCOM
+            
+            2. **Автоматическое сохранение:**
+               - SPNet файлы сохраняются в `data/SPNet reports/`
+               - STECCOM файлы сохраняются в `data/STECCOMLLCRussiaSBD.AccessFees_reports/`
+            
+            3. **Проверка дубликатов:**
+               - Система автоматически проверяет, был ли файл уже загружен
+               - Уже загруженные файлы пропускаются
+               - Неполные загрузки перезагружаются автоматически
+            
+            4. **Типы данных:**
+               - **SPNet**: данные об использовании трафика (CSV/Excel)
+               - **STECCOM**: финансовые данные из инвойсов (CSV/Excel)
+            
+            5. **После загрузки:**
+               - Обновите вкладку "Report" для просмотра новых данных
+               - Данные автоматически попадают в базу данных PostgreSQL
+            
+            **Формат файлов:**
+            - Поддерживаются форматы: CSV, XLSX
+            - Файлы должны соответствовать структуре таблиц SPNET_TRAFFIC или STECCOM_EXPENSES
+            """)
+        
         st.markdown("---")
         
         # Директории для данных

@@ -5,21 +5,22 @@
 # ============================================================================
 
 # Используем алиас или прямое подключение
-if command -v vz2 &> /dev/null; then
-    SSH_CMD="vz2"
-    REMOTE_USER="root"
-    REMOTE_HOST="82.114.2.2"
+# ВАЖНО: Замените на реальные значения перед использованием
+if command -v your_server_alias &> /dev/null; then
+    SSH_CMD="your_server_alias"
+    REMOTE_USER="your_remote_user"
+    REMOTE_HOST="your.remote.server.com"
 else
-    SSH_CMD="ssh -p 1194 root@82.114.2.2"
-    REMOTE_USER="root"
-    REMOTE_HOST="82.114.2.2"
+    SSH_CMD="ssh -p 22 your_remote_user@your.remote.server.com"
+    REMOTE_USER="your_remote_user"
+    REMOTE_HOST="your.remote.server.com"
 fi
 
 REMOTE_PATH="/usr/local/projects/ai_report"
 LOCAL_PATH="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 echo "============================================================================"
-echo "Синхронизация проекта на сервер vz2 (Oracle)"
+echo "Синхронизация проекта на удаленный сервер"
 echo "============================================================================"
 echo "Локальный путь:  $LOCAL_PATH"
 echo "Удаленный сервер: $REMOTE_USER@$REMOTE_HOST"
@@ -34,7 +35,7 @@ $SSH_CMD "mkdir -p $REMOTE_PATH"
 echo ""
 echo "🔄 Синхронизация файлов..."
 rsync -avz --progress \
-    -e "ssh -p 1194" \
+    -e "ssh -p $SSH_PORT" \
     --exclude='.git/' \
     --exclude='.gitignore' \
     --exclude='__pycache__/' \
@@ -70,8 +71,8 @@ rsync -avz --progress \
 echo ""
 echo "✅ Синхронизация завершена!"
 echo ""
-echo "📋 Следующие шаги на удаленном сервере (vz2):"
-echo "  1. Подключитесь: vz2"
+echo "📋 Следующие шаги на удаленном сервере:"
+echo "  1. Подключитесь к серверу"
 echo "  2. Перейдите в директорию: cd $REMOTE_PATH"
 echo "  3. Создайте config.env с настройками Oracle:"
 echo "     cp config.env.example config.env"

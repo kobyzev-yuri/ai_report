@@ -1,0 +1,58 @@
+-- ============================================================================
+-- Проверка дубликатов fees в STECCOM_EXPENSES
+-- Назначение: Найти дубликаты записей, которые могут вызывать задвоение сумм
+-- ============================================================================
+
+-- 1. Проверка дубликатов по ключевым полям (без ID)
+SELECT 
+    INVOICE_DATE,
+    CONTRACT_ID,
+    ICC_ID_IMEI,
+    DESCRIPTION,
+    AMOUNT,
+    COUNT(*) AS duplicate_count,
+    LISTAGG(ID, ', ') WITHIN GROUP (ORDER BY ID) AS ids,
+    LISTAGG(SOURCE_FILE, ', ') WITHIN GROUP (ORDER BY SOURCE_FILE) AS source_files
+FROM STECCOM_EXPENSES
+WHERE CONTRACT_ID IS NOT NULL
+  AND ICC_ID_IMEI IS NOT NULL
+  AND INVOICE_DATE IS NOT NULL
+  AND (SERVICE IS NULL OR UPPER(TRIM(SERVICE)) != 'BROADBAND')
+GROUP BY INVOICE_DATE, CONTRACT_ID, ICC_ID_IMEI, DESCRIPTION, AMOUNT
+HAVING COUNT(*) > 1
+ORDER BY duplicate_count DESC, INVOICE_DATE DESC, CONTRACT_ID;
+
+-- 2. Проверка сумм по периодам для конкретного контракта (пример из запроса пользователя)
+SELECT 
+    TO_CHAR(INVOICE_DATE, 'YYYYMM') AS bill_month,
+    CONTRACT_ID,
+    ICC_ID_IMEI AS imei,
+    DESCRIPTION,
+    COUNT(*) AS record_count,
+    SUM(AMOUNT) AS total_amount,
+    LISTAGG(AMOUNT, ' + ') WITHIN GROUP (ORDER BY ID) AS amounts
+FROM STECCOM_EXPENSES
+WHERE CONTRACT_ID = 'SUB-61922000117'
+  AND ICC_ID_IMEI = '300234069804210'
+  AND TO_CHAR(INVOICE_DATE, 'YYYYMM') = '202510'
+GROUP BY TO_CHAR(INVOICE_DATE, 'YYYYMM'), CONTRACT_ID, ICC_ID_IMEI, DESCRIPTION
+ORDER BY DESCRIPTION;
+
+-- 3. Проверка агрегированных fees для этого контракта
+SELECT 
+    TO_CHAR(INVOICE_DATE, 'YYYYMM') AS bill_month,
+    CONTRACT_ID,
+    ICC_ID_IMEI AS imei,
+    SUM(CASE WHEN UPPER(TRIM(DESCRIPTION)) LIKE '%ACTIVATION%' OR UPPER(TRIM(DESCRIPTION)) = 'ACTIVATION FEE' THEN AMOUNT ELSE 0 END) AS fee_activation_fee,
+    SUM(CASE WHEN UPPER(TRIM(DESCRIPTION)) LIKE '%ADVANCE CHARGE%' OR UPPER(TRIM(DESCRIPTION)) = 'ADVANCE CHARGE' THEN AMOUNT ELSE 0 END) AS fee_advance_charge,
+    SUM(CASE WHEN UPPER(TRIM(DESCRIPTION)) LIKE '%PRORATED%' OR UPPER(TRIM(DESCRIPTION)) = 'PRORATED' THEN AMOUNT ELSE 0 END) AS fee_prorated,
+    SUM(AMOUNT) AS fees_total,
+    COUNT(*) AS total_records
+FROM STECCOM_EXPENSES
+WHERE CONTRACT_ID = 'SUB-61922000117'
+  AND ICC_ID_IMEI = '300234069804210'
+  AND TO_CHAR(INVOICE_DATE, 'YYYYMM') = '202510'
+GROUP BY TO_CHAR(INVOICE_DATE, 'YYYYMM'), CONTRACT_ID, ICC_ID_IMEI;
+
+
+

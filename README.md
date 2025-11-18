@@ -59,6 +59,25 @@ streamlit run streamlit_report_oracle_backup.py \
 
 Приложение доступно через Nginx: **stat.steccom.ru:7776/ai_report**
 
+### SSH туннель для доступа к Oracle
+
+Если Oracle сервер находится в локальной сети и недоступен напрямую, можно использовать SSH туннель через сервер vz2:
+
+```bash
+# Запуск туннеля
+./oracle_tunnel.sh start
+
+# Проверка статуса
+./oracle_tunnel.sh status
+
+# Остановка туннеля
+./oracle_tunnel.sh stop
+```
+
+После запуска туннеля Oracle будет доступен на `localhost:15210`.
+
+**Подробная документация**: `docs/ORACLE_TUNNEL.md`
+
 ## 📊 Основные интерфейсы
 
 ### 1. Streamlit Web Interface
@@ -147,14 +166,18 @@ WHERE code_1c IS NOT NULL;
 - Все данные из V_CONSOLIDATED_OVERAGE_REPORT
 - + данные клиентов из биллинга
 - Используется для экспорта в 1С
+- **ВАЖНО:** Включает авансы за предыдущий месяц (`FEE_ADVANCE_CHARGE_PREVIOUS_MONTH`)
+  - Авансы за месяц X отображаются в отчете за месяц X+1 (финансовый период)
+  - Это позволяет видеть авансы даже если IMEI был выключен в следующем месяце
 
 **Пример запроса:**
 ```sql
 SELECT customer_name, code_1c, agreement_number,
-       imei, plan_name, bill_month,
+       imei, plan_name, bill_month, financial_period,
+       fee_advance_charge_previous_month,
        spnet_total_amount, calculated_overage, steccom_total_amount
 FROM V_CONSOLIDATED_REPORT_WITH_BILLING
-WHERE bill_month = '202510'
+WHERE financial_period = '2025-10'
 ORDER BY customer_name;
 ```
 
@@ -227,16 +250,26 @@ ai_report/
 │   ├── load_steccom_expenses.py # Загрузка данных STECCOM
 │   └── calculate_overage.py    # Python модуль расчета превышений
 │
+├── postgresql/                  # PostgreSQL (testing)
+│   ├── tables/                  # DDL таблиц
+│   ├── views/                   # Представления для отчетов
+│   ├── functions/               # PL/pgSQL функции
+│   └── README.md                # Документация по PostgreSQL
+│
 ├── docs/                        # Документация
 │   ├── INSTALLATION_ORACLE.md   # Инструкция по установке Oracle
-│   ├── billing_integration.md   # Интеграция с биллингом
-│   ├── README_STREAMLIT.md     # Документация Streamlit
-│   └── TZ.md                   # Техническое задание
+│   ├── ORACLE_TUNNEL.md         # SSH туннель для Oracle
+│   └── SYNC_TO_ORACLE.md        # Синхронизация с Oracle
+│
+├── tests/                       # Тесты и проверки
+│   ├── advance_charge_fix/      # Тесты для исправления авансов
+│   └── legacy/                  # Старые тесты
 │
 ├── streamlit_report_oracle_backup.py      # Streamlit приложение (Oracle)
 ├── streamlit_report_postgresql_backup.py # Streamlit приложение (PostgreSQL)
 ├── streamlit_data_loader.py              # Модуль загрузки данных
 ├── db_connection.py                      # Модуль подключения к БД
+├── oracle_tunnel.sh                      # SSH туннель для Oracle
 ├── run_streamlit_background.sh           # Скрипт запуска в фоне
 ├── stop_streamlit.sh                     # Скрипт остановки
 ├── status_streamlit.sh                   # Скрипт проверки статуса

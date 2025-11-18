@@ -60,7 +60,6 @@ spnet_data AS (
         SUM(ov.REGISTRATION_EVENTS) AS REGISTRATION_EVENTS,
         
         -- SPNet суммы (по каждому периоду отдельно)
-        SUM(ov.SPNET_TOTAL_AMOUNT) AS SPNET_TOTAL_AMOUNT,
         MAX(ov.INCLUDED_KB) AS INCLUDED_KB,
         SUM(ov.TOTAL_USAGE_KB) AS TOTAL_USAGE_KB,
         SUM(ov.OVERAGE_KB) AS OVERAGE_KB,
@@ -76,23 +75,35 @@ steccom_data AS (
     SELECT 
         se.ICC_ID_IMEI AS IMEI,
         se.CONTRACT_ID,
-        TO_CHAR(se.INVOICE_DATE, 'YYYYMM') AS BILL_MONTH,
-        -- Основной тариф (Monthly Fee, не Suspended) - сумма и план
-        SUM(CASE 
-            WHEN se.RATE_TYPE IS NOT NULL 
-             AND UPPER(TRIM(se.RATE_TYPE)) NOT LIKE '%SUSPEND%'
-            THEN se.AMOUNT 
-            ELSE 0 
-        END) AS STECCOM_MONTHLY_AMOUNT,
-        -- Suspended тариф - сумма
-        SUM(CASE 
-            WHEN se.RATE_TYPE IS NOT NULL 
-             AND UPPER(TRIM(se.RATE_TYPE)) LIKE '%SUSPEND%'
-            THEN se.AMOUNT 
-            ELSE 0 
-        END) AS STECCOM_SUSPENDED_AMOUNT,
-        -- Общая сумма для обратной совместимости
-        SUM(se.AMOUNT) AS STECCOM_TOTAL_AMOUNT,
+        -- ВАЖНО: Период определяется по дате в имени файла (SOURCE_FILE)
+        -- Файл STECCOMLLCRussiaSBD.AccessFees.20250702.csv содержит счета за период с 2 июня по 1 июля включительно
+        -- Дата в имени файла (20250702) - это дата окончания периода (2 июля = следующий день после окончания)
+        -- Для отчета за июнь (202506) нужно использовать файл с датой 20250702
+        -- Поэтому вычитаем один месяц из даты в имени файла для получения правильного BILL_MONTH
+        CASE 
+            -- Если есть дата в имени файла (формат: .YYYYMMDD.csv), используем её
+            WHEN se.SOURCE_FILE ~ '\.([0-9]{8})\.csv$' THEN
+                -- Извлекаем YYYYMM из имени файла и вычитаем один месяц
+                -- Пример: 20250702 -> извлекаем 202507 -> вычитаем месяц -> 202506
+                CASE 
+                    WHEN ((regexp_match(se.SOURCE_FILE, '\.([0-9]{8})\.csv$'))[1]::int) / 100 % 100 = 1 THEN
+                        -- Если месяц = 01 (январь), переходим на предыдущий год (декабрь)
+                        (((regexp_match(se.SOURCE_FILE, '\.([0-9]{8})\.csv$'))[1]::int) / 10000 - 1) * 100 + 12
+                    ELSE
+                        -- Иначе просто вычитаем 1 месяц
+                        ((regexp_match(se.SOURCE_FILE, '\.([0-9]{8})\.csv$'))[1]::int) / 100 - 1
+                END
+            ELSE
+                -- Если даты в имени файла нет, используем INVOICE_DATE минус один месяц
+                CASE 
+                    WHEN EXTRACT(MONTH FROM se.INVOICE_DATE) = 1 THEN
+                        -- Если январь, переходим на предыдущий год (декабрь)
+                        (EXTRACT(YEAR FROM se.INVOICE_DATE) - 1) * 100 + 12
+                    ELSE
+                        -- Иначе просто вычитаем месяц из INVOICE_DATE
+                        EXTRACT(YEAR FROM se.INVOICE_DATE) * 100 + EXTRACT(MONTH FROM se.INVOICE_DATE) - 1
+                END
+        END AS BILL_MONTH,
         -- Две отдельные колонки для планов: основной и suspended
         -- Основной план тарифа (из plan_discount, где rate_type не Suspend)
         MAX(CASE 
@@ -116,7 +127,23 @@ steccom_data AS (
     GROUP BY 
         se.ICC_ID_IMEI,
         se.CONTRACT_ID,
-        TO_CHAR(se.INVOICE_DATE, 'YYYYMM')
+        -- Группируем по вычисленному BILL_MONTH (используем то же выражение, что и в SELECT)
+        CASE 
+            WHEN se.SOURCE_FILE ~ '\.([0-9]{8})\.csv$' THEN
+                CASE 
+                    WHEN ((regexp_match(se.SOURCE_FILE, '\.([0-9]{8})\.csv$'))[1]::int) / 100 % 100 = 1 THEN
+                        (((regexp_match(se.SOURCE_FILE, '\.([0-9]{8})\.csv$'))[1]::int) / 10000 - 1) * 100 + 12
+                    ELSE
+                        ((regexp_match(se.SOURCE_FILE, '\.([0-9]{8})\.csv$'))[1]::int) / 100 - 1
+                END
+            ELSE
+                CASE 
+                    WHEN EXTRACT(MONTH FROM se.INVOICE_DATE) = 1 THEN
+                        (EXTRACT(YEAR FROM se.INVOICE_DATE) - 1) * 100 + 12
+                    ELSE
+                        EXTRACT(YEAR FROM se.INVOICE_DATE) * 100 + EXTRACT(MONTH FROM se.INVOICE_DATE) - 1
+                END
+        END
 )
 SELECT 
     COALESCE(sp.IMEI, st.IMEI) AS IMEI,
@@ -139,18 +166,12 @@ SELECT
     COALESCE(sp.REGISTRATION_EVENTS, 0) AS REGISTRATION_EVENTS,
     
     -- SPNet данные (по каждому периоду отдельно, НЕ суммируются!)
-    COALESCE(sp.SPNET_TOTAL_AMOUNT, 0) AS SPNET_TOTAL_AMOUNT,
     COALESCE(sp.INCLUDED_KB, 0) AS INCLUDED_KB,
     COALESCE(sp.TOTAL_USAGE_KB, 0) AS TOTAL_USAGE_KB,
     COALESCE(sp.OVERAGE_KB, 0) AS OVERAGE_KB,
     COALESCE(sp.CALCULATED_OVERAGE, 0) AS CALCULATED_OVERAGE,
     
     -- STECCOM данные (по каждому периоду отдельно)
-    -- Разделение на основной тариф и suspended
-    COALESCE(st.STECCOM_MONTHLY_AMOUNT, 0) AS STECCOM_MONTHLY_AMOUNT,
-    COALESCE(st.STECCOM_SUSPENDED_AMOUNT, 0) AS STECCOM_SUSPENDED_AMOUNT,
-    -- Общая сумма для обратной совместимости
-    COALESCE(st.STECCOM_TOTAL_AMOUNT, 0) AS STECCOM_TOTAL_AMOUNT,
     -- Две отдельные колонки для планов: основной и suspended
     st.STECCOM_PLAN_NAME_MONTHLY AS STECCOM_PLAN_NAME_MONTHLY,
     st.STECCOM_PLAN_NAME_SUSPENDED AS STECCOM_PLAN_NAME_SUSPENDED
@@ -168,6 +189,6 @@ ORDER BY
     COALESCE(sp.IMEI, st.IMEI),
     COALESCE(sp.BILL_MONTH, st.BILL_MONTH) DESC;
 
-COMMENT ON VIEW V_CONSOLIDATED_OVERAGE_REPORT IS 'Сводный отчет по превышению с данными из SPNet и STECCOM. КАЖДАЯ СТРОКА = ОТДЕЛЬНЫЙ ПЕРИОД (BILL_MONTH). Периоды НЕ суммируются! STECCOM данные разделены: STECCOM_MONTHLY_AMOUNT/SUSPENDED_AMOUNT (суммы) и STECCOM_PLAN_NAME_MONTHLY/SUSPENDED (планы). Группировка: IMEI + CONTRACT_ID + BILL_MONTH - одна строка на период. PLAN_NAME заполняется из текущего периода, если отсутствует - из маппинга по contract_id или IMEI из других периодов.';
+COMMENT ON VIEW V_CONSOLIDATED_OVERAGE_REPORT IS 'Сводный отчет по превышению с данными из SPNet и STECCOM. КАЖДАЯ СТРОКА = ОТДЕЛЬНЫЙ ПЕРИОД (BILL_MONTH). Периоды НЕ суммируются! ВАЖНО: Для STECCOM период определяется по дате в имени файла (SOURCE_FILE). Файл STECCOMLLCRussiaSBD.AccessFees.20250702.csv содержит счета за период с 2 июня по 1 июля включительно. Дата в имени файла (20250702) - это дата окончания периода, поэтому для отчета за июнь (202506) используется файл с датой 20250702. BILL_MONTH для STECCOM вычисляется как дата из имени файла минус один месяц. STECCOM данные содержат только планы: STECCOM_PLAN_NAME_MONTHLY/SUSPENDED. Группировка: IMEI + CONTRACT_ID + BILL_MONTH - одна строка на период. PLAN_NAME заполняется из текущего периода, если отсутствует - из маппинга по contract_id или IMEI из других периодов.';
 
 \echo 'View V_CONSOLIDATED_OVERAGE_REPORT создан успешно!'

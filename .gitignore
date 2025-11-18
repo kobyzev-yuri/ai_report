@@ -75,6 +75,13 @@ secrets.*
 !config.example.*
 !*.example.*
 
+# Local scripts with sensitive data (IPs, passwords, etc.)
+scripts/local/
+**/local/
+*.local.*
+!*.local.example.*
+!*.template
+
 # OS
 Thumbs.db
 .DS_Store

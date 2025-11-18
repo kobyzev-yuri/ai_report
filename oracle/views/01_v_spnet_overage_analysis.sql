@@ -20,14 +20,14 @@ SELECT
     -- Трафик: только для SBD Data Usage в байтах
     SUM(CASE WHEN st.USAGE_TYPE = 'SBD Data Usage' THEN st.USAGE_BYTES ELSE 0 END) AS TRAFFIC_USAGE_BYTES,
     
-    -- События: количество сессий/вызовов (CALL_SESSION_COUNT)
-    -- Для всех типов использования суммируем события
-    SUM(NVL(st.CALL_SESSION_COUNT, 0)) AS EVENTS_COUNT,
+    -- События: считаем количество записей (каждая запись = одно событие)
+    -- Для всех типов использования считаем количество записей
+    COUNT(*) AS EVENTS_COUNT,
     
-    -- Также можно отдельно считать события по типам
-    SUM(CASE WHEN st.USAGE_TYPE = 'SBD Data Usage' THEN NVL(st.CALL_SESSION_COUNT, 0) ELSE 0 END) AS DATA_USAGE_EVENTS,
-    SUM(CASE WHEN st.USAGE_TYPE = 'SBD Mailbox Checks' THEN NVL(st.CALL_SESSION_COUNT, 0) ELSE 0 END) AS MAILBOX_EVENTS,
-    SUM(CASE WHEN st.USAGE_TYPE = 'SBD Registrations' THEN NVL(st.CALL_SESSION_COUNT, 0) ELSE 0 END) AS REGISTRATION_EVENTS,
+    -- Отдельно считаем события по типам (количество записей каждого типа)
+    COUNT(CASE WHEN st.USAGE_TYPE = 'SBD Data Usage' THEN 1 END) AS DATA_USAGE_EVENTS,
+    COUNT(CASE WHEN st.USAGE_TYPE = 'SBD Mailbox Checks' THEN 1 END) AS MAILBOX_EVENTS,
+    COUNT(CASE WHEN st.USAGE_TYPE = 'SBD Registrations' THEN 1 END) AS REGISTRATION_EVENTS,
     
     -- Количество записей
     COUNT(*) AS RECORD_COUNT,

@@ -1,0 +1,63 @@
+-- Проверка всех колонок Fees в представлении
+SET PAGESIZE 1000
+SET LINESIZE 200
+
+PROMPT ========================================
+PROMPT Проверка всех колонок Fees для периода 2025-11
+PROMPT ========================================
+SELECT 
+    BILL_MONTH,
+    IMEI,
+    CONTRACT_ID,
+    FEE_ACTIVATION_FEE,
+    FEE_ADVANCE_CHARGE,
+    FEE_ADVANCE_CHARGE_PREVIOUS_MONTH,
+    FEE_CREDIT,
+    FEE_CREDITED,
+    FEE_PRORATED
+FROM V_CONSOLIDATED_REPORT_WITH_BILLING
+WHERE IMEI = '300234069308010'
+  AND CONTRACT_ID = 'SUB-26089990228'
+  AND BILL_MONTH = '2025-11';
+
+PROMPT ========================================
+PROMPT Проверка всех записей с ненулевыми Fees для периода 2025-11
+PROMPT ========================================
+SELECT 
+    BILL_MONTH,
+    IMEI,
+    CONTRACT_ID,
+    FEE_ACTIVATION_FEE,
+    FEE_ADVANCE_CHARGE,
+    FEE_CREDIT,
+    FEE_CREDITED,
+    FEE_PRORATED
+FROM V_CONSOLIDATED_REPORT_WITH_BILLING
+WHERE BILL_MONTH = '2025-11'
+  AND (FEE_ACTIVATION_FEE IS NOT NULL AND FEE_ACTIVATION_FEE != 0
+       OR FEE_ADVANCE_CHARGE IS NOT NULL AND FEE_ADVANCE_CHARGE != 0
+       OR FEE_CREDIT IS NOT NULL AND FEE_CREDIT != 0
+       OR FEE_CREDITED IS NOT NULL AND FEE_CREDITED != 0
+       OR FEE_PRORATED IS NOT NULL AND FEE_PRORATED != 0)
+ORDER BY NVL(FEE_ADVANCE_CHARGE, 0) DESC;
+
+PROMPT ========================================
+PROMPT Проверка исходных данных в STECCOM_EXPENSES для периода 2025-11
+PROMPT ========================================
+SELECT 
+    SOURCE_FILE,
+    CONTRACT_ID,
+    ICC_ID_IMEI,
+    DESCRIPTION,
+    AMOUNT,
+    INVOICE_DATE
+FROM STECCOM_EXPENSES
+WHERE CONTRACT_ID = 'SUB-26089990228'
+  AND ICC_ID_IMEI = '300234069308010'
+  AND SOURCE_FILE LIKE '%20251102%'
+ORDER BY INVOICE_DATE DESC;
+
+PROMPT ========================================
+PROMPT Проверка завершена
+PROMPT ========================================
+

@@ -184,7 +184,7 @@ class SPNetDataLoader:
                     'usage_bytes': self.parse_number(row.get('Usage', None)),
                     'usage_unit': str(row.get('Usage Unit', '')).strip() if row.get('Usage Unit') else None,
                     'total_amount': self.parse_number(row.get('Total Amount', None)),
-                    'bill_month': self.parse_number(row.get('Bill Month', None)),
+                    'bill_month': self.parse_bill_month(row.get('Bill Month', None)),
                     'plan_name': str(row.get('Plan Name', '')).strip() if row.get('Plan Name') else None,
                     'imsi': str(row.get('IMSI', '')).strip() if row.get('IMSI') else None,
                     'msisdn': str(row.get('MSISDN', '')).strip() if row.get('MSISDN') else None,
@@ -448,6 +448,33 @@ class SPNetDataLoader:
             return None
         finally:
             cursor.close()
+    
+    def parse_bill_month(self, value):
+        """Парсинг и преобразование BILL_MONTH из формата MMYYYY в YYYYMM"""
+        if pd.isna(value) or value is None or str(value).strip() == '':
+            return None
+        
+        try:
+            bill_month = self.parse_number(value)
+            if bill_month is None:
+                return None
+            
+            # Преобразуем из MMYYYY (например, 92025 или 102025) в YYYYMM (202509 или 202510)
+            # Формат: MMYYYY где MM = месяц, YYYY = год
+            year = int(bill_month) % 10000  # Последние 4 цифры = год
+            month = int(bill_month) // 10000  # Первые цифры = месяц
+            
+            # Проверяем валидность
+            if year < 2000 or year > 2100 or month < 1 or month > 12:
+                logger.warning(f"Некорректный BILL_MONTH: {bill_month} (год={year}, месяц={month})")
+                return None
+            
+            # Преобразуем в YYYYMM
+            return year * 100 + month  # Например: 2025 * 100 + 9 = 202509
+            
+        except Exception as e:
+            logger.warning(f"Не удалось преобразовать BILL_MONTH '{value}': {e}")
+            return None
     
     def parse_number(self, value):
         """Парсинг числового значения"""

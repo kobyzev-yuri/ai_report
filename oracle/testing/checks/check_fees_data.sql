@@ -1,0 +1,35 @@
+-- Проверка данных Fees для конкретного IMEI
+SET PAGESIZE 1000
+SET LINESIZE 200
+
+PROMPT ========================================
+PROMPT Проверка данных Fees для IMEI с ненулевыми значениями
+PROMPT ========================================
+SELECT 
+    BILL_MONTH,
+    FINANCIAL_PERIOD,
+    IMEI,
+    CONTRACT_ID,
+    FEE_ACTIVATION_FEE,
+    FEE_ADVANCE_CHARGE,
+    FEE_ADVANCE_CHARGE_PREVIOUS_MONTH,
+    FEE_CREDIT,
+    FEE_CREDITED,
+    FEE_PRORATED
+FROM V_CONSOLIDATED_REPORT_WITH_BILLING
+WHERE IMEI = '300234069308010'
+  AND CONTRACT_ID LIKE 'SUB-26089990228%'
+  AND BILL_MONTH IN ('2025-10', '2025-09', '2025-08')
+  AND (
+      (FEE_ACTIVATION_FEE IS NOT NULL AND FEE_ACTIVATION_FEE != 0)
+      OR (FEE_ADVANCE_CHARGE IS NOT NULL AND FEE_ADVANCE_CHARGE != 0)
+      OR (FEE_CREDIT IS NOT NULL AND FEE_CREDIT != 0)
+      OR (FEE_CREDITED IS NOT NULL AND FEE_CREDITED != 0)
+      OR (FEE_PRORATED IS NOT NULL AND FEE_PRORATED != 0)
+  )
+ORDER BY BILL_MONTH DESC;
+
+PROMPT ========================================
+PROMPT Проверка завершена
+PROMPT ========================================
+

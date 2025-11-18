@@ -42,14 +42,14 @@ def get_postgres_config() -> Dict[str, Any]:
 def get_oracle_config() -> Dict[str, Any]:
     """Получение конфигурации Oracle"""
     # Поддержка как ORACLE_SID, так и ORACLE_SERVICE для совместимости
-    service_name = os.getenv('ORACLE_SID') or os.getenv('ORACLE_SERVICE', 'bm7')
+    service_name = os.getenv('ORACLE_SID') or os.getenv('ORACLE_SERVICE', 'your_service')
     return {
-        'user': os.getenv('ORACLE_USER', 'billing7'),
-        'password': os.getenv('ORACLE_PASSWORD', 'billing'),
-        'host': os.getenv('ORACLE_HOST', '192.168.3.35'),
+        'user': os.getenv('ORACLE_USER', 'your_user'),
+        'password': os.getenv('ORACLE_PASSWORD', 'your_password'),
+        'host': os.getenv('ORACLE_HOST', 'localhost'),
         'port': int(os.getenv('ORACLE_PORT', '1521')),
         'service_name': service_name,
-        'username': os.getenv('ORACLE_USER', 'billing7')  # Для совместимости с загрузчиками
+        'username': os.getenv('ORACLE_USER', 'your_user')  # Для совместимости с загрузчиками
     }
 
 def get_db_connection(db_type: str = 'postgresql'):

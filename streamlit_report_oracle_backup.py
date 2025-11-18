@@ -149,8 +149,8 @@ def get_main_report(period_filter=None, plan_filter=None, contract_id_filter=Non
     # Фильтр по периодам
     period_condition = ""
     if period_filter and period_filter != "All Periods":
-        # BILL_MONTH в Oracle уже в формате "YYYY-MM" из VIEW
-        period_condition = f"AND v.BILL_MONTH = '{period_filter}'"
+        # Фильтруем по FINANCIAL_PERIOD (Отчетный период), который на месяц меньше BILL_MONTH
+        period_condition = f"AND v.FINANCIAL_PERIOD = '{period_filter}'"
     
     # Фильтр по тарифам
     plan_condition = ""
@@ -159,36 +159,37 @@ def get_main_report(period_filter=None, plan_filter=None, contract_id_filter=Non
     
     # Фильтр по CONTRACT_ID (SUB-*)
     contract_condition = ""
-    contract_param = None
     if contract_id_filter and contract_id_filter.strip():
-        contract_condition = "AND v.CONTRACT_ID LIKE :contract_id"
-        contract_param = f"%{contract_id_filter.strip()}%"
+        # Экранируем одинарные кавычки для безопасности
+        contract_value = contract_id_filter.strip().replace("'", "''")
+        contract_condition = f"AND v.CONTRACT_ID LIKE '%{contract_value}%'"
     
     # Фильтр по IMEI
     imei_condition = ""
-    imei_param = None
     if imei_filter and imei_filter.strip():
-        imei_condition = "AND v.IMEI LIKE :imei"
-        imei_param = f"%{imei_filter.strip()}%"
+        # Экранируем одинарные кавычки для безопасности
+        imei_value = imei_filter.strip().replace("'", "''")
+        imei_condition = f"AND v.IMEI = '{imei_value}'"
     
     # Фильтр по названию клиента
     customer_condition = ""
-    customer_param = None
     if customer_name_filter and customer_name_filter.strip():
-        customer_condition = "AND UPPER(COALESCE(v.ORGANIZATION_NAME, v.CUSTOMER_NAME, '')) LIKE UPPER(:customer_name)"
-        customer_param = f"%{customer_name_filter.strip()}%"
+        # Экранируем одинарные кавычки для безопасности
+        customer_value = customer_name_filter.strip().replace("'", "''")
+        customer_condition = f"AND UPPER(COALESCE(v.ORGANIZATION_NAME, v.CUSTOMER_NAME, '')) LIKE UPPER('%{customer_value}%')"
     
     # Фильтр по коду 1С
     code_1c_condition = ""
-    code_1c_param = None
     if code_1c_filter and code_1c_filter.strip():
-        code_1c_condition = "AND v.CODE_1C LIKE :code_1c"
-        code_1c_param = f"%{code_1c_filter.strip()}%"
+        # Экранируем одинарные кавычки для безопасности
+        code_1c_value = code_1c_filter.strip().replace("'", "''")
+        code_1c_condition = f"AND v.CODE_1C LIKE '%{code_1c_value}%'"
     
     # Формируем базовый запрос (без параметров в WHERE)
     # В Oracle нужно экранировать % в строковых литералах как %%
     base_query = """
     SELECT 
+        v.FINANCIAL_PERIOD AS "Отчетный Период",
         v.BILL_MONTH AS "Bill Month",
         v.IMEI AS "IMEI",
         v.CONTRACT_ID AS "Contract ID",
@@ -206,31 +207,15 @@ def get_main_report(period_filter=None, plan_filter=None, contract_id_filter=Non
         v.DATA_USAGE_EVENTS AS "Data Events",
         v.MAILBOX_EVENTS AS "Mailbox Events",
         v.REGISTRATION_EVENTS AS "Registration Events",
-        -- Превышения: зануляем суммы Iridium для СТЭК.КОМ
-        CASE 
-            WHEN UPPER(COALESCE(v.ORGANIZATION_NAME, v.CUSTOMER_NAME, '')) LIKE '%%СТЭК.КОМ%%' 
-                 OR UPPER(COALESCE(v.ORGANIZATION_NAME, v.CUSTOMER_NAME, '')) LIKE '%%СТЭККОМ%%'
-                 OR UPPER(COALESCE(v.ORGANIZATION_NAME, v.CUSTOMER_NAME, '')) LIKE '%%STECCOM%%'
-            THEN 0
-            ELSE v.OVERAGE_KB
-        END AS "Overage (KB)",
-        CASE 
-            WHEN UPPER(COALESCE(v.ORGANIZATION_NAME, v.CUSTOMER_NAME, '')) LIKE '%%СТЭК.КОМ%%' 
-                 OR UPPER(COALESCE(v.ORGANIZATION_NAME, v.CUSTOMER_NAME, '')) LIKE '%%СТЭККОМ%%'
-                 OR UPPER(COALESCE(v.ORGANIZATION_NAME, v.CUSTOMER_NAME, '')) LIKE '%%STECCOM%%'
-            THEN 0
-            ELSE v.CALCULATED_OVERAGE
-        END AS "Calculated Overage ($)",
-        CASE 
-            WHEN UPPER(COALESCE(v.ORGANIZATION_NAME, v.CUSTOMER_NAME, '')) LIKE '%%СТЭК.КОМ%%' 
-                 OR UPPER(COALESCE(v.ORGANIZATION_NAME, v.CUSTOMER_NAME, '')) LIKE '%%СТЭККОМ%%'
-                 OR UPPER(COALESCE(v.ORGANIZATION_NAME, v.CUSTOMER_NAME, '')) LIKE '%%STECCOM%%'
-            THEN 0
-            ELSE v.SPNET_TOTAL_AMOUNT
-        END AS "SPNet Total Amount ($)",
+        -- Превышения
+        v.OVERAGE_KB AS "Overage (KB)",
+        v.CALCULATED_OVERAGE AS "Calculated Overage ($)",
+        -- Сумма из отчета SPNet (стоимость трафика из детализации)
+        NVL(v.SPNET_TOTAL_AMOUNT, 0) AS "Total Amount ($)",
         -- Fees из STECCOM_EXPENSES (убрали префикс "Fee:")
         NVL(v.FEE_ACTIVATION_FEE, 0) AS "Activation Fee",
         NVL(v.FEE_ADVANCE_CHARGE, 0) AS "Advance Charge",
+        NVL(v.FEE_ADVANCE_CHARGE_PREVIOUS_MONTH, 0) AS "Advance Charge Previous Month",
         NVL(v.FEE_CREDIT, 0) AS "Credit",
         NVL(v.FEE_CREDITED, 0) AS "Credited",
         NVL(v.FEE_PRORATED, 0) AS "Prorated"
@@ -256,22 +241,8 @@ def get_main_report(period_filter=None, plan_filter=None, contract_id_filter=Non
     )
     
     try:
-        # Собираем параметры для запроса Oracle
-        params = {}
-        if contract_param:
-            params['contract_id'] = contract_param
-        if imei_param:
-            params['imei'] = imei_param
-        if customer_param:
-            params['customer_name'] = customer_param
-        if code_1c_param:
-            params['code_1c'] = code_1c_param
-        
-        # Выполняем запрос с параметрами
-        if params:
-            df = pd.read_sql_query(query, conn, params=params)
-        else:
-            df = pd.read_sql_query(query, conn)
+        # Выполняем запрос напрямую (все параметры уже подставлены в запрос)
+        df = pd.read_sql_query(query, conn)
         
         if df.empty:
             return df
@@ -287,37 +258,47 @@ def get_main_report(period_filter=None, plan_filter=None, contract_id_filter=Non
             conn.close()
 
 
-@st.cache_data(ttl=300)  # Кэшируем на 5 минут
+# Временно отключено кэширование для диагностики зацикливания
+# @st.cache_data(ttl=300)  # Кэшируем на 5 минут
 def get_periods():
-    """Получение списка периодов"""
-    conn = get_connection()
-    if not conn:
-        return []
-    
-    # Используем V_CONSOLIDATED_REPORT_WITH_BILLING, где BILL_MONTH уже в формате "YYYY-MM"
-    query = """
-    SELECT DISTINCT BILL_MONTH
-    FROM V_CONSOLIDATED_REPORT_WITH_BILLING
-    WHERE BILL_MONTH IS NOT NULL
-    ORDER BY BILL_MONTH DESC
-    """
-    
+    """Получение списка периодов (возвращаем FINANCIAL_PERIOD для отображения и фильтрации)"""
     try:
+        conn = get_connection()
+        if not conn:
+            return []
+        
+        # Используем FINANCIAL_PERIOD для отображения и фильтрации (Отчетный период на месяц меньше BILL_MONTH)
+        query = """
+        SELECT DISTINCT 
+            FINANCIAL_PERIOD AS display_period
+        FROM V_CONSOLIDATED_REPORT_WITH_BILLING
+        WHERE FINANCIAL_PERIOD IS NOT NULL
+        ORDER BY FINANCIAL_PERIOD DESC
+        FETCH FIRST 100 ROWS ONLY
+        """
+        
         cursor = conn.cursor()
         cursor.execute(query)
         periods = []
         for row in cursor.fetchall():
             if row[0]:
-                # BILL_MONTH уже в формате "YYYY-MM"
-                periods.append(str(row[0]))
+                # Возвращаем кортеж (display_period, display_period) для совместимости с существующим кодом
+                periods.append((str(row[0]), str(row[0])))
         cursor.close()
         return periods
     except Exception as e:
-        st.error(f"Ошибка получения периодов: {e}")
+        # Не используем st.error здесь, так как это может вызвать зацикливание
+        # Вместо этого возвращаем пустой список и логируем ошибку
+        import traceback
+        print(f"Ошибка получения периодов: {e}")
+        print(traceback.format_exc())
         return []
     finally:
-        if conn:
-            conn.close()
+        try:
+            if conn:
+                conn.close()
+        except:
+            pass
 
 
 @st.cache_data(ttl=300)  # Кэшируем на 5 минут
@@ -506,6 +487,36 @@ def main():
     # Заголовок
     st.title("📊 Iridium M2M Overage Report")
     st.markdown("**Oracle Database | All Plans (Calculated Overage for SBD-1 and SBD-10 only)**")
+    
+    # Expander с комментарием к отчету
+    with st.expander("ℹ️ О комментарии к отчету", expanded=False):
+        st.markdown("""
+        **Описание отчета:**
+        
+        Этот отчет объединяет данные из двух источников:
+        
+        1. **SPNet** - данные об использовании трафика:
+           - `Traffic Usage (KB)` - объем использованного трафика
+           - `Overage (KB)` - превышение включенного трафика
+           - `Calculated Overage ($)` - рассчитанная стоимость превышения (только для SBD-1 и SBD-10)
+        
+        2. **STECCOM** - данные из биллинга:
+           - `Plan Monthly` - название активного тарифного плана
+           - `Plan Suspended` - название приостановленного тарифного плана
+        
+        **Важно:**
+        - Каждая строка отчета = отдельный период (BILL_MONTH)
+        - Периоды НЕ суммируются
+        - Расчет превышения выполняется только для активных тарифов SBD-1 и SBD-10
+        - Данные группируются по IMEI + CONTRACT_ID + BILL_MONTH
+        
+        **Логика периодов STECCOM:**
+        - Файл `STECCOMLLCRussiaSBD.AccessFees.20250702.csv` содержит счета за период с 2 июня по 1 июля включительно
+        - Дата в имени файла (20250702) - это дата окончания периода
+        - Для отчета за июнь (202506) используется файл с датой 20250702
+        - Система автоматически вычитает один месяц из даты файла для правильного сопоставления периодов
+        """)
+    
     st.markdown("---")
     
     # Фильтры в боковой панели (вне вкладок, чтобы были доступны всегда)
@@ -513,23 +524,57 @@ def main():
         st.header("⚙️ Filters")
         
         # Кэшируем периоды и планы, чтобы не делать запросы при каждом rerun
-        periods = get_periods()
+        periods_data = get_periods()
+        
+        # Проверяем, что periods_data не пустой
+        if not periods_data:
+            st.error("⚠️ Не удалось загрузить периоды. Проверьте подключение к базе данных.")
+            st.stop()
+        
+        # periods_data теперь список кортежей (display_period, filter_period)
+        # Используем display_period (FINANCIAL_PERIOD) для отображения и фильтрации
+        period_display_list = []
+        
+        for display_period, filter_period in periods_data:
+            if display_period:
+                # Используем только уникальные значения FINANCIAL_PERIOD
+                if display_period not in period_display_list:
+                    period_display_list.append(display_period)
+        
+        # Проверяем, что period_display_list не пустой
+        if not period_display_list:
+            st.error("⚠️ Нет доступных периодов для отображения.")
+            st.stop()
         
         # По умолчанию выбираем последний период (первый в отсортированном списке)
         if 'selected_period_index' not in st.session_state:
             st.session_state.selected_period_index = 0  # 0 = последний период (не "All Periods")
         
-        period_options = periods + ["All Periods"]  # Последний период первым, потом "All Periods"
-        selected_period = st.selectbox(
-            "Period", 
+        # Проверяем, что индекс не выходит за границы
+        if st.session_state.selected_period_index >= len(period_display_list):
+            st.session_state.selected_period_index = 0
+        
+        period_options = period_display_list + ["All Periods"]  # Последний период первым, потом "All Periods"
+        selected_period_display = st.selectbox(
+            "Отчетный Период", 
             period_options,
             index=st.session_state.selected_period_index,
-            key='period_selectbox'
+            key='period_selectbox',
+            help="Выберите отчетный период. Фильтрация выполняется по BILL_MONTH."
         )
         
+        # Используем selected_period_display напрямую для фильтрации по BILL_MONTH
+        if selected_period_display == "All Periods":
+            selected_period = None
+        else:
+            selected_period = selected_period_display
+        
         # Обновляем индекс при изменении
-        if selected_period in period_options:
-            st.session_state.selected_period_index = period_options.index(selected_period)
+        if selected_period_display in period_options:
+            try:
+                st.session_state.selected_period_index = period_options.index(selected_period_display)
+            except ValueError:
+                st.session_state.selected_period_index = 0
         
         plans = get_plans()
         plan_options = ["All Plans"] + plans
@@ -591,7 +636,7 @@ def main():
     # ========== REPORT TAB ==========
     with tab_report:
         
-        period_filter = None if selected_period == "All Periods" else selected_period
+        period_filter = selected_period  # selected_period уже преобразован в filter_period (BILL_MONTH) или None
         plan_filter = None if selected_plan == "All Plans" else selected_plan
         contract_id_filter = contract_id_filter if contract_id_filter else None
         imei_filter = imei_filter if imei_filter else None
@@ -616,7 +661,7 @@ def main():
                     st.session_state.last_report_key = filter_key
                     st.session_state.last_report_df = df
             else:
-                df = st.session_state.last_report_df
+                df = st.session_state.get('last_report_df', None)
         else:
             # Если период не выбран, не загружаем отчет
             df = None
@@ -747,6 +792,38 @@ def main():
     with tab_loader:
         st.header("📥 Data Loader")
         st.markdown("Загрузка и импорт данных Иридиум (трафик и финансовые файлы)")
+        
+        # Expander с комментарием к процедуре загрузки
+        with st.expander("ℹ️ О процедуре загрузки документов (CSV) в базу", expanded=False):
+            st.markdown("""
+            **Процедура загрузки CSV файлов:**
+            
+            1. **Автоматическое определение типа файла:**
+               - Файлы с именами, содержащими "spnet" или "traffic" → загружаются как SPNet
+               - Файлы с именами, содержащими "steccom", "access" или "fee" → загружаются как STECCOM
+            
+            2. **Автоматическое сохранение:**
+               - SPNet файлы сохраняются в `data/SPNet reports/`
+               - STECCOM файлы сохраняются в `data/STECCOMLLCRussiaSBD.AccessFees_reports/`
+            
+            3. **Проверка дубликатов:**
+               - Система автоматически проверяет, был ли файл уже загружен
+               - Уже загруженные файлы пропускаются
+               - Неполные загрузки перезагружаются автоматически
+            
+            4. **Типы данных:**
+               - **SPNet**: данные об использовании трафика (CSV/Excel)
+               - **STECCOM**: финансовые данные из инвойсов (CSV/Excel)
+            
+            5. **После загрузки:**
+               - Обновите вкладку "Report" для просмотра новых данных
+               - Данные автоматически попадают в базу данных Oracle
+            
+            **Формат файлов:**
+            - Поддерживаются форматы: CSV, XLSX
+            - Файлы должны соответствовать структуре таблиц SPNET_TRAFFIC или STECCOM_EXPENSES
+            """)
+        
         st.markdown("---")
         
         # Директории для данных
@@ -754,6 +831,72 @@ def main():
         DATA_DIR = Path(__file__).parent / 'data'
         SPNET_DIR = DATA_DIR / 'SPNet reports'
         ACCESS_FEES_DIR = DATA_DIR / 'STECCOMLLCRussiaSBD.AccessFees_reports'
+        
+        # Функция для определения типа файла по имени
+        def detect_file_type(filename):
+            """Определяет тип файла (SPNet или STECCOM) по имени"""
+            filename_lower = filename.lower()
+            if 'spnet' in filename_lower or 'traffic' in filename_lower:
+                return 'SPNet'
+            elif 'steccom' in filename_lower or 'access' in filename_lower or 'fee' in filename_lower:
+                return 'STECCOM'
+            return None
+        
+        st.markdown("---")
+        
+        # Универсальный загрузчик файлов - автоматически определяет тип по имени
+        st.subheader("📤 Upload File")
+        uploaded_file = st.file_uploader(
+            "📤 Upload file (drag & drop) - автоматически определит тип по имени",
+            type=['csv', 'xlsx'],
+            key='file_uploader',
+            help="Файлы автоматически сохраняются в нужную директорию на основе имени файла"
+        )
+        
+        if uploaded_file:
+            # Автоматически определяем тип файла
+            file_type = detect_file_type(uploaded_file.name)
+            
+            if file_type == 'SPNet':
+                target_dir = SPNET_DIR
+                file_type_msg = "✅ **Определен как SPNet файл** - будет сохранен в SPNet reports"
+            elif file_type == 'STECCOM':
+                target_dir = ACCESS_FEES_DIR
+                file_type_msg = "✅ **Определен как Access Fees файл** - будет сохранен в Access Fees directory"
+            else:
+                # Если не удалось определить, спрашиваем пользователя
+                file_type = st.radio(
+                    "Не удалось определить тип файла. Выберите тип:",
+                    ["SPNet Traffic", "Access Fees (Financial)"],
+                    horizontal=True,
+                    key='file_type_selector'
+                )
+                if file_type == "SPNet Traffic":
+                    target_dir = SPNET_DIR
+                    file_type_msg = "⚠️ **Выбран SPNet** - будет сохранен в SPNet reports"
+                else:
+                    target_dir = ACCESS_FEES_DIR
+                    file_type_msg = "⚠️ **Выбран Access Fees** - будет сохранен в Access Fees directory"
+            
+            if file_type:
+                st.info(file_type_msg)
+                save_path = target_dir / uploaded_file.name
+                
+                if save_path.exists():
+                    st.warning(f"⚠️ File `{uploaded_file.name}` already exists")
+                else:
+                    # Используем form для изоляции процесса сохранения
+                    with st.form(key='save_file_form', clear_on_submit=True):
+                        if st.form_submit_button("💾 Save File", use_container_width=True):
+                            try:
+                                with st.spinner("Saving file..."):
+                                    target_dir.mkdir(parents=True, exist_ok=True)
+                                    with open(save_path, 'wb') as f:
+                                        f.write(uploaded_file.getbuffer())
+                                st.success(f"✅ File saved to {target_dir.name}/: {uploaded_file.name}")
+                                st.rerun()
+                            except Exception as e:
+                                st.error(f"Error saving: {e}")
         
         st.markdown("---")
         
