@@ -176,6 +176,12 @@ def get_main_report(period_filter=None, plan_filter=None, contract_id_filter=Non
         v.code_1c              AS "Code 1C",
         v.service_id           AS "Service ID",
         v.agreement_number     AS "Agreement #",
+        -- Activation Date временно отключен до обновления представления в базе данных
+        -- После применения apply_postgresql_view_fix.py раскомментировать:
+        -- CASE 
+        --     WHEN v.activation_date IS NOT NULL THEN TO_CHAR(v.activation_date, 'YYYY-MM-DD')
+        --     ELSE NULL
+        -- END AS "Activation Date",
         COALESCE(v.plan_name, '') AS "Plan Name",
         COALESCE(v.steccom_plan_name_monthly, '') AS "Plan Monthly",
         COALESCE(v.steccom_plan_name_suspended, '') AS "Plan Suspended",

@@ -11,10 +11,56 @@ SELECT
     st.CONTRACT_ID AS "Contract ID",
     -- Трафик и события
     ROUND(SUM(CASE WHEN st.USAGE_TYPE = 'SBD Data Usage' THEN st.USAGE_BYTES ELSE 0 END) / 1000, 2) AS "Traffic Usage (KB)",
-    COUNT(*) AS "Events (Count)",
-    COUNT(CASE WHEN st.USAGE_TYPE = 'SBD Data Usage' THEN 1 END) AS "Data Events",
-    COUNT(CASE WHEN st.USAGE_TYPE = 'SBD Mailbox Checks' THEN 1 END) AS "Mailbox Events",
-    COUNT(CASE WHEN st.USAGE_TYPE = 'SBD Registrations' THEN 1 END) AS "Registration Events",
+    -- События: для событий (USAGE_UNIT = 'EVENT') используем значение USAGE_BYTES,
+    -- для остальных типов используем CALL_SESSION_COUNT или COUNT записей
+    SUM(
+        CASE 
+            WHEN UPPER(TRIM(st.USAGE_UNIT)) = 'EVENT' THEN 
+                COALESCE(st.USAGE_BYTES, st.ACTUAL_USAGE, 0)
+            WHEN st.CALL_SESSION_COUNT IS NOT NULL THEN 
+                st.CALL_SESSION_COUNT
+            ELSE 1
+        END
+    ) AS "Events (Count)",
+    SUM(
+        CASE 
+            WHEN st.USAGE_TYPE = 'SBD Data Usage' THEN
+                CASE 
+                    WHEN UPPER(TRIM(st.USAGE_UNIT)) = 'EVENT' THEN 
+                        COALESCE(st.USAGE_BYTES, st.ACTUAL_USAGE, 0)
+                    WHEN st.CALL_SESSION_COUNT IS NOT NULL THEN 
+                        st.CALL_SESSION_COUNT
+                    ELSE 1
+                END
+            ELSE 0
+        END
+    ) AS "Data Events",
+    SUM(
+        CASE 
+            WHEN st.USAGE_TYPE = 'SBD Mailbox Checks' THEN
+                CASE 
+                    WHEN UPPER(TRIM(st.USAGE_UNIT)) = 'EVENT' THEN 
+                        COALESCE(st.USAGE_BYTES, st.ACTUAL_USAGE, 0)
+                    WHEN st.CALL_SESSION_COUNT IS NOT NULL THEN 
+                        st.CALL_SESSION_COUNT
+                    ELSE 1
+                END
+            ELSE 0
+        END
+    ) AS "Mailbox Events",
+    SUM(
+        CASE 
+            WHEN st.USAGE_TYPE = 'SBD Registrations' THEN
+                CASE 
+                    WHEN UPPER(TRIM(st.USAGE_UNIT)) = 'EVENT' THEN 
+                        COALESCE(st.USAGE_BYTES, st.ACTUAL_USAGE, 0)
+                    WHEN st.CALL_SESSION_COUNT IS NOT NULL THEN 
+                        st.CALL_SESSION_COUNT
+                    ELSE 1
+                END
+            ELSE 0
+        END
+    ) AS "Registration Events",
     -- Fees из STECCOM_EXPENSES (агрегированные отдельно, без дубликатов)
     NVL(fees.fee_activation_fee, 0) AS "Activation Fee",
     NVL(fees.fee_advance_charge, 0) AS "Advance Charge",
@@ -75,6 +121,7 @@ GROUP BY
     fees.fee_advance_charge,
     fees.fee_prorated
 ORDER BY "Bill Month" DESC;
+
 
 
 

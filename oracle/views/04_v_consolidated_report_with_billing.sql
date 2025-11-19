@@ -80,6 +80,7 @@ SELECT
     END AS FINANCIAL_PERIOD,
     cor.IMEI,
     cor.CONTRACT_ID,
+    cor.ACTIVATION_DATE,
     cor.PLAN_NAME,
     -- Разделение трафика и событий (по каждому периоду)
     cor.TRAFFIC_USAGE_BYTES,
@@ -131,6 +132,8 @@ FROM (
         IMEI,
         CONTRACT_ID,
         BILL_MONTH,
+        -- ACTIVATION_DATE: берем минимальную дату активации из всех записей периода
+        MIN(ACTIVATION_DATE) AS ACTIVATION_DATE,
         -- PLAN_NAME: берем первый непустой из всех записей периода
         MAX(CASE WHEN PLAN_NAME IS NOT NULL AND LENGTH(TRIM(PLAN_NAME)) > 0 THEN PLAN_NAME END) AS PLAN_NAME,
         -- Суммируем трафик и события для всех записей периода
@@ -230,6 +233,7 @@ SELECT
     TO_CHAR(ADD_MONTHS(TO_DATE(sf_prev.bill_month, 'YYYYMM'), 1), 'YYYY-MM') AS FINANCIAL_PERIOD,
     sf_prev.imei AS IMEI,
     sf_prev.CONTRACT_ID,
+    NULL AS ACTIVATION_DATE,
     NULL AS PLAN_NAME,
     0 AS TRAFFIC_USAGE_BYTES,
     0 AS EVENTS_COUNT,
@@ -285,9 +289,14 @@ LEFT JOIN steccom_fees sf_next
 -- 2. НЕТ данных в cor для BILL_MONTH = bill_month + 1 (месяц после аванса)
 -- 3. И НЕТ данных в основном SELECT (проверяем через NOT EXISTS с полным набором условий)
 WHERE sf_prev.fee_advance_charge > 0
+  -- Проверяем, что нет данных в основном SELECT (cor) для этого периода
   AND NOT EXISTS (
       SELECT 1
-      FROM V_CONSOLIDATED_OVERAGE_REPORT cor_check
+      FROM (
+          SELECT IMEI, CONTRACT_ID, BILL_MONTH
+          FROM V_CONSOLIDATED_OVERAGE_REPORT
+          GROUP BY IMEI, CONTRACT_ID, BILL_MONTH
+      ) cor_check
       WHERE cor_check.IMEI = sf_prev.imei
         AND RTRIM(cor_check.CONTRACT_ID) = RTRIM(sf_prev.CONTRACT_ID)
         AND CASE 

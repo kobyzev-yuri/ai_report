@@ -198,6 +198,10 @@ def get_main_report(period_filter=None, plan_filter=None, contract_id_filter=Non
         v.CODE_1C AS "Code 1C",
         v.SERVICE_ID AS "Service ID",
         v.AGREEMENT_NUMBER AS "Agreement #",
+        CASE 
+            WHEN v.ACTIVATION_DATE IS NOT NULL THEN TO_CHAR(v.ACTIVATION_DATE, 'YYYY-MM-DD')
+            ELSE NULL
+        END AS "Activation Date",
         COALESCE(v.PLAN_NAME, '') AS "Plan Name",
         COALESCE(v.STECCOM_PLAN_NAME_MONTHLY, '') AS "Plan Monthly",
         COALESCE(v.STECCOM_PLAN_NAME_SUSPENDED, '') AS "Plan Suspended",
@@ -680,8 +684,44 @@ def main():
             
             st.markdown("---")
             
+            # Убеждаемся, что все колонки видны, даже если они NULL
+            display_df = df.copy()
+            
+            # Заполняем NULL пустыми строками для строковых колонок (включая Activation Date)
+            for col in display_df.columns:
+                if display_df[col].dtype == 'object':  # строковые колонки
+                    display_df[col] = display_df[col].fillna('')
+            
+            # Убеждаемся, что Activation Date всегда присутствует и отображается
+            if 'Activation Date' in display_df.columns:
+                # Заполняем NULL пустыми строками для Activation Date
+                display_df['Activation Date'] = display_df['Activation Date'].fillna('')
+            else:
+                # Колонка отсутствует - добавляем пустую колонку (не должно случиться)
+                display_df['Activation Date'] = ''
+            
+            # Упорядочиваем колонки: Activation Date должна быть перед Plan Name
+            # Определяем правильный порядок колонок
+            expected_order = [
+                "Отчетный Период", "Bill Month", "IMEI", "Contract ID",
+                "Organization/Person", "Code 1C", "Service ID", "Agreement #",
+                "Activation Date",  # Должна быть перед Plan Name
+                "Plan Name", "Plan Monthly", "Plan Suspended",
+                "Traffic Usage (KB)", "Events (Count)", "Data Events", 
+                "Mailbox Events", "Registration Events",
+                "Overage (KB)", "Calculated Overage ($)", "Total Amount ($)",
+                "Activation Fee", "Advance Charge", "Advance Charge Previous Month",
+                "Credit", "Credited", "Prorated"
+            ]
+            
+            # Берем только те колонки, которые есть в dataframe, в нужном порядке
+            ordered_columns = [col for col in expected_order if col in display_df.columns]
+            # Добавляем остальные колонки, которых нет в списке
+            other_columns = [col for col in display_df.columns if col not in expected_order]
+            display_df = display_df[ordered_columns + other_columns]
+            
             # Таблица данных
-            st.dataframe(df, use_container_width=True, height=400)
+            st.dataframe(display_df, use_container_width=True, height=400)
             
             # Экспорт
             st.markdown("---")

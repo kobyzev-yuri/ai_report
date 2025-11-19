@@ -97,6 +97,8 @@ steccom_data AS (
         -- BILL_MONTH - это месяц из INVOICE_DATE (без вычитания)
         -- INVOICE_DATE = 2025-11-02 (ноябрь) → BILL_MONTH = 202511 (ноябрь)
         TO_CHAR(se.INVOICE_DATE, 'YYYYMM') AS BILL_MONTH,
+        -- Activation Date из STECCOM_EXPENSES (берем минимальную дату активации для периода)
+        MIN(se.ACTIVATION_DATE) AS ACTIVATION_DATE,
         -- Две отдельные колонки для планов: основной и suspended
         -- Основной план тарифа (из plan_discount, где rate_type не Suspend)
         MAX(CASE 
@@ -127,6 +129,8 @@ SELECT
     NVL(sp.IMEI, st.IMEI) AS IMEI,
     NVL(sp.CONTRACT_ID, st.CONTRACT_ID) AS CONTRACT_ID,
     NVL(sp.BILL_MONTH, st.BILL_MONTH) AS BILL_MONTH,
+    -- Activation Date из STECCOM_EXPENSES (перед Plan Name)
+    st.ACTIVATION_DATE AS ACTIVATION_DATE,
     -- PLAN_NAME: сначала из текущего периода, если нет - из STECCOM, если нет - из маппинга по contract_id, если нет - из маппинга по IMEI
     -- Используем NULLIF для обработки пустых строк как NULL
     NVL(

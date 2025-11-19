@@ -138,6 +138,7 @@ SELECT
     END AS financial_period,
     cor.imei,
     cor.contract_id,
+    cor.activation_date,
     -- Используем plan_name из cor, если пустой - берем из маппинга по contract_id из SPNET_TRAFFIC,
     -- если пустой - из маппинга по tariff_id, если пустой - из маппинга по IMEI
     COALESCE(cor.plan_name, cpm.plan_name, tpm.plan_name, ipm.plan_name) AS plan_name,
@@ -191,6 +192,8 @@ FROM (
         imei,
         contract_id,
         bill_month,
+        -- ACTIVATION_DATE: берем минимальную дату активации из всех записей периода
+        MIN(activation_date) AS activation_date,
         -- PLAN_NAME: берем первый непустой из всех записей периода
         MAX(CASE WHEN plan_name IS NOT NULL AND TRIM(plan_name) != '' THEN plan_name END) AS plan_name,
         -- Суммируем трафик и события для всех записей периода

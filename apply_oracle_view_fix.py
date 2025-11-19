@@ -24,7 +24,7 @@ except ImportError:
         import cx_Oracle
     except ImportError:
         print("ERROR: oracledb or cx_Oracle not installed. Install with: pip install oracledb")
-        sys.exit(1)
+    sys.exit(1)
 
 # Параметры подключения к Oracle
 # ВАЖНО: Используйте переменные окружения или config.env для реальных значений

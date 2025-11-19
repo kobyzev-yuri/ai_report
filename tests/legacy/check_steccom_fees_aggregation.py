@@ -14,7 +14,7 @@ def check_aggregation():
     imeis = ['300234069508860', '300234069606340']
     
     oracle_host = os.getenv('ORACLE_HOST', 'localhost')
-    oracle_port = os.getenv('ORACLE_PORT', '15210')
+    oracle_port = os.getenv('ORACLE_PORT', '1521')
     oracle_service = os.getenv('ORACLE_SERVICE', 'bm7')
     oracle_user = os.getenv('ORACLE_USER', 'billing7')
     oracle_password = os.getenv('ORACLE_PASSWORD', 'billing')

@@ -20,14 +20,59 @@ SELECT
     -- Трафик: только для SBD Data Usage в байтах
     SUM(CASE WHEN st.USAGE_TYPE = 'SBD Data Usage' THEN st.USAGE_BYTES ELSE 0 END) AS TRAFFIC_USAGE_BYTES,
     
-    -- События: считаем количество записей (каждая запись = одно событие)
-    -- Для всех типов использования считаем количество записей
-    COUNT(*) AS EVENTS_COUNT,
+    -- События: для событий (USAGE_UNIT = 'EVENT') используем значение USAGE_BYTES,
+    -- для остальных типов используем CALL_SESSION_COUNT или COUNT записей
+    SUM(
+        CASE 
+            WHEN UPPER(TRIM(st.USAGE_UNIT)) = 'EVENT' THEN 
+                COALESCE(st.USAGE_BYTES, st.ACTUAL_USAGE, 0)
+            WHEN st.CALL_SESSION_COUNT IS NOT NULL THEN 
+                st.CALL_SESSION_COUNT
+            ELSE 1
+        END
+    ) AS EVENTS_COUNT,
     
-    -- Отдельно считаем события по типам (количество записей каждого типа)
-    COUNT(CASE WHEN st.USAGE_TYPE = 'SBD Data Usage' THEN 1 END) AS DATA_USAGE_EVENTS,
-    COUNT(CASE WHEN st.USAGE_TYPE = 'SBD Mailbox Checks' THEN 1 END) AS MAILBOX_EVENTS,
-    COUNT(CASE WHEN st.USAGE_TYPE = 'SBD Registrations' THEN 1 END) AS REGISTRATION_EVENTS,
+    -- Отдельно считаем события по типам
+    -- Для событий (USAGE_UNIT = 'EVENT') суммируем USAGE_BYTES, иначе используем CALL_SESSION_COUNT или COUNT
+    SUM(
+        CASE 
+            WHEN st.USAGE_TYPE = 'SBD Data Usage' THEN
+                CASE 
+                    WHEN UPPER(TRIM(st.USAGE_UNIT)) = 'EVENT' THEN 
+                        COALESCE(st.USAGE_BYTES, st.ACTUAL_USAGE, 0)
+                    WHEN st.CALL_SESSION_COUNT IS NOT NULL THEN 
+                        st.CALL_SESSION_COUNT
+                    ELSE 1
+                END
+            ELSE 0
+        END
+    ) AS DATA_USAGE_EVENTS,
+    SUM(
+        CASE 
+            WHEN st.USAGE_TYPE = 'SBD Mailbox Checks' THEN
+                CASE 
+                    WHEN UPPER(TRIM(st.USAGE_UNIT)) = 'EVENT' THEN 
+                        COALESCE(st.USAGE_BYTES, st.ACTUAL_USAGE, 0)
+                    WHEN st.CALL_SESSION_COUNT IS NOT NULL THEN 
+                        st.CALL_SESSION_COUNT
+                    ELSE 1
+                END
+            ELSE 0
+        END
+    ) AS MAILBOX_EVENTS,
+    SUM(
+        CASE 
+            WHEN st.USAGE_TYPE = 'SBD Registrations' THEN
+                CASE 
+                    WHEN UPPER(TRIM(st.USAGE_UNIT)) = 'EVENT' THEN 
+                        COALESCE(st.USAGE_BYTES, st.ACTUAL_USAGE, 0)
+                    WHEN st.CALL_SESSION_COUNT IS NOT NULL THEN 
+                        st.CALL_SESSION_COUNT
+                    ELSE 1
+                END
+            ELSE 0
+        END
+    ) AS REGISTRATION_EVENTS,
     
     -- Количество записей
     COUNT(*) AS RECORD_COUNT,
@@ -70,7 +115,7 @@ GROUP BY
     st.PLAN_NAME
 /
 
-COMMENT ON TABLE V_SPNET_OVERAGE_ANALYSIS IS 'Анализ превышения трафика по IMEI с расчетом стоимости. Разделение на трафик (bytes) и события (count)'
+COMMENT ON TABLE V_SPNET_OVERAGE_ANALYSIS IS 'Анализ превышения трафика по IMEI с расчетом стоимости. Разделение на трафик (bytes) и события (count). Для событий (USAGE_UNIT=EVENT) используется значение USAGE_BYTES, для остальных - CALL_SESSION_COUNT или COUNT записей'
 /
 
 SET DEFINE ON
