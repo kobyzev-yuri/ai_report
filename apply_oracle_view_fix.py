@@ -95,11 +95,12 @@ def apply_view_fix():
         )
         print(f"✅ Подключение к Oracle успешно: {oracle_config['username']}@{oracle_config['host']}:{oracle_config['port']}")
         
-        # Читаем SQL файлы - сначала базовое представление, потом с биллингом
+        # Читаем SQL файлы - сначала базовое представление, потом с биллингом, затем доходы
         sql_files = [
             Path(__file__).parent / 'oracle' / 'views' / '01_v_spnet_overage_analysis.sql',
             Path(__file__).parent / 'oracle' / 'views' / '02_v_consolidated_overage_report.sql',
-            Path(__file__).parent / 'oracle' / 'views' / '04_v_consolidated_report_with_billing.sql'
+            Path(__file__).parent / 'oracle' / 'views' / '04_v_consolidated_report_with_billing.sql',
+            Path(__file__).parent / 'oracle' / 'views' / '05_v_revenue_from_invoices.sql'
         ]
         
         for sql_file in sql_files:

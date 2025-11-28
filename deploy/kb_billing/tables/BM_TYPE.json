@@ -1,0 +1,34 @@
+{
+  "table_name": "BM_TYPE",
+  "schema": "billing",
+  "description": "Справочник типов услуг биллинга. Содержит информацию о всех типах услуг, включая Iridium M2M сервисы. Используется для фильтрации и классификации услуг.",
+  "database": "Oracle (production)",
+  "key_columns": {
+    "TYPE_ID": "Уникальный идентификатор типа услуги (PRIMARY KEY). Связь с SERVICES.TYPE_ID",
+    "CLASS": "Класс типа услуги (например, 'service')",
+    "MNEMONIC": "Мнемоника типа услуги (например, 'iridium_sbd', 'iridium_monitoring')",
+    "NAME": "Название типа услуги (например, '?????? SBD', '????????? ??????????')"
+  },
+  "business_rules": [
+    "TYPE_ID = 9002: iridium_sbd - SBD услуга (тарификация по трафику), LOGIN = SUB-XXXXX",
+    "TYPE_ID = 9005: iridium_monitoring - услуга мониторинга",
+    "TYPE_ID = 9008: iridium_sbd_suspend - приостановление SBD услуги, LOGIN = IMEI",
+    "TYPE_ID = 9013: gsm_block - блокировка мониторинга (GSM)",
+    "TYPE_ID = 9014: iridium_msg - услуга по сообщениям",
+    "Услуги 9002 и 9008 в противофазе, связаны по VSAT (IMEI) и ACCOUNT_ID"
+  ],
+  "relationships": [
+    {
+      "table": "SERVICES",
+      "type": "JOIN",
+      "on": "BM_TYPE.TYPE_ID = SERVICES.TYPE_ID"
+    }
+  ],
+  "usage_notes": [
+    "Используется для фильтрации услуг по типу",
+    "Для Iridium M2M используются типы: 9002, 9005, 9008, 9013, 9014",
+    "MNEMONIC используется для программной идентификации типа услуги"
+  ]
+}
+
+

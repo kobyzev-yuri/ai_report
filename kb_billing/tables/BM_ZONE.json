@@ -1,0 +1,50 @@
+{
+  "table_name": "BM_ZONE",
+  "schema": "billing",
+  "description": "Справочник тарифных зон. Содержит информацию о зонах с фиксированной ценой в тарифных планах. Используется в BM_TARIFF (PH_ZONE_GROUP_ID, TR_ZONE_GROUP_ID) и BM_TARIFFEL (ZONE_ID) для определения цены в зависимости от зоны. Важна для понимания тарификации по зонам.",
+  "database": "Oracle (production)",
+  "key_columns": {
+    "ZONE_ID": "Уникальный идентификатор зоны (PRIMARY KEY). Используется в BM_TARIFFEL.ZONE_ID, BM_TARIFF.PH_ZONE_GROUP_ID, BM_TARIFF.TR_ZONE_GROUP_ID",
+    "DESCRIPTION": "Описание зоны (например, 'Местная зона', 'Междугородная зона', 'Международная зона')",
+    "ZONE_CLASS_ID": "ID класса зоны",
+    "TRAFFIC_TYPE": "Тип трафика зоны (например, 'local', 'interurban', 'international')",
+    "DATE_BEG": "Дата начала действия зоны",
+    "DATE_END": "Дата окончания действия зоны (NULL если действует сейчас)",
+    "DELETED": "Флаг удаления (1 = удалена, 0 = активна)",
+    "IS_INCOMING": "Флаг входящего трафика (1 = входящий, 0 = исходящий)",
+    "DOMAIN_ID": "ID домена"
+  },
+  "business_rules": [
+    "BM_ZONE определяет тарифные зоны с фиксированной ценой в тарифных планах",
+    "ZONE_ID используется в BM_TARIFFEL для определения цены (MONEY) в зависимости от зоны",
+    "BM_TARIFF использует PH_ZONE_GROUP_ID (зона телефонии) и TR_ZONE_GROUP_ID (зона трафика)",
+    "BM_TARIFFEL использует ZONE_ID для определения зоны тарификации",
+    "Один тарифный элемент (BM_TARIFFEL) может иметь фиксированную цену (MONEY) для конкретной зоны (ZONE_ID)",
+    "TRAFFIC_TYPE определяет тип трафика зоны (local, interurban, international)",
+    "IS_INCOMING определяет направление трафика (входящий/исходящий)",
+    "Для активных зон: DELETED = 0 и (DATE_END IS NULL OR DATE_END >= текущая дата)"
+  ],
+  "relationships": [
+    {
+      "table": "BM_TARIFFEL",
+      "type": "JOIN",
+      "on": "BM_ZONE.ZONE_ID = BM_TARIFFEL.ZONE_ID",
+      "note": "Тарифные элементы с фиксированной ценой зоны"
+    },
+    {
+      "table": "BM_TARIFF",
+      "type": "LEFT JOIN",
+      "on": "BM_ZONE.ZONE_ID = BM_TARIFF.PH_ZONE_GROUP_ID OR BM_ZONE.ZONE_ID = BM_TARIFF.TR_ZONE_GROUP_ID",
+      "note": "Тарифы могут использовать зоны телефонии (PH_ZONE_GROUP_ID) и зоны трафика (TR_ZONE_GROUP_ID)"
+    }
+  ],
+  "usage_notes": [
+    "Используется для понимания тарификации по зонам",
+    "BM_TARIFFEL может иметь разные цены (MONEY) для разных зон (ZONE_ID)",
+    "TRAFFIC_TYPE помогает понять тип зоны (local, interurban, international)",
+    "Важна для расчета стоимости услуг в зависимости от зоны",
+    "Для Iridium SBD услуг могут использоваться специфические зоны"
+  ]
+}
+
+

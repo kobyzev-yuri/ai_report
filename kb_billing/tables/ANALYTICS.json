@@ -1,0 +1,115 @@
+{
+  "table_name": "ANALYTICS",
+  "schema": "billing",
+  "description": "Таблица аналитики - основа для формирования счетов-фактур. Формируется на основе BM_SERVICE_MONEY (сессии услуг с объемами трафика и начислениями). BM_SERVICE_MONEY зависит от BM_CDR_ACCT (таблица трафика из файлов) для SBD услуг. ОБНОВЛЯЕТСЯ КАЖДЫЙ ДЕНЬ НЕСКОЛЬКО РАЗ на основе сессий. Содержит все начисления по услугам, включая тесты и предпродажные эксперименты. НЕ ВСЕ записи попадают в счета-фактуры (BM_INVOICE_ITEM). Связь определяется через INVOICE_ITEM_ID - если заполнен, значит запись попала в счет-фактуру. 1 ЧИСЛА данные по договорам переносятся в счета-фактуры (BM_INVOICE, BM_INVOICE_ITEM), что закрывает финансовый период.",
+  "database": "Oracle (production)",
+  "key_columns": {
+    "AID": "Уникальный идентификатор записи аналитики (PRIMARY KEY)",
+    "PERIOD_ID": "ID финансового периода из BM_PERIODS. Определяет период начисления",
+    "SERVICE_ID": "ID услуги из SERVICES. Связь с SERVICES.SERVICE_ID. Для Iridium: TYPE_ID IN (9002, 9005, 9008, 9013, 9014)",
+    "CUSTOMER_ID": "ID клиента из CUSTOMERS",
+    "ACCOUNT_ID": "ID аккаунта из ACCOUNTS",
+    "TYPE_ID": "Тип услуги (дублирует SERVICES.TYPE_ID)",
+    "TARIFF_ID": "ID тарифа из BM_TARIFF",
+    "TARIFFEL_ID": "ID тарифного элемента из BM_TARIFFEL",
+    "VSAT": "IMEI устройства (для Iridium услуг). Связь с SPNET_TRAFFIC.IMEI",
+    "MONEY": "Сумма начисления (NUMBER). ОСНОВНОЕ ПОЛЕ для расчета доходов",
+    "PRICE": "Цена единицы",
+    "TRAF": "Трафик (объем)",
+    "TOTAL_TRAF": "Общий трафик",
+    "CBYTE": "Байты счетчика",
+    "INVOICE_ITEM_ID": "ID позиции счета-фактуры из BM_INVOICE_ITEM. Если заполнен - запись попала в счет-фактуру. Если NULL - тест/эксперимент, не попал в счет",
+    "FLAG": "Флаг (возможно, определяет попадание в счет-фактуру)",
+    "RESOURCE_TYPE_ID": "Тип ресурса из BM_RESOURCE_TYPE. Связь с BM_RESOURCE_TYPE.RESOURCE_TYPE_ID. Используется для расшифровки услуг для бухгалтерии (имеет хороший мнемонический смысл через MNEMONIC)",
+    "CLASS_ID": "ID класса",
+    "CLASS_NAME": "Название класса (например, 'SBD')",
+    "BLANK": "Номер заказа/приложения",
+    "COUNTER_ID": "ID счетчика",
+    "COUNTER_CF": "Счетчик CF",
+    "ZONE_ID": "ID зоны",
+    "THRESHOLD": "Порог",
+    "SUB_TYPE_ID": "ID подтипа",
+    "SUB_PERIOD_ID": "ID подпериода",
+    "PMONEY": "Предварительная сумма",
+    "PARTNER_PERCENT": "Процент партнера",
+    "SERVICE_MONEY_ID": "ID сессии услуги из BM_SERVICE_MONEY. Связь с BM_SERVICE_MONEY.SERVICE_MONEY_ID. ANALYTICS формируется на основе BM_SERVICE_MONEY"
+  },
+  "business_rules": [
+    "ANALYTICS формируется на основе BM_SERVICE_MONEY (сессии услуг с объемами трафика и начислениями)",
+    "BM_SERVICE_MONEY зависит от BM_CDR_ACCT (таблица трафика) для SBD услуг",
+    "BM_SERVICE_MONEY может зависеть от RADACCT для prepaid услуг на RADIUS, но для SBD НЕ используется",
+    "ANALYTICS ОБНОВЛЯЕТСЯ КАЖДЫЙ ДЕНЬ НЕСКОЛЬКО РАЗ на основе сессий",
+    "ANALYTICS - ОСНОВА для формирования счетов-фактур (BM_INVOICE, BM_INVOICE_ITEM)",
+    "1 ЧИСЛА данные по договорам переносятся из ANALYTICS в счета-фактуры (BM_INVOICE, BM_INVOICE_ITEM), что ЗАКРЫВАЕТ ФИНАНСОВЫЙ ПЕРИОД",
+    "НЕ ВСЕ записи попадают в счета-фактуры - есть тесты и предпродажные эксперименты",
+    "Если INVOICE_ITEM_ID заполнен - запись попала в счет-фактуру (BM_INVOICE_ITEM)",
+    "Если INVOICE_ITEM_ID IS NULL - запись НЕ попала в счет (тест/эксперимент)",
+    "Для расчета доходов использовать только записи с INVOICE_ITEM_ID IS NOT NULL",
+    "MONEY содержит сумму начисления",
+    "PERIOD_ID определяет период начисления (для Иридиум: с 2 числа по 1 число следующего месяца)",
+    "VSAT содержит IMEI для связи с затратами Иридиум (SPNET_TRAFFIC.IMEI)",
+    "SERVICE_ID связывается с SERVICES для получения LOGIN (CONTRACT_ID = SUB-XXXXX)"
+  ],
+  "relationships": [
+    {
+      "table": "BM_INVOICE_ITEM",
+      "type": "LEFT JOIN",
+      "on": "ANALYTICS.INVOICE_ITEM_ID = BM_INVOICE_ITEM.INVOICE_ITEM_ID",
+      "note": "Только записи с INVOICE_ITEM_ID попадают в счета-фактуры"
+    },
+    {
+      "table": "SERVICES",
+      "type": "JOIN",
+      "on": "ANALYTICS.SERVICE_ID = SERVICES.SERVICE_ID"
+    },
+    {
+      "table": "BM_TARIFF",
+      "type": "LEFT JOIN",
+      "on": "ANALYTICS.TARIFF_ID = BM_TARIFF.TARIFF_ID"
+    },
+    {
+      "table": "BM_TARIFFEL",
+      "type": "LEFT JOIN",
+      "on": "ANALYTICS.TARIFFEL_ID = BM_TARIFFEL.TARIFFEL_ID"
+    },
+    {
+      "table": "BM_PERIODS",
+      "type": "LEFT JOIN",
+      "on": "ANALYTICS.PERIOD_ID = BM_PERIODS.PERIOD_ID"
+    },
+    {
+      "table": "SPNET_TRAFFIC",
+      "type": "LEFT JOIN",
+      "on": "ANALYTICS.VSAT = SPNET_TRAFFIC.IMEI AND SERVICES.LOGIN = SPNET_TRAFFIC.CONTRACT_ID"
+    },
+    {
+      "table": "BM_RESOURCE_TYPE",
+      "type": "LEFT JOIN",
+      "on": "ANALYTICS.RESOURCE_TYPE_ID = BM_RESOURCE_TYPE.RESOURCE_TYPE_ID",
+      "note": "Расшифровка типа услуги для бухгалтерии (MNEMONIC имеет хороший мнемонический смысл)"
+    },
+    {
+      "table": "BM_SERVICE_MONEY",
+      "type": "LEFT JOIN",
+      "on": "ANALYTICS.SERVICE_MONEY_ID = BM_SERVICE_MONEY.SERVICE_MONEY_ID",
+      "note": "ANALYTICS формируется на основе BM_SERVICE_MONEY"
+    },
+    {
+      "table": "BM_CDR_ACCT",
+      "type": "LEFT JOIN",
+      "on": "BM_SERVICE_MONEY.CDR_ACCT_ID = BM_CDR_ACCT.CDR_ACCT_ID",
+      "note": "BM_SERVICE_MONEY зависит от BM_CDR_ACCT для SBD услуг (таблица трафика)"
+    }
+  ],
+  "usage_notes": [
+    "ОСНОВНАЯ ТАБЛИЦА для формирования счетов-фактур",
+    "ОБНОВЛЯЕТСЯ КАЖДЫЙ ДЕНЬ НЕСКОЛЬКО РАЗ на основе сессий",
+    "Содержит ВСЕ начисления, включая тесты и эксперименты",
+    "1 ЧИСЛА данные переносятся в счета-фактуры, что закрывает финансовый период",
+    "Для расчета доходов использовать только записи с INVOICE_ITEM_ID IS NOT NULL",
+    "Для расчета себестоимости нужно связать доходы (ANALYTICS.MONEY где INVOICE_ITEM_ID IS NOT NULL) с затратами (STECCOM_EXPENSES)",
+    "PERIOD_ID определяет период начисления (для Иридиум: с 2 числа по 1 число следующего месяца)",
+    "VSAT (IMEI) используется для связи с затратами Иридиум"
+  ]
+}
+

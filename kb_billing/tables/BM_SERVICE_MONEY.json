@@ -1,0 +1,85 @@
+{
+  "table_name": "BM_SERVICE_MONEY",
+  "schema": "billing",
+  "description": "Таблица сессий услуг с объемами трафика и начислениями. Содержит информацию о каждой сессии услуги: объем трафика, сумма начисления (MONEY), даты начала и окончания сессии. Зависит от таблицы трафика BM_CDR_ACCT (через CDR_ACCT_ID) или RADACCT (через RADACCTID для prepaid услуг на RADIUS, для SBD не используется). Является основой для формирования ANALYTICS.",
+  "database": "Oracle (production)",
+  "key_columns": {
+    "SERVICE_MONEY_ID": "Уникальный идентификатор сессии услуги (PRIMARY KEY). Связь с ANALYTICS.SERVICE_MONEY_ID",
+    "SERVICE_ID": "ID услуги из SERVICES. Связь с SERVICES.SERVICE_ID. Для Iridium: TYPE_ID IN (9002, 9005, 9008, 9013, 9014)",
+    "CDR_ACCT_ID": "ID записи трафика из BM_CDR_ACCT. Связь с BM_CDR_ACCT.CDR_ACCT_ID. Для SBD услуг используется BM_CDR_ACCT",
+    "RADACCTID": "ID записи из RADACCT (для prepaid услуг на RADIUS). Для SBD услуг НЕ используется (NULL)",
+    "MONEY": "Сумма начисления за сессию (NUMBER(15,5)). Используется для формирования ANALYTICS.MONEY",
+    "SERVICE_AMOUNT": "Объем услуги (NUMBER(38,18)) - количество единиц (трафик, время и т.д.)",
+    "FDATE": "Дата начала сессии",
+    "TDATE": "Дата окончания сессии",
+    "MOMENT": "Момент начисления",
+    "TARIFFEL_ID": "ID тарифного элемента из BM_TARIFFEL",
+    "PERIODIC_ACCT_ID": "ID периодического начисления",
+    "APERIODIC_ACCT_ID": "ID апериодического начисления",
+    "CHARGE_TYPE_ID": "Тип начисления",
+    "SUBSCRIPTION_ID": "ID подписки",
+    "COUNTER_CF": "Счетчик CF",
+    "INVOICE_ITEM_ID": "ID позиции счета-фактуры (если попала в счет)",
+    "PREBILL_MONEY": "Предварительная сумма",
+    "PREBILL_TRAF": "Предварительный трафик",
+    "RECHARGE_MOMENT": "Момент перезарядки",
+    "DESCRIPTION": "Описание сессии",
+    "PARENT_ID": "ID родительской записи",
+    "PREFIX_ID": "ID префикса"
+  },
+  "business_rules": [
+    "BM_SERVICE_MONEY - ОСНОВА для формирования ANALYTICS",
+    "Для SBD услуг используется BM_CDR_ACCT (CDR_ACCT_ID заполнен, RADACCTID = NULL)",
+    "Для prepaid услуг на RADIUS используется RADACCT (RADACCTID заполнен, CDR_ACCT_ID = NULL). Для SBD НЕ используется",
+    "MONEY содержит сумму начисления за сессию",
+    "SERVICE_AMOUNT содержит объем услуги (трафик в байтах, время в секундах и т.д.)",
+    "FDATE и TDATE определяют период сессии",
+    "TARIFFEL_ID связывается с BM_TARIFFEL для получения информации о тарификации",
+    "INVOICE_ITEM_ID заполняется, если сессия попала в счет-фактуру",
+    "Одна услуга может иметь множество сессий (множество записей в BM_SERVICE_MONEY)"
+  ],
+  "relationships": [
+    {
+      "table": "SERVICES",
+      "type": "JOIN",
+      "on": "BM_SERVICE_MONEY.SERVICE_ID = SERVICES.SERVICE_ID"
+    },
+    {
+      "table": "BM_CDR_ACCT",
+      "type": "LEFT JOIN",
+      "on": "BM_SERVICE_MONEY.CDR_ACCT_ID = BM_CDR_ACCT.CDR_ACCT_ID",
+      "note": "Для SBD услуг - источник данных о трафике"
+    },
+    {
+      "table": "RADACCT",
+      "type": "LEFT JOIN",
+      "on": "BM_SERVICE_MONEY.RADACCTID = RADACCT.RADACCTID",
+      "note": "Для prepaid услуг на RADIUS. Для SBD НЕ используется"
+    },
+    {
+      "table": "BM_TARIFFEL",
+      "type": "LEFT JOIN",
+      "on": "BM_SERVICE_MONEY.TARIFFEL_ID = BM_TARIFFEL.TARIFFEL_ID"
+    },
+    {
+      "table": "ANALYTICS",
+      "type": "LEFT JOIN",
+      "on": "BM_SERVICE_MONEY.SERVICE_MONEY_ID = ANALYTICS.SERVICE_MONEY_ID",
+      "note": "ANALYTICS формируется на основе BM_SERVICE_MONEY"
+    },
+    {
+      "table": "BM_INVOICE_ITEM",
+      "type": "LEFT JOIN",
+      "on": "BM_SERVICE_MONEY.INVOICE_ITEM_ID = BM_INVOICE_ITEM.INVOICE_ITEM_ID"
+    }
+  ],
+  "usage_notes": [
+    "ОСНОВНАЯ ТАБЛИЦА для формирования ANALYTICS",
+    "Содержит детализацию по сессиям услуг с объемами трафика и начислениями",
+    "Для SBD используется BM_CDR_ACCT (CDR_ACCT_ID), RADACCT НЕ используется",
+    "MONEY содержит сумму начисления за сессию",
+    "SERVICE_AMOUNT содержит объем услуги (трафик в байтах для SBD)"
+  ]
+}
+
+

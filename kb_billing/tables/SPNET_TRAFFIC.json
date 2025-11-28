@@ -1,0 +1,56 @@
+{
+  "table_name": "SPNET_TRAFFIC",
+  "schema": "billing",
+  "description": "Таблица трафика SPNet - данные об использовании Iridium M2M сервисов. Содержит детализацию трафика, событий (mailbox checks, registrations) и сумм по каждому контракту и IMEI устройству.",
+  "database": "Oracle (production) / PostgreSQL (testing)",
+  "ddl": "CREATE TABLE SPNET_TRAFFIC (\n    ID SERIAL PRIMARY KEY,\n    TOTAL_ROWS INTEGER,\n    CONTRACT_ID VARCHAR(50),\n    IMEI VARCHAR(50),\n    SIM_ICCID VARCHAR(50),\n    SERVICE VARCHAR(100),\n    USAGE_TYPE VARCHAR(100),\n    USAGE_BYTES NUMERIC,\n    USAGE_UNIT VARCHAR(20),\n    TOTAL_AMOUNT NUMERIC(10,2),\n    BILL_MONTH INTEGER,\n    PLAN_NAME VARCHAR(100),\n    IMSI VARCHAR(50),\n    MSISDN VARCHAR(50),\n    ACTUAL_USAGE NUMERIC,\n    CALL_SESSION_COUNT INTEGER,\n    SP_ACCOUNT_NO INTEGER,\n    SP_NAME VARCHAR(100),\n    SP_REFERENCE VARCHAR(100),\n    SOURCE_FILE VARCHAR(200),\n    LOAD_DATE TIMESTAMP DEFAULT CURRENT_TIMESTAMP,\n    CREATED_BY VARCHAR(50) DEFAULT CURRENT_USER\n);",
+  "key_columns": {
+    "CONTRACT_ID": "ID контракта - связь с биллингом (SERVICES.LOGIN). Формат: SUB-XXXXX",
+    "IMEI": "IMEI номер устройства Iridium. Уникальный идентификатор устройства",
+    "BILL_MONTH": "Месяц биллинга. Формат: YYYYMM (например, 202510 для октября 2025). ВАЖНО: старые данные могут быть в формате MMYYYY",
+    "PLAN_NAME": "Название тарифного плана из SPNet (например, 'SBD Tiered 1250 1K', 'SBD Tiered 1250 10K')",
+    "USAGE_TYPE": "Тип использования: 'SBD Data Usage' (трафик в байтах), 'SBD Mailbox Checks' (события), 'SBD Registrations' (события)",
+    "USAGE_BYTES": "Объем использованных данных в байтах (для SBD Data Usage) или количество событий (для Mailbox/Registration)",
+    "USAGE_UNIT": "Единица измерения: 'BYTES' (для трафика), 'EVENT' (для событий mailbox/registration)",
+    "TOTAL_AMOUNT": "Общая сумма за использование (USD) из отчета SPNet"
+  },
+  "business_rules": [
+    "Только записи с USAGE_TYPE = 'SBD Data Usage' считаются трафиком",
+    "События (Mailbox Checks, Registrations) имеют USAGE_UNIT = 'EVENT'",
+    "BILL_MONTH может быть в двух форматах: YYYYMM (новые данные) или MMYYYY (старые данные)",
+    "CONTRACT_ID связывается с SERVICES.LOGIN в биллинге",
+    "PLAN_NAME должен соответствовать записям в TARIFF_PLANS.PLAN_NAME"
+  ],
+  "relationships": [
+    {
+      "table": "TARIFF_PLANS",
+      "type": "LEFT JOIN",
+      "on": "SPNET_TRAFFIC.PLAN_NAME = TARIFF_PLANS.PLAN_NAME"
+    },
+    {
+      "table": "IRIDIUM_SERVICES_INFO",
+      "type": "LEFT JOIN",
+      "on": "SPNET_TRAFFIC.CONTRACT_ID = IRIDIUM_SERVICES_INFO.CONTRACT_ID"
+    },
+    {
+      "table": "STECCOM_EXPENSES",
+      "type": "LEFT JOIN",
+      "on": "SPNET_TRAFFIC.CONTRACT_ID = STECCOM_EXPENSES.CONTRACT_ID AND SPNET_TRAFFIC.IMEI = STECCOM_EXPENSES.ICC_ID_IMEI"
+    }
+  ],
+  "indexes": [
+    "idx_spnet_imei ON SPNET_TRAFFIC(IMEI)",
+    "idx_spnet_contract ON SPNET_TRAFFIC(CONTRACT_ID)",
+    "idx_spnet_bill_month ON SPNET_TRAFFIC(BILL_MONTH)",
+    "idx_spnet_plan_name ON SPNET_TRAFFIC(PLAN_NAME)",
+    "idx_spnet_usage_type ON SPNET_TRAFFIC(USAGE_TYPE)"
+  ],
+  "usage_notes": [
+    "Используется для расчета превышения трафика (overage) через функцию calculate_overage()",
+    "Группировка по IMEI, CONTRACT_ID, BILL_MONTH для агрегации данных",
+    "Трафик (SBD Data Usage) измеряется в байтах, но для отчетов конвертируется в KB (1KB = 1000 bytes)",
+    "События (Mailbox Checks, Registrations) не учитываются в расчете превышения трафика"
+  ]
+}
+
+

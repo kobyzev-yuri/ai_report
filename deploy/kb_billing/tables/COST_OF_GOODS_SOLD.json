@@ -1,0 +1,114 @@
+{
+  "table_name": "COST_OF_GOODS_SOLD",
+  "schema": "billing",
+  "description": "Виртуальная концепция для расчета себестоимости. Не является физической таблицей, а представляет собой логику расчета себестоимости услуг Iridium SBD путем сопоставления доходов (ANALYTICS, BM_INVOICE_ITEM) с затратами Иридиум (STECCOM_EXPENSES, SPNET_TRAFFIC) по SUB-XXXXX (CONTRACT_ID). ВАЖНО: Финансистов волнуют ВСЕ SUB-XXXXX, даже тестовые. Иридиум не всегда выставляет счета, особенно по тестовым услугам.",
+  "database": "Oracle (production) - концептуальная",
+  "key_concepts": {
+    "SUB-XXXXX": "CONTRACT_ID - ключевая связь между доходами и затратами. Формат: SUB-XXXXX из SERVICES.LOGIN (TYPE_ID = 9002)",
+    "Доходы": "Из ANALYTICS.MONEY (все начисления, включая тесты) или BM_INVOICE_ITEM.MONEY (только попавшие в счета-фактуры)",
+    "Затраты": "Из STECCOM_EXPENSES.AMOUNT (планы, fees) и SPNET_TRAFFIC.TOTAL_AMOUNT (overage трафика)",
+    "Периоды": "PERIOD_ID (доходы) сопоставляется с BILL_MONTH (затраты) через BM_PERIODS. Для Иридиум: период с 2 числа по 1 число следующего месяца"
+  },
+  "business_rules": [
+    "Финансистов волнуют ВСЕ SUB-XXXXX, даже тестовые (включая clone-услуги)",
+    "Иридиум не всегда выставляет счета, особенно по тестовым услугам",
+    "Есть SUB- которых может не быть в счетах Иридиум (тесты, еще не активированы)",
+    "Есть SUB- в счетах Иридиум, но нет в доходах (не попали в счета-фактуры)",
+    "ANALYTICS содержит ВСЕ начисления, включая тесты (INVOICE_ITEM_ID IS NULL для тестов)",
+    "BM_INVOICE_ITEM содержит только начисления, попавшие в счета-фактуры",
+    "Для расчета себестоимости нужно сопоставить доходы и затраты по SUB- и периоду",
+    "Периоды: PERIOD_ID (доходы) сопоставляется с BILL_MONTH (затраты) через BM_PERIODS",
+    "Для Иридиум: период с 2 числа по 1 число следующего месяца (например, с 2 октября по 1 ноября = период за октябрь)"
+  ],
+  "data_sources": {
+    "Доходы": [
+      {
+        "source": "ANALYTICS",
+        "field": "MONEY",
+        "join": "ANALYTICS.SERVICE_ID = SERVICES.SERVICE_ID, SERVICES.LOGIN = SUB-XXXXX",
+        "note": "ВСЕ начисления, включая тесты. INVOICE_ITEM_ID IS NULL для тестов"
+      },
+      {
+        "source": "BM_INVOICE_ITEM",
+        "field": "MONEY - MONEY_REVERSED",
+        "join": "BM_INVOICE_ITEM.SERVICE_ID = SERVICES.SERVICE_ID, SERVICES.LOGIN = SUB-XXXXX",
+        "note": "Только попавшие в счета-фактуры"
+      }
+    ],
+    "Затраты": [
+      {
+        "source": "STECCOM_EXPENSES",
+        "field": "AMOUNT",
+        "join": "STECCOM_EXPENSES.CONTRACT_ID = SUB-XXXXX",
+        "note": "Планы, fees (Activation Fee, Advance Charge, Credit). BILL_MONTH из INVOICE_DATE"
+      },
+      {
+        "source": "SPNET_TRAFFIC",
+        "field": "TOTAL_AMOUNT",
+        "join": "SPNET_TRAFFIC.CONTRACT_ID = SUB-XXXXX",
+        "note": "Overage трафика. BILL_MONTH в формате YYYYMM"
+      }
+    ]
+  },
+  "problematic_cases": [
+    {
+      "case": "REVENUE_NO_COST",
+      "description": "SUB- с доходами, но без затрат Иридиум",
+      "reasons": [
+        "Тестовые услуги (Иридиум не выставляет счета)",
+        "Услуги еще не активированы",
+        "Ошибка в данных или задержка загрузки счетов Иридиум"
+      ],
+      "action": "Проверить статус услуги, дату создания, наличие тестовых начислений"
+    },
+    {
+      "case": "COST_NO_REVENUE",
+      "description": "SUB- с затратами Иридиум, но без доходов",
+      "reasons": [
+        "Услуга не попала в счета-фактуры (тест/эксперимент)",
+        "Ошибка в данных или задержка формирования счетов-фактур",
+        "Услуга была закрыта до формирования счетов"
+      ],
+      "action": "Проверить ANALYTICS (есть ли начисления), статус услуги, дату закрытия"
+    },
+    {
+      "case": "HAS_TEST_ITEMS",
+      "description": "SUB- с тестовыми начислениями (INVOICE_ITEM_ID IS NULL в ANALYTICS)",
+      "reasons": [
+        "Тестовые начисления не попали в счета-фактуры",
+        "Предпродажные эксперименты"
+      ],
+      "action": "Учесть при расчете себестоимости - тестовые начисления не являются реальными доходами"
+    },
+    {
+      "case": "TEST_CLONE",
+      "description": "SUB- с суффиксом -clone- (тестовые клоны)",
+      "reasons": [
+        "Тестовые копии услуг для экспериментов"
+      ],
+      "action": "Учесть при анализе - могут не иметь затрат Иридиум"
+    }
+  ],
+  "calculation_logic": {
+    "step1": "Получить все SUB-XXXXX из SERVICES (TYPE_ID = 9002, LOGIN LIKE 'SUB-%')",
+    "step2": "Собрать доходы по каждому SUB- из ANALYTICS и BM_INVOICE_ITEM",
+    "step3": "Собрать затраты по каждому SUB- из STECCOM_EXPENSES и SPNET_TRAFFIC",
+    "step4": "Сопоставить периоды: PERIOD_ID (доходы) с BILL_MONTH (затраты) через BM_PERIODS",
+    "step5": "Рассчитать себестоимость: (Затраты / Доходы) * 100%",
+    "step6": "Выявить проблемные случаи: REVENUE_NO_COST, COST_NO_REVENUE, HAS_TEST_ITEMS"
+  },
+  "usage_notes": [
+    "Используется для расчета себестоимости услуг Iridium SBD",
+    "ВАЖНО: Учитывать ВСЕ SUB-, даже тестовые",
+    "Периоды Иридиум отличаются от стандартных - с 2 числа по 1 число следующего месяца",
+    "При сопоставлении периодов использовать BM_PERIODS для маппинга PERIOD_ID на BILL_MONTH",
+    "Тестовые начисления (INVOICE_ITEM_ID IS NULL) не являются реальными доходами",
+    "Иридиум не всегда выставляет счета по тестовым услугам - это нормально",
+    "SQL запрос: oracle/queries/cost_of_goods_sold_analysis.sql"
+  ],
+  "related_files": [
+    "oracle/queries/cost_of_goods_sold_analysis.sql"
+  ]
+}
+
+

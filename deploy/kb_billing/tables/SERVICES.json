@@ -1,0 +1,74 @@
+{
+  "table_name": "SERVICES",
+  "schema": "billing",
+  "description": "Основная таблица услуг биллинга. Содержит информацию о всех услугах, включая Iridium M2M сервисы (TYPE_ID = 9002, 9005, 9008, 9013, 9014). Связывает услуги с клиентами (CUSTOMER_ID), аккаунтами (ACCOUNT_ID) и тарифами (TARIFF_ID).",
+  "database": "Oracle (production)",
+  "key_columns": {
+    "SERVICE_ID": "Уникальный идентификатор услуги (PRIMARY KEY)",
+    "LOGIN": "Логин услуги. Для Iridium SBD (TYPE_ID=9002): формат SUB-XXXXX (CONTRACT_ID). Для suspend (TYPE_ID=9008): IMEI (VSAT)",
+    "VSAT": "IMEI устройства (для Iridium сервисов). Связь с SPNET_TRAFFIC.IMEI",
+    "TYPE_ID": "Тип услуги из BM_TYPE: 9002=SBD (тарификация по трафику), 9005=мониторинг, 9008=suspend (приостановление), 9013=блокировка мониторинга, 9014=сообщения",
+    "TARIFF_ID": "ID тарифа из BM_TARIFF. Связь с нашими тарифными планами для клиентов",
+    "CUSTOMER_ID": "ID клиента из CUSTOMERS",
+    "ACCOUNT_ID": "ID аккаунта из ACCOUNTS",
+    "STATUS": "Статус услуги: 10 = активный, -10 = приостановленный",
+    "ACTUAL_STATUS": "Актуальный статус услуги",
+    "START_DATE": "Дата начала предоставления услуги (open_date)",
+    "STOP_DATE": "Дата окончания предоставления услуги (stop_date)",
+    "CREATE_DATE": "Дата создания услуги",
+    "OPEN_DATE": "Дата открытия услуги",
+    "BLANK": "Номер заказа/приложения к договору (бланк)",
+    "DESCRIPTION": "Описание услуги",
+    "BALANCE_IRIDIUM": "Баланс Iridium (по умолчанию 0)",
+    "STATUS_IRIDIUM": "Статус Iridium"
+  },
+  "business_rules": [
+    "Для Iridium SBD (TYPE_ID=9002): LOGIN = SUB-XXXXX (CONTRACT_ID), VSAT = IMEI",
+    "Для suspend (TYPE_ID=9008): LOGIN = IMEI (VSAT), связана с основной услугой 9002 по VSAT и ACCOUNT_ID",
+    "Услуги 9002 и 9008 в противофазе: когда 9008 активна, 9002 приостановлена и наоборот",
+    "TARIFF_ID связывается с BM_TARIFF.TARIFF_ID для получения информации о тарифе клиента",
+    "Связь с тарифами по периодам через BM_SERVICE_TARIFF (DATE_BEG, DATE_END)",
+    "STATUS = 10 означает активную услугу, STATUS = -10 означает приостановленную",
+    "Для активных услуг: STATUS = 10 AND LOGIN NOT LIKE '%-clone-%'"
+  ],
+  "relationships": [
+    {
+      "table": "BM_TARIFF",
+      "type": "LEFT JOIN",
+      "on": "SERVICES.TARIFF_ID = BM_TARIFF.TARIFF_ID"
+    },
+    {
+      "table": "BM_SERVICE_TARIFF",
+      "type": "LEFT JOIN",
+      "on": "SERVICES.SERVICE_ID = BM_SERVICE_TARIFF.SERVICE_ID"
+    },
+    {
+      "table": "CUSTOMERS",
+      "type": "JOIN",
+      "on": "SERVICES.CUSTOMER_ID = CUSTOMERS.CUSTOMER_ID"
+    },
+    {
+      "table": "ACCOUNTS",
+      "type": "JOIN",
+      "on": "SERVICES.ACCOUNT_ID = ACCOUNTS.ACCOUNT_ID"
+    },
+    {
+      "table": "BM_TYPE",
+      "type": "LEFT JOIN",
+      "on": "SERVICES.TYPE_ID = BM_TYPE.TYPE_ID"
+    },
+    {
+      "table": "SPNET_TRAFFIC",
+      "type": "LEFT JOIN",
+      "on": "SERVICES.LOGIN = SPNET_TRAFFIC.CONTRACT_ID AND SERVICES.VSAT = SPNET_TRAFFIC.IMEI"
+    }
+  ],
+  "usage_notes": [
+    "Используется для получения информации об услугах клиентов",
+    "TARIFF_ID указывает на тариф клиента (наши тарифы), а не тарифы Иридиум",
+    "Для расчета доходов нужно использовать BM_TARIFFEL с ценами (MONEY)",
+    "Связь с тарифами по периодам через BM_SERVICE_TARIFF (может быть несколько записей для одной услуги)"
+  ]
+}
+
+

@@ -1,0 +1,108 @@
+{
+  "table_name": "BM_INVOICE_ITEM",
+  "schema": "billing",
+  "description": "Детали счетов-фактур - позиции в счетах с детализацией по услугам, тарифам и суммам. Формируется на основе ANALYTICS. 1 ЧИСЛА данные по договорам переносятся из ANALYTICS в BM_INVOICE_ITEM, что закрывает финансовый период. После формирования счета-фактуры уходят в систему 1С (связь через OUTER_IDS по CUSTOMER_ID из BM_INVOICE). Содержит информацию о каждой услуге в счете: цена (PRICE), количество (QTY), сумма (MONEY), НДС (MONEY_NDS). Основная таблица для расчета доходов от клиентов по услугам.",
+  "database": "Oracle (production)",
+  "key_columns": {
+    "INVOICE_ITEM_ID": "Уникальный идентификатор позиции счета (PRIMARY KEY)",
+    "INVOICE_ID": "ID счета-фактуры из BM_INVOICE. Связь с BM_INVOICE.INVOICE_ID",
+    "SERVICE_ID": "ID услуги из SERVICES. Связь с SERVICES.SERVICE_ID. Для Iridium: TYPE_ID IN (9002, 9005, 9008, 9013, 9014)",
+    "TARIFF_ID": "ID тарифа из BM_TARIFF. Связь с BM_TARIFF.TARIFF_ID",
+    "TARIFFEL_ID": "ID тарифного элемента из BM_TARIFFEL. Связь с BM_TARIFFEL.TARIFFEL_ID",
+    "ACCOUNT_ID": "ID аккаунта из ACCOUNTS",
+    "PERIOD_ID": "ID периода биллинга",
+    "RESOURCE_TYPE_ID": "Тип ресурса из BM_RESOURCE_TYPE. Связь с BM_RESOURCE_TYPE.RESOURCE_TYPE_ID. Используется для расшифровки услуг для бухгалтерии (MNEMONIC имеет хороший мнемонический смысл, например 'traffic_sbd', 'abon_payment')",
+    "LOGIN": "Логин услуги (для Iridium: SUB-XXXXX)",
+    "PRICE": "Цена единицы (NUMBER(38,18))",
+    "ACC_PRICE": "Цена единицы в валюте аккаунта",
+    "QTY": "Количество единиц (NUMBER(38,18))",
+    "MONEY": "Сумма без НДС (NUMBER(15,5)). ОСНОВНОЕ ПОЛЕ ДЛЯ РАСЧЕТА ДОХОДОВ",
+    "MONEY_CLEAR": "Сумма чистая (без НДС и других налогов)",
+    "MONEY_NDS": "Сумма НДС (NUMBER(15,5))",
+    "MONEY_REVERSED": "Сумма сторно (отмененные начисления)",
+    "ACC_MONEY": "Сумма в валюте аккаунта",
+    "ACC_MONEY_CLEAR": "Сумма чистая в валюте аккаунта",
+    "ACC_MONEY_NDS": "Сумма НДС в валюте аккаунта",
+    "CURRENCY_ID": "ID валюты позиции",
+    "ACC_CURRENCY_ID": "ID валюты аккаунта",
+    "RATE": "Курс валюты (NUMBER(15,5))",
+    "NDS_PERCENT": "Процент НДС (NUMBER(15,5))",
+    "EXCISE": "Акциз (NUMBER(15,5))",
+    "COUNTRY": "Страна (для экспорта/импорта)",
+    "CUSTOM_DECLARATION": "Таможенная декларация",
+    "BILL_ITEM_ID": "ID позиции биллинга. Связь с ANALYTICS.AID (если используется для связи с аналитикой)",
+    "CORRECTION_TYPE_ID": "Тип коррекции",
+    "CORRECTION_PERIOD_ID": "ID периода коррекции"
+  },
+  "business_rules": [
+    "BM_INVOICE_ITEM формируется на основе ANALYTICS (не все записи ANALYTICS попадают в счета)",
+    "1 ЧИСЛА данные по договорам переносятся из ANALYTICS в BM_INVOICE_ITEM, что ЗАКРЫВАЕТ ФИНАНСОВЫЙ ПЕРИОД",
+    "После формирования счета-фактуры уходят в систему 1С (связь через OUTER_IDS по CUSTOMER_ID из BM_INVOICE, где TBL = 'CUSTOMERS')",
+    "MONEY - основное поле для расчета доходов (сумма без НДС)",
+    "MONEY = PRICE * QTY (обычно)",
+    "MONEY_CLEAR = MONEY - MONEY_NDS (чистая сумма без НДС)",
+    "Один счет (BM_INVOICE) может содержать несколько позиций (BM_INVOICE_ITEM) для разных услуг",
+    "SERVICE_ID связывается с SERVICES для получения информации об услуге (TYPE_ID, LOGIN, VSAT)",
+    "TARIFF_ID и TARIFFEL_ID связываются с BM_TARIFF и BM_TARIFFEL для получения информации о тарифе",
+    "Для Iridium услуг фильтровать по SERVICES.TYPE_ID IN (9002, 9005, 9008, 9013, 9014)",
+    "PERIOD_ID определяет период, за который начислена сумма",
+    "MONEY_REVERSED содержит суммы сторно (отмененные начисления) - нужно вычитать из доходов",
+    "Для расчета доходов: SUM(MONEY) - SUM(MONEY_REVERSED) по услугам за период",
+    "BILL_ITEM_ID может содержать ANALYTICS.AID для связи с исходной записью аналитики"
+  ],
+  "relationships": [
+    {
+      "table": "BM_INVOICE",
+      "type": "JOIN",
+      "on": "BM_INVOICE_ITEM.INVOICE_ID = BM_INVOICE.INVOICE_ID"
+    },
+    {
+      "table": "SERVICES",
+      "type": "JOIN",
+      "on": "BM_INVOICE_ITEM.SERVICE_ID = SERVICES.SERVICE_ID"
+    },
+    {
+      "table": "BM_TARIFF",
+      "type": "LEFT JOIN",
+      "on": "BM_INVOICE_ITEM.TARIFF_ID = BM_TARIFF.TARIFF_ID"
+    },
+    {
+      "table": "BM_TARIFFEL",
+      "type": "LEFT JOIN",
+      "on": "BM_INVOICE_ITEM.TARIFFEL_ID = BM_TARIFFEL.TARIFFEL_ID"
+    },
+    {
+      "table": "ACCOUNTS",
+      "type": "LEFT JOIN",
+      "on": "BM_INVOICE_ITEM.ACCOUNT_ID = ACCOUNTS.ACCOUNT_ID"
+    },
+    {
+      "table": "ANALYTICS",
+      "type": "LEFT JOIN",
+      "on": "BM_INVOICE_ITEM.INVOICE_ITEM_ID = ANALYTICS.INVOICE_ITEM_ID",
+      "note": "ANALYTICS - основа для формирования BM_INVOICE_ITEM"
+    },
+    {
+      "table": "BM_PERIODS",
+      "type": "LEFT JOIN",
+      "on": "BM_INVOICE_ITEM.PERIOD_ID = BM_PERIODS.PERIOD_ID"
+    },
+    {
+      "table": "BM_RESOURCE_TYPE",
+      "type": "LEFT JOIN",
+      "on": "BM_INVOICE_ITEM.RESOURCE_TYPE_ID = BM_RESOURCE_TYPE.RESOURCE_TYPE_ID",
+      "note": "Расшифровка типа услуги для бухгалтерии (MNEMONIC имеет хороший мнемонический смысл)"
+    }
+  ],
+  "usage_notes": [
+    "ОСНОВНАЯ ТАБЛИЦА ДЛЯ РАСЧЕТА ДОХОДОВ от клиентов",
+    "1 ЧИСЛА данные переносятся из ANALYTICS в BM_INVOICE_ITEM, что закрывает финансовый период",
+    "После формирования счета-фактуры уходят в систему 1С (связь через OUTER_IDS)",
+    "MONEY содержит сумму начисления без НДС",
+    "Для расчета себестоимости нужно связать доходы (BM_INVOICE_ITEM.MONEY) с затратами (STECCOM_EXPENSES.AMOUNT, TARIFF_PLANS)",
+    "Связь с услугами через SERVICE_ID позволяет получить CONTRACT_ID (LOGIN) для связи с затратами Иридиум",
+    "PERIOD_ID используется для группировки доходов по периодам (аналогично BILL_MONTH в затратах)",
+    "MONEY_REVERSED нужно учитывать при расчете (вычитать из доходов)"
+  ]
+}
+

@@ -1,0 +1,68 @@
+{
+  "table_name": "BM_CDR_ACCT",
+  "schema": "billing",
+  "description": "Таблица трафика (CDR - Call Detail Records). Содержит детализацию трафика из файлов или других источников. Используется для SBD услуг через BM_SERVICE_MONEY.CDR_ACCT_ID. Содержит информацию о сессиях: IP адреса, порты, объем трафика (TRAFFIC_BYTES), время начала и окончания сессии.",
+  "database": "Oracle (production)",
+  "key_columns": {
+    "CDR_ACCT_ID": "Уникальный идентификатор записи трафика (PRIMARY KEY). Связь с BM_SERVICE_MONEY.CDR_ACCT_ID",
+    "CDR_FILE_ID": "ID файла CDR, из которого загружена запись",
+    "TYPE_ID": "Тип услуги (может дублировать SERVICES.TYPE_ID)",
+    "START_TIME": "Время начала сессии",
+    "STOP_TIME": "Время окончания сессии",
+    "DURATION": "Длительность сессии (секунды)",
+    "TRAFFIC_BYTES": "Объем трафика в байтах (VARCHAR2, может содержать число как строку). ОСНОВНОЕ ПОЛЕ для расчета трафика",
+    "SRC_IPADDR": "IP адрес источника",
+    "DST_IPADDR": "IP адрес назначения",
+    "SOURCE_PORT": "Порт источника",
+    "DEST_PORT": "Порт назначения",
+    "IP_PROTOCOL": "IP протокол",
+    "CALLED_NUMBER": "Вызываемый номер",
+    "CALLING_NUMBER": "Вызывающий номер",
+    "TRUNK_IN": "Входящий транк",
+    "TRUNK_OUT": "Исходящий транк",
+    "RESULT_CODE": "Код результата",
+    "CONN_TYPE": "Тип соединения",
+    "LINENO": "Номер строки в файле",
+    "CRC": "Контрольная сумма",
+    "SOURCE_NET": "Сеть источника",
+    "DEST_NET": "Сеть назначения",
+    "NEXT_HOP": "Следующий хоп",
+    "SOURCE_TOS": "TOS источника",
+    "DEST_TOS": "TOS назначения",
+    "INPUT_SNMP": "SNMP вход",
+    "OUTPUT_SNMP": "SNMP выход",
+    "A_CATEGORY": "Категория"
+  },
+  "business_rules": [
+    "BM_CDR_ACCT - источник данных о трафике для SBD услуг",
+    "Используется через BM_SERVICE_MONEY.CDR_ACCT_ID",
+    "TRAFFIC_BYTES содержит объем трафика в байтах (может быть строкой, нужно преобразовывать в число)",
+    "START_TIME и STOP_TIME определяют период сессии",
+    "DURATION определяет длительность сессии в секундах",
+    "Связь с услугами через BM_SERVICE_MONEY.CDR_ACCT_ID (SERVICE_ID может отсутствовать в BM_CDR_ACCT)",
+    "CDR_FILE_ID указывает на файл, из которого загружена запись",
+    "Одна услуга может иметь множество записей трафика (множество сессий)"
+  ],
+  "relationships": [
+    {
+      "table": "BM_SERVICE_MONEY",
+      "type": "JOIN",
+      "on": "BM_CDR_ACCT.CDR_ACCT_ID = BM_SERVICE_MONEY.CDR_ACCT_ID",
+      "note": "BM_SERVICE_MONEY использует BM_CDR_ACCT для получения данных о трафике"
+    },
+    {
+      "table": "SERVICES",
+      "type": "LEFT JOIN",
+      "on": "BM_SERVICE_MONEY.SERVICE_ID = SERVICES.SERVICE_ID",
+      "note": "Связь с услугами через BM_SERVICE_MONEY (BM_CDR_ACCT может не иметь SERVICE_ID)"
+    }
+  ],
+  "usage_notes": [
+    "Используется для SBD услуг через BM_SERVICE_MONEY",
+    "TRAFFIC_BYTES содержит объем трафика в байтах",
+    "Для расчета трафика нужно суммировать TRAFFIC_BYTES по услуге за период",
+    "START_TIME и STOP_TIME определяют период сессии",
+    "Для prepaid услуг на RADIUS используется RADACCT (для SBD НЕ используется)"
+  ]
+}
+

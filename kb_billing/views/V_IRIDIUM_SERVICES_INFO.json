@@ -1,0 +1,53 @@
+{
+  "view_name": "V_IRIDIUM_SERVICES_INFO",
+  "schema": "billing",
+  "description": "Информация о SBD сервисах Iridium с данными клиентов из биллинга. VIEW в Oracle. Содержит связь между контрактами, IMEI, клиентами (организации/ФИО), договорами и кодами 1С. Используется для получения информации о клиентах в отчетах.",
+  "database": "Oracle (production) - VIEW",
+  "source_tables_oracle": [
+    "SERVICES",
+    "ACCOUNTS",
+    "CUSTOMERS",
+    "BM_CUSTOMER_CONTACT",
+    "BM_CONTACT_DICT",
+    "OUTER_IDS"
+  ],
+  "key_columns": {
+    "SERVICE_ID": "ID сервиса из billing (SERVICES.SERVICE_ID)",
+    "CONTRACT_ID": "ID контракта (LOGIN из SERVICES) - связь с SPNET_TRAFFIC.CONTRACT_ID. Формат: SUB-XXXXX",
+    "IMEI": "IMEI устройства (VSAT из SERVICES) - связь с SPNET_TRAFFIC.IMEI",
+    "TARIFF_ID": "ID тарифа из биллинга (SERVICES.TARIFF_ID)",
+    "AGREEMENT_NUMBER": "Номер договора в СТЭККОМ (ACCOUNTS.DESCRIPTION)",
+    "ORDER_NUMBER": "Номер заказа/приложения к договору (SERVICES.BLANK)",
+    "STATUS": "Статус сервиса: 10 = активный, -10 = приостановленный",
+    "ACTUAL_STATUS": "Актуальный статус сервиса",
+    "CUSTOMER_ID": "ID клиента (CUSTOMERS.CUSTOMER_ID)",
+    "ORGANIZATION_NAME": "Название организации (для юр.лиц). CONTACT_DICT_ID = 23, MNEMONIC = 'description'",
+    "PERSON_NAME": "ФИО физического лица. CONTACT_DICT_ID = 11, MNEMONIC IN ('first_name', 'last_name', 'middle_name')",
+    "CUSTOMER_NAME": "Универсальное поле: название организации или ФИО (ORGANIZATION_NAME или PERSON_NAME)",
+    "CREATE_DATE": "Дата создания сервиса",
+    "START_DATE": "Начало предоставления услуги (open_date)",
+    "STOP_DATE": "Конец предоставления услуги (stop_date)",
+    "ACCOUNT_ID": "ID аккаунта (ACCOUNTS.ACCOUNT_ID)",
+    "IS_SUSPENDED": "Признак приостановки: Y = есть активная услуга приостановления (TYPE_ID=9008), N = нет",
+    "CODE_1C": "Код клиента из системы 1С (из OUTER_IDS по CUSTOMER_ID, где TBL = 'CUSTOMERS')"
+  },
+  "business_rules": [
+    "TYPE_ID в SERVICES: 9002 = SBD (тарификация по трафику), 9008 = suspend (приостановление), 9014 = сообщения",
+    "Услуги 9002 и 9008 в противофазе: когда 9008 активна, 9002 приостановлена и наоборот",
+    "У 9008: LOGIN = IMEI (VSAT), у 9002: LOGIN = SUB-XXXXX (контракт)",
+    "IS_SUSPENDED = 'Y' если есть активная услуга приостановления (TYPE_ID=9008) со STATUS=10",
+    "CODE_1C получается из OUTER_IDS где TBL = 'CUSTOMERS' (регистр не важен, используется UPPER)",
+    "CUSTOMER_NAME = ORGANIZATION_NAME (если есть) или PERSON_NAME (если нет организации)",
+    "ORGANIZATION_NAME собирается из BM_CUSTOMER_CONTACT где CONTACT_DICT_ID = 23 и MNEMONIC = 'description'",
+    "PERSON_NAME собирается из BM_CUSTOMER_CONTACT где CONTACT_DICT_ID = 11 и MNEMONIC IN ('first_name', 'last_name', 'middle_name')"
+  ],
+  "usage_notes": [
+    "Используется для получения информации о клиентах в отчетах",
+    "В Oracle это VIEW, создается на основе таблиц биллинга",
+    "Для активных сервисов: STATUS = 10 AND CONTRACT_ID NOT LIKE '%-clone-%'",
+    "CODE_1C используется для связи с системой 1С",
+    "CUSTOMER_NAME используется для отображения в отчетах (организация или ФИО)"
+  ]
+}
+
+

@@ -1,0 +1,95 @@
+{
+  "table_name": "BM_INVOICE",
+  "schema": "billing",
+  "description": "Счета-фактуры (накладные) - документы для выставления счетов клиентам. Формируются на основе таблицы ANALYTICS. 1 ЧИСЛА данные по договорам переносятся из ANALYTICS в счета-фактуры, что ЗАКРЫВАЕТ ФИНАНСОВЫЙ ПЕРИОД. После формирования счета-фактуры уходят в систему 1С (связь через OUTER_IDS по CUSTOMER_ID, где TBL = 'CUSTOMERS'). Содержат информацию о периоде, клиенте, аккаунте, валюте. Детализация по услугам хранится в BM_INVOICE_ITEM. НЕ ВСЕ записи из ANALYTICS попадают в счета-фактуры (есть тесты и предпродажные эксперименты). Используется для расчета доходов от клиентов.",
+  "database": "Oracle (production)",
+  "key_columns": {
+    "INVOICE_ID": "Уникальный идентификатор счета-фактуры (PRIMARY KEY). Связь с BM_INVOICE_ITEM.INVOICE_ID",
+    "PERIOD_ID": "ID периода биллинга. Определяет период, за который выставляется счет",
+    "CUSTOMER_ID": "ID клиента из CUSTOMERS. Связь с CUSTOMERS.CUSTOMER_ID",
+    "ACCOUNT_ID": "ID аккаунта из ACCOUNTS. Связь с ACCOUNTS.ACCOUNT_ID",
+    "SERVICE_ID": "ID услуги из SERVICES (может быть NULL, если счет на несколько услуг). Связь с SERVICES.SERVICE_ID",
+    "MOMENT": "Дата/время выставления счета-фактуры",
+    "CREATION_MOMENT": "Дата/время создания счета-фактуры",
+    "CURRENCY_ID": "ID валюты счета-фактуры",
+    "PREFIX": "Префикс номера счета-фактуры",
+    "SERIAL": "Серийный номер счета-фактуры",
+    "YEAR": "Год счета-фактуры",
+    "IS_ADVANCE": "Флаг авансового счета: 1 = авансовый счет, 0 = обычный счет",
+    "BUYER_NAME": "Название покупателя (клиента)",
+    "BUYER_INN": "ИНН покупателя",
+    "BUYER_KPP": "КПП покупателя",
+    "BUYER_ADDRESS": "Адрес покупателя",
+    "SELLER_ID": "ID продавца",
+    "SELLER_KPP": "КПП продавца",
+    "CONSIGNEE_NAME": "Название грузополучателя",
+    "CONSIGNEE_ADDRESS": "Адрес грузополучателя",
+    "NOT_EXPORT": "Флаг неэкспорта (для 1С и других систем)",
+    "CORRECTION_PERIOD_ID": "ID периода коррекции (если счет является корректировочным)"
+  },
+  "business_rules": [
+    "Счета-фактуры формируются на основе таблицы ANALYTICS",
+    "1 ЧИСЛА данные по договорам переносятся из ANALYTICS в счета-фактуры, что ЗАКРЫВАЕТ ФИНАНСОВЫЙ ПЕРИОД",
+    "После формирования счета-фактуры уходят в систему 1С (связь через OUTER_IDS по CUSTOMER_ID, где TBL = 'CUSTOMERS')",
+    "НЕ ВСЕ записи из ANALYTICS попадают в счета-фактуры - есть тесты и предпродажные эксперименты",
+    "Один счет-фактура может содержать несколько позиций (BM_INVOICE_ITEM) для разных услуг",
+    "PERIOD_ID определяет период, за который выставляется счет (из BM_PERIODS)",
+    "Для Иридиум: PERIOD_ID соответствует периоду с 2 числа по 1 число следующего месяца",
+    "IS_ADVANCE = 1 означает авансовый счет (предоплата)",
+    "NOT_EXPORT = 1 означает, что счет не экспортируется в 1С",
+    "Для расчета доходов за период нужно использовать PERIOD_ID или MOMENT",
+    "Связь с услугами через BM_INVOICE_ITEM.SERVICE_ID",
+    "Для Iridium услуг фильтровать по SERVICES.TYPE_ID IN (9002, 9005, 9008, 9013, 9014)"
+  ],
+  "relationships": [
+    {
+      "table": "BM_INVOICE_ITEM",
+      "type": "JOIN",
+      "on": "BM_INVOICE.INVOICE_ID = BM_INVOICE_ITEM.INVOICE_ID"
+    },
+    {
+      "table": "CUSTOMERS",
+      "type": "JOIN",
+      "on": "BM_INVOICE.CUSTOMER_ID = CUSTOMERS.CUSTOMER_ID"
+    },
+    {
+      "table": "ACCOUNTS",
+      "type": "JOIN",
+      "on": "BM_INVOICE.ACCOUNT_ID = ACCOUNTS.ACCOUNT_ID"
+    },
+    {
+      "table": "SERVICES",
+      "type": "LEFT JOIN",
+      "on": "BM_INVOICE.SERVICE_ID = SERVICES.SERVICE_ID"
+    },
+    {
+      "table": "BM_PERIODS",
+      "type": "LEFT JOIN",
+      "on": "BM_INVOICE.PERIOD_ID = BM_PERIODS.PERIOD_ID"
+    },
+    {
+      "table": "ANALYTICS",
+      "type": "LEFT JOIN",
+      "on": "BM_INVOICE_ITEM.INVOICE_ITEM_ID = ANALYTICS.INVOICE_ITEM_ID",
+      "note": "ANALYTICS - основа для формирования счетов-фактур. 1 числа данные переносятся из ANALYTICS в счета-фактуры"
+    },
+    {
+      "table": "OUTER_IDS",
+      "type": "LEFT JOIN",
+      "on": "OUTER_IDS.ID = BM_INVOICE.CUSTOMER_ID AND UPPER(TRIM(OUTER_IDS.TBL)) = 'CUSTOMERS'",
+      "note": "Связь с системой 1С через OUTER_IDS.EXT_ID (код клиента в 1С)"
+    }
+  ],
+  "usage_notes": [
+    "Используется для расчета доходов от клиентов",
+    "Формируется на основе ANALYTICS (не все записи ANALYTICS попадают в счета)",
+    "1 ЧИСЛА данные переносятся из ANALYTICS в счета-фактуры, что закрывает финансовый период",
+    "После формирования счета-фактуры уходят в систему 1С (связь через OUTER_IDS)",
+    "Детализация по услугам находится в BM_INVOICE_ITEM",
+    "Для расчета себестоимости нужно связать доходы (BM_INVOICE_ITEM.MONEY) с затратами (STECCOM_EXPENSES.AMOUNT)",
+    "PERIOD_ID используется для группировки доходов по периодам",
+    "Для Иридиум: PERIOD_ID соответствует периоду с 2 числа по 1 число следующего месяца (например, с 2 октября по 1 ноября = период за октябрь)",
+    "NOT_EXPORT = 1 означает, что счет не экспортируется в 1С"
+  ]
+}
+

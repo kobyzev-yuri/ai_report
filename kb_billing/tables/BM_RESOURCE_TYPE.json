@@ -1,0 +1,94 @@
+{
+  "table_name": "BM_RESOURCE_TYPE",
+  "schema": "billing",
+  "description": "Справочник типов ресурсов (расшифровки услуг) для бухгалтерии. Связывает финансовые таблицы (ANALYTICS, BM_INVOICE_ITEM, BM_TARIFFEL) с расшифровками услуг через RESOURCE_TYPE_ID. Имеет хороший мнемонический смысл (MNEMONIC) для понимания типа услуги. Используется для группировки и классификации начислений в бухгалтерском учете.",
+  "database": "Oracle (production)",
+  "key_columns": {
+    "RESOURCE_TYPE_ID": "Уникальный идентификатор типа ресурса (PRIMARY KEY). Используется в ANALYTICS.RESOURCE_TYPE_ID, BM_INVOICE_ITEM.RESOURCE_TYPE_ID, BM_TARIFFEL.RESOURCE_TYPE_ID",
+    "MNEMONIC": "Мнемоника типа ресурса (например, 'traffic_sbd', 'abon_payment', 'traffic', 'time', 'advance'). Имеет хороший мнемонический смысл для понимания типа услуги",
+    "NAME": "Название типа ресурса (например, 'Трафик SBD 1000 байт', 'Абонентская плата', 'Трафик', 'Время')",
+    "UNIT": "Единица измерения (например, 'байт', 'мес.', 'час.')",
+    "BUH_GROUP": "Группа для бухгалтерии (код группы)",
+    "BUH_GROUP_DESCRIPTION": "Описание группы для бухгалтерии",
+    "CODE": "Код типа ресурса",
+    "TYPE_ID": "Тип услуги (связь с BM_TYPE.TYPE_ID, если применимо)",
+    "SUB_TYPE_ID": "ID подтипа",
+    "RES_ZONE_ID": "ID зоны ресурса",
+    "DOMAIN_ID": "ID домена",
+    "MANUAL": "Флаг ручного ввода (1 = ручной, 0 = автоматический)",
+    "IS_BLOCKED": "Флаг блокировки (1 = заблокирован, 0 = активен)"
+  },
+  "business_rules": [
+    "RESOURCE_TYPE_ID используется во всех финансовых таблицах для классификации начислений",
+    "MNEMONIC имеет хороший мнемонический смысл - позволяет понять тип услуги по названию",
+    "Примеры мнемоник для Iridium: 'traffic_sbd' (трафик SBD), 'abon_payment' (абонентская плата), 'traffic' (трафик), 'time' (время), 'advance' (аванс)",
+    "BUH_GROUP и BUH_GROUP_DESCRIPTION используются для группировки в бухгалтерском учете",
+    "UNIT определяет единицу измерения для данного типа ресурса",
+    "Для Iridium услуг используются специфические типы ресурсов (например, RESOURCE_TYPE_ID = 10 для 'traffic_sbd')"
+  ],
+  "relationships": [
+    {
+      "table": "ANALYTICS",
+      "type": "JOIN",
+      "on": "BM_RESOURCE_TYPE.RESOURCE_TYPE_ID = ANALYTICS.RESOURCE_TYPE_ID"
+    },
+    {
+      "table": "BM_INVOICE_ITEM",
+      "type": "JOIN",
+      "on": "BM_RESOURCE_TYPE.RESOURCE_TYPE_ID = BM_INVOICE_ITEM.RESOURCE_TYPE_ID"
+    },
+    {
+      "table": "BM_TARIFFEL",
+      "type": "JOIN",
+      "on": "BM_RESOURCE_TYPE.RESOURCE_TYPE_ID = BM_TARIFFEL.RESOURCE_TYPE_ID"
+    },
+    {
+      "table": "BM_TYPE",
+      "type": "LEFT JOIN",
+      "on": "BM_RESOURCE_TYPE.TYPE_ID = BM_TYPE.TYPE_ID"
+    }
+  ],
+  "usage_notes": [
+    "Используется для расшифровки услуг в финансовых таблицах",
+    "MNEMONIC позволяет быстро понять тип услуги (например, 'traffic_sbd' = трафик SBD)",
+    "BUH_GROUP используется для группировки в бухгалтерских отчетах",
+    "Для расчета себестоимости можно группировать доходы и затраты по RESOURCE_TYPE_ID",
+    "Полезно для создания отчетов с расшифровкой по типам услуг"
+  ],
+  "examples": {
+    "common_mnemonics": [
+      {
+        "mnemonic": "traffic_sbd",
+        "name": "Трафик SBD 1000 байт",
+        "unit": "1000b",
+        "usage": "Трафик для Iridium SBD услуг"
+      },
+      {
+        "mnemonic": "abon_payment",
+        "name": "Абонентская плата",
+        "unit": "мес.",
+        "usage": "Ежемесячная абонентская плата"
+      },
+      {
+        "mnemonic": "traffic",
+        "name": "Трафик",
+        "unit": "байт",
+        "usage": "Общий трафик"
+      },
+      {
+        "mnemonic": "time",
+        "name": "Время по тарифу",
+        "unit": "час.",
+        "usage": "Тарификация по времени"
+      },
+      {
+        "mnemonic": "advance",
+        "name": "Аванс (пред. платеж)",
+        "unit": null,
+        "usage": "Авансовые платежи"
+      }
+    ]
+  }
+}
+
+

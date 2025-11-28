@@ -1,0 +1,40 @@
+{
+  "table_name": "BM_SERVICE_TARIFF",
+  "schema": "billing",
+  "description": "Связь услуг с тарифами по периодам. Позволяет отслеживать историю изменения тарифов для услуги. Одна услуга может иметь несколько записей с разными тарифами в разные периоды.",
+  "database": "Oracle (production)",
+  "key_columns": {
+    "SERVICE_TARIFF_ID": "Уникальный идентификатор связи услуги с тарифом (PRIMARY KEY)",
+    "SERVICE_ID": "ID услуги из SERVICES. Связь с SERVICES.SERVICE_ID",
+    "TARIFF_ID": "ID тарифа из BM_TARIFF. Связь с BM_TARIFF.TARIFF_ID",
+    "DATE_BEG": "Дата начала действия тарифа для услуги",
+    "DATE_END": "Дата окончания действия тарифа для услуги (NULL если тариф действует сейчас)",
+    "IS_DELETED": "Флаг удаления: 0 = активная запись, 1 = удаленная"
+  },
+  "business_rules": [
+    "Одна услуга может иметь несколько записей с разными тарифами в разные периоды",
+    "Для получения текущего тарифа: DATE_END IS NULL AND IS_DELETED = 0",
+    "Для получения тарифа на конкретную дату: DATE_BEG <= дата AND (DATE_END IS NULL OR DATE_END >= дата) AND IS_DELETED = 0",
+    "SERVICES.TARIFF_ID может не совпадать с текущим тарифом из BM_SERVICE_TARIFF (нужно проверять BM_SERVICE_TARIFF для актуального тарифа)",
+    "Для расчета доходов за период нужно использовать тариф, действующий в этом периоде"
+  ],
+  "relationships": [
+    {
+      "table": "SERVICES",
+      "type": "JOIN",
+      "on": "BM_SERVICE_TARIFF.SERVICE_ID = SERVICES.SERVICE_ID"
+    },
+    {
+      "table": "BM_TARIFF",
+      "type": "JOIN",
+      "on": "BM_SERVICE_TARIFF.TARIFF_ID = BM_TARIFF.TARIFF_ID"
+    }
+  ],
+  "usage_notes": [
+    "Используется для получения актуального тарифа услуги на конкретную дату",
+    "Для расчета доходов нужно учитывать тариф, действующий в отчетном периоде",
+    "Может быть несколько записей для одной услуги (история изменения тарифов)"
+  ]
+}
+
+

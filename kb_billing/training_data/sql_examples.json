@@ -1,0 +1,211 @@
+[
+  {
+    "question": "Покажи всех активных сервисов Iridium",
+    "sql": "SELECT service_id, contract_id, imei, customer_name, agreement_number, code_1c FROM v_iridium_services_info WHERE status = 10 AND contract_id NOT LIKE '%-clone-%' ORDER BY customer_name",
+    "context": "Поиск активных Iridium сервисов",
+    "business_entity": "services",
+    "complexity": 1,
+    "category": "Сервисы"
+  },
+  {
+    "question": "Найди сервис по IMEI 300234069603430",
+    "sql": "SELECT service_id, contract_id, imei, customer_name, agreement_number, status FROM v_iridium_services_info WHERE imei = '300234069603430'",
+    "context": "Поиск сервиса по IMEI устройства",
+    "business_entity": "services",
+    "complexity": 1,
+    "category": "Поиск"
+  },
+  {
+    "question": "Покажи превышение трафика за октябрь 2025",
+    "sql": "SELECT imei, contract_id, customer_name, plan_name, total_usage_kb, overage_kb, calculated_overage FROM v_consolidated_report_with_billing WHERE bill_month_yyyymm = 202510 ORDER BY calculated_overage DESC",
+    "context": "Анализ превышения трафика за период",
+    "business_entity": "overage",
+    "complexity": 2,
+    "category": "Превышение трафика"
+  },
+  {
+    "question": "Сервисы с высоким превышением трафика больше 50 долларов",
+    "sql": "SELECT imei, contract_id, customer_name, code_1c, bill_month, plan_name, total_usage_kb, overage_kb, calculated_overage FROM v_consolidated_report_with_billing WHERE calculated_overage > 50 AND service_status = 1 ORDER BY calculated_overage DESC",
+    "context": "Выявление сервисов с высоким превышением",
+    "business_entity": "overage",
+    "complexity": 2,
+    "category": "Финансовые алерты"
+  },
+  {
+    "question": "Покажи все сервисы клиента по коду 1С",
+    "sql": "SELECT service_id, contract_id, imei, customer_name, agreement_number, order_number FROM v_iridium_services_info WHERE code_1c = '1C00123' AND status = 10 ORDER BY create_date DESC",
+    "context": "Поиск сервисов клиента по коду 1С",
+    "business_entity": "customers",
+    "complexity": 2,
+    "category": "Клиенты"
+  },
+  {
+    "question": "Сумма превышения трафика по организациям за последний месяц",
+    "sql": "SELECT organization_name, code_1c, COUNT(DISTINCT service_id) as services, SUM(calculated_overage) as total_overage FROM v_consolidated_report_with_billing WHERE organization_name IS NOT NULL AND bill_month_yyyymm = TO_NUMBER(TO_CHAR(TRUNC(SYSDATE, 'MM'), 'YYYYMM')) GROUP BY organization_name, code_1c ORDER BY total_overage DESC",
+    "context": "Агрегация превышения трафика по организациям",
+    "business_entity": "overage",
+    "complexity": 3,
+    "category": "Аналитика"
+  },
+  {
+    "question": "Сервисы без данных о трафике за последние 3 месяца",
+    "sql": "SELECT s.service_id, s.contract_id, s.imei, s.customer_name, s.agreement_number, s.code_1c FROM v_iridium_services_info s WHERE s.status = 10 AND s.contract_id NOT LIKE '%-clone-%' AND NOT EXISTS (SELECT 1 FROM v_consolidated_report_with_billing r WHERE r.contract_id = s.contract_id AND r.bill_month_yyyymm >= TO_NUMBER(TO_CHAR(ADD_MONTHS(SYSDATE, -3), 'YYYYMM'))) ORDER BY s.create_date",
+    "context": "Выявление сервисов без трафика",
+    "business_entity": "services",
+    "complexity": 3,
+    "category": "Финансовые алерты"
+  },
+  {
+    "question": "Расхождения между рассчитанным превышением и выставленной суммой больше 5 долларов",
+    "sql": "SELECT imei, contract_id, customer_name, code_1c, bill_month, plan_name, calculated_overage, spnet_total_amount, ABS(spnet_total_amount - calculated_overage) as difference FROM v_consolidated_report_with_billing WHERE service_status = 1 AND ABS(spnet_total_amount - calculated_overage) > 5 ORDER BY difference DESC",
+    "context": "Выявление расхождений в биллинге",
+    "business_entity": "billing",
+    "complexity": 3,
+    "category": "Финансовые алерты"
+  },
+  {
+    "question": "Полный отчет с данными клиентов за октябрь 2025",
+    "sql": "SELECT imei, contract_id, service_id, code_1c, organization_name, customer_name, agreement_number, total_usage_kb, calculated_overage, fee_activation_fee, fee_advance_charge, fees_total FROM v_consolidated_report_with_billing WHERE bill_month_yyyymm = 202510 AND service_id IS NOT NULL ORDER BY calculated_overage DESC",
+    "context": "Полный отчет с данными клиентов",
+    "business_entity": "reports",
+    "complexity": 2,
+    "category": "Отчеты"
+  },
+  {
+    "question": "Сервисы без кода 1С",
+    "sql": "SELECT contract_id, customer_name, agreement_number, status FROM v_iridium_services_info WHERE status = 10 AND contract_id NOT LIKE '%-clone-%' AND code_1c IS NULL ORDER BY create_date DESC",
+    "context": "Выявление сервисов без кода 1С",
+    "business_entity": "services",
+    "complexity": 2,
+    "category": "Финансовые алерты"
+  },
+  {
+    "question": "Трафик и события по контракту SUB-12345",
+    "sql": "SELECT bill_month, plan_name, traffic_usage_bytes, mailbox_events, registration_events, events_count, total_usage_kb, overage_kb, calculated_overage FROM v_consolidated_overage_report WHERE contract_id = 'SUB-12345' ORDER BY bill_month DESC",
+    "context": "Детализация трафика и событий по контракту",
+    "business_entity": "traffic",
+    "complexity": 2,
+    "category": "Трафик"
+  },
+  {
+    "question": "Сумма всех fees по типам за период",
+    "sql": "SELECT bill_month, SUM(fee_activation_fee) as total_activation, SUM(fee_advance_charge) as total_advance, SUM(fee_credit) as total_credit, SUM(fees_total) as total_fees FROM v_consolidated_report_with_billing WHERE bill_month_yyyymm = 202510 GROUP BY bill_month",
+    "context": "Агрегация fees по типам",
+    "business_entity": "fees",
+    "complexity": 3,
+    "category": "Fees"
+  },
+  {
+    "question": "Сервисы с постоянным высоким использованием трафика",
+    "sql": "SELECT contract_id, customer_name, COUNT(*) as months_high_usage, AVG(overage_kb) as avg_overage FROM v_consolidated_report_with_billing WHERE overage_kb > included_kb * 0.5 AND bill_month_yyyymm >= TO_NUMBER(TO_CHAR(ADD_MONTHS(SYSDATE, -6), 'YYYYMM')) GROUP BY contract_id, customer_name HAVING COUNT(*) >= 3 ORDER BY avg_overage DESC",
+    "context": "Выявление сервисов с постоянным превышением",
+    "business_entity": "overage",
+    "complexity": 4,
+    "category": "Аналитика"
+  },
+  {
+    "question": "Дубликаты IMEI в разных контрактах",
+    "sql": "SELECT imei, COUNT(DISTINCT contract_id) as contract_count, STRING_AGG(DISTINCT contract_id, ', ') as contracts FROM v_consolidated_report_with_billing WHERE imei IS NOT NULL GROUP BY imei HAVING COUNT(DISTINCT contract_id) > 1 ORDER BY contract_count DESC",
+    "context": "Выявление дубликатов IMEI",
+    "business_entity": "services",
+    "complexity": 3,
+    "category": "Финансовые алерты"
+  },
+  {
+    "question": "Авансы за предыдущий месяц",
+    "sql": "SELECT imei, contract_id, customer_name, bill_month, fee_advance_charge_previous_month FROM v_consolidated_report_with_billing WHERE fee_advance_charge_previous_month > 0 AND bill_month_yyyymm = 202510 ORDER BY fee_advance_charge_previous_month DESC",
+    "context": "Авансы за предыдущий период",
+    "business_entity": "fees",
+    "complexity": 2,
+    "category": "Fees"
+  },
+  {
+    "question": "Сервисы без трафика более 60 дней",
+    "sql": "SELECT s.service_id, s.contract_id, s.imei, s.customer_name, s.create_date, TRUNC(SYSDATE) - TRUNC(s.create_date) as days_without_traffic FROM v_iridium_services_info s WHERE s.status = 10 AND s.contract_id NOT LIKE '%-clone-%' AND s.create_date < ADD_MONTHS(TRUNC(SYSDATE), -2) AND NOT EXISTS (SELECT 1 FROM v_consolidated_report_with_billing r WHERE r.contract_id = s.contract_id AND r.bill_month_yyyymm >= TO_NUMBER(TO_CHAR(ADD_MONTHS(SYSDATE, -2), 'YYYYMM'))) ORDER BY days_without_traffic DESC",
+    "context": "Выявление неактивных сервисов",
+    "business_entity": "services",
+    "complexity": 3,
+    "category": "Финансовые алерты"
+  },
+  {
+    "question": "Сравнение планов из SPNet и STECCOM",
+    "sql": "SELECT contract_id, imei, plan_name as spnet_plan, steccom_plan_name_monthly as steccom_plan, CASE WHEN plan_name != steccom_plan_name_monthly THEN 'DIFFERENT' ELSE 'SAME' END as comparison FROM v_consolidated_report_with_billing WHERE plan_name IS NOT NULL AND steccom_plan_name_monthly IS NOT NULL AND bill_month_yyyymm = 202510",
+    "context": "Сравнение планов из разных источников",
+    "business_entity": "plans",
+    "complexity": 3,
+    "category": "Планы"
+  },
+  {
+    "question": "Экспорт данных для 1С за период",
+    "sql": "SELECT imei, contract_id, code_1c, organization_name, customer_name, agreement_number, bill_month as period, total_usage_kb, overage_kb, calculated_overage, fee_activation_fee, fee_advance_charge, fee_advance_charge_previous_month, fees_total FROM v_consolidated_report_with_billing WHERE bill_month_yyyymm = 202510 AND code_1c IS NOT NULL ORDER BY code_1c, contract_id",
+    "context": "Экспорт данных для системы 1С",
+    "business_entity": "export",
+    "complexity": 2,
+    "category": "Экспорт"
+  },
+  {
+    "question": "Статистика по тарифным планам",
+    "sql": "SELECT plan_name, COUNT(DISTINCT contract_id) as services_count, AVG(total_usage_kb) as avg_usage, AVG(overage_kb) as avg_overage, SUM(calculated_overage) as total_overage_charge FROM v_consolidated_report_with_billing WHERE bill_month_yyyymm = 202510 AND plan_name IS NOT NULL GROUP BY plan_name ORDER BY total_overage_charge DESC",
+    "context": "Статистика использования тарифных планов",
+    "business_entity": "plans",
+    "complexity": 3,
+    "category": "Аналитика"
+  },
+  {
+    "question": "Детализация трафика по типам использования",
+    "sql": "SELECT contract_id, imei, bill_month, usage_type, SUM(usage_bytes) as total_bytes, SUM(total_amount) as total_amount FROM spnet_traffic WHERE contract_id = 'SUB-12345' AND bill_month = 202510 GROUP BY contract_id, imei, bill_month, usage_type ORDER BY usage_type",
+    "context": "Детализация трафика по типам",
+    "business_entity": "traffic",
+    "complexity": 2,
+    "category": "Трафик"
+  },
+  {
+    "question": "Сервисы с приостановленными планами",
+    "sql": "SELECT contract_id, imei, customer_name, steccom_plan_name_suspended, bill_month FROM v_consolidated_report_with_billing WHERE steccom_plan_name_suspended IS NOT NULL AND bill_month_yyyymm = 202510 ORDER BY customer_name",
+    "context": "Сервисы с приостановленными тарифами",
+    "business_entity": "plans",
+    "complexity": 2,
+    "category": "Планы"
+  },
+  {
+    "question": "Покажи себестоимость по всем SUB- с доходами и затратами",
+    "sql": "SELECT svc.LOGIN AS CONTRACT_ID, SUM(a.MONEY) AS REVENUE, SUM(se.AMOUNT) + SUM(sp.TOTAL_AMOUNT) AS TOTAL_COST, ROUND((SUM(se.AMOUNT) + SUM(sp.TOTAL_AMOUNT)) / SUM(a.MONEY) * 100, 2) AS COST_PERCENTAGE FROM SERVICES svc JOIN ANALYTICS a ON svc.SERVICE_ID = a.SERVICE_ID LEFT JOIN STECCOM_EXPENSES se ON svc.LOGIN = se.CONTRACT_ID LEFT JOIN SPNET_TRAFFIC sp ON svc.LOGIN = sp.CONTRACT_ID WHERE svc.TYPE_ID = 9002 AND svc.LOGIN LIKE 'SUB-%' GROUP BY svc.LOGIN HAVING SUM(a.MONEY) > 0 AND (SUM(se.AMOUNT) + SUM(sp.TOTAL_AMOUNT)) > 0 ORDER BY COST_PERCENTAGE DESC",
+    "context": "Расчет себестоимости по SUB- с доходами и затратами",
+    "business_entity": "cost_of_goods_sold",
+    "complexity": 4,
+    "category": "Себестоимость"
+  },
+  {
+    "question": "SUB- с доходами, но без затрат Иридиум",
+    "sql": "SELECT s.LOGIN AS CONTRACT_ID, SUM(a.MONEY) AS REVENUE, COUNT(*) AS ANALYTICS_COUNT FROM SERVICES s JOIN ANALYTICS a ON s.SERVICE_ID = a.SERVICE_ID WHERE s.TYPE_ID = 9002 AND s.LOGIN LIKE 'SUB-%' AND NOT EXISTS (SELECT 1 FROM STECCOM_EXPENSES se WHERE se.CONTRACT_ID = s.LOGIN) AND NOT EXISTS (SELECT 1 FROM SPNET_TRAFFIC sp WHERE sp.CONTRACT_ID = s.LOGIN) GROUP BY s.LOGIN ORDER BY REVENUE DESC",
+    "context": "Выявление SUB- с доходами, но без затрат Иридиум (тесты, не активированы)",
+    "business_entity": "cost_of_goods_sold",
+    "complexity": 3,
+    "category": "Себестоимость"
+  },
+  {
+    "question": "SUB- с затратами Иридиум, но без доходов",
+    "sql": "SELECT se.CONTRACT_ID, SUM(se.AMOUNT) AS COST_STECCOM, SUM(sp.TOTAL_AMOUNT) AS COST_SPNET FROM STECCOM_EXPENSES se LEFT JOIN SPNET_TRAFFIC sp ON se.CONTRACT_ID = sp.CONTRACT_ID WHERE se.CONTRACT_ID LIKE 'SUB-%' AND NOT EXISTS (SELECT 1 FROM ANALYTICS a JOIN SERVICES s ON a.SERVICE_ID = s.SERVICE_ID WHERE s.LOGIN = se.CONTRACT_ID AND s.TYPE_ID = 9002) AND NOT EXISTS (SELECT 1 FROM BM_INVOICE_ITEM ii JOIN SERVICES s ON ii.SERVICE_ID = s.SERVICE_ID WHERE s.LOGIN = se.CONTRACT_ID AND s.TYPE_ID = 9002) GROUP BY se.CONTRACT_ID ORDER BY COST_STECCOM DESC",
+    "context": "Выявление SUB- с затратами Иридиум, но без доходов (не попали в счета-фактуры)",
+    "business_entity": "cost_of_goods_sold",
+    "complexity": 3,
+    "category": "Себестоимость"
+  },
+  {
+    "question": "Доходы и затраты по SUB- за период с тестовыми начислениями",
+    "sql": "SELECT s.LOGIN AS CONTRACT_ID, a.PERIOD_ID, SUM(a.MONEY) AS REVENUE_ANALYTICS, COUNT(CASE WHEN a.INVOICE_ITEM_ID IS NULL THEN 1 END) AS TEST_ITEMS_COUNT, SUM(se.AMOUNT) AS COST_STECCOM, SUM(sp.TOTAL_AMOUNT) AS COST_SPNET FROM SERVICES s JOIN ANALYTICS a ON s.SERVICE_ID = a.SERVICE_ID LEFT JOIN STECCOM_EXPENSES se ON s.LOGIN = se.CONTRACT_ID LEFT JOIN SPNET_TRAFFIC sp ON s.LOGIN = sp.CONTRACT_ID WHERE s.TYPE_ID = 9002 AND s.LOGIN LIKE 'SUB-%' AND a.PERIOD_ID = 12345 GROUP BY s.LOGIN, a.PERIOD_ID ORDER BY s.LOGIN",
+    "context": "Доходы и затраты по SUB- за период, включая тестовые начисления",
+    "business_entity": "cost_of_goods_sold",
+    "complexity": 4,
+    "category": "Себестоимость"
+  },
+  {
+    "question": "Все SUB- с флагами наличия доходов и затрат",
+    "sql": "SELECT svc.LOGIN AS CONTRACT_ID, CASE WHEN ra.CONTRACT_ID IS NOT NULL THEN 'Y' ELSE 'N' END AS HAS_REVENUE, CASE WHEN cs.CONTRACT_ID IS NOT NULL OR csp.CONTRACT_ID IS NOT NULL THEN 'Y' ELSE 'N' END AS HAS_COST FROM SERVICES svc LEFT JOIN (SELECT DISTINCT s.LOGIN AS CONTRACT_ID FROM ANALYTICS a JOIN SERVICES s ON a.SERVICE_ID = s.SERVICE_ID WHERE s.TYPE_ID = 9002) ra ON svc.LOGIN = ra.CONTRACT_ID LEFT JOIN (SELECT DISTINCT CONTRACT_ID FROM STECCOM_EXPENSES WHERE CONTRACT_ID LIKE 'SUB-%') cs ON svc.LOGIN = cs.CONTRACT_ID LEFT JOIN (SELECT DISTINCT CONTRACT_ID FROM SPNET_TRAFFIC WHERE CONTRACT_ID LIKE 'SUB-%') csp ON svc.LOGIN = csp.CONTRACT_ID WHERE svc.TYPE_ID = 9002 AND svc.LOGIN LIKE 'SUB-%' ORDER BY svc.LOGIN",
+    "context": "Все SUB- с флагами наличия доходов и затрат для выявления проблемных случаев",
+    "business_entity": "cost_of_goods_sold",
+    "complexity": 3,
+    "category": "Себестоимость"
+  }
+]
+

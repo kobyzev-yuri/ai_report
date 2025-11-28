@@ -120,10 +120,9 @@ def test_activation_date_and_events():
         try:
             cursor.execute("""
                 SELECT 
-                    EVENTS_COUNT,
-                    DATA_USAGE_EVENTS,
                     MAILBOX_EVENTS,
                     REGISTRATION_EVENTS,
+                    EVENTS_COUNT,
                     TRAFFIC_USAGE_BYTES
                 FROM V_SPNET_OVERAGE_ANALYSIS
                 WHERE IMEI = :imei
@@ -133,12 +132,11 @@ def test_activation_date_and_events():
             if rows:
                 print(f"   ✅ Найдено записей: {len(rows)}")
                 for i, row in enumerate(rows, 1):
-                    events_count, data_events, mailbox_events, reg_events, traffic = row
+                    mailbox_events, reg_events, events_count, traffic = row
                     print(f"\n   Запись {i}:")
-                    print(f"      Events Count: {events_count or 0}")
-                    print(f"      Data Events: {data_events or 0}")
                     print(f"      Mailbox Events: {mailbox_events or 0}")
                     print(f"      Registration Events: {reg_events or 0}")
+                    print(f"      Events Count: {events_count or 0} (должно быть = Mailbox + Registration)")
                     print(f"      Traffic Usage (bytes): {traffic or 0}")
                     
                     if (events_count or 0) == 0:
@@ -161,10 +159,9 @@ def test_activation_date_and_events():
                     BILL_MONTH,
                     ACTIVATION_DATE,
                     PLAN_NAME,
-                    EVENTS_COUNT,
-                    DATA_USAGE_EVENTS,
                     MAILBOX_EVENTS,
                     REGISTRATION_EVENTS,
+                    EVENTS_COUNT,
                     TRAFFIC_USAGE_BYTES
                 FROM V_CONSOLIDATED_OVERAGE_REPORT
                 WHERE IMEI = :imei
@@ -174,17 +171,16 @@ def test_activation_date_and_events():
             if rows:
                 print(f"   ✅ Найдено записей: {len(rows)}")
                 for i, row in enumerate(rows, 1):
-                    bill_month, activation_date, plan_name, events_count, data_events, mailbox_events, reg_events, traffic = row
+                    bill_month, activation_date, plan_name, mailbox_events, reg_events, events_count, traffic = row
                     print(f"\n   Запись {i}:")
                     print(f"      Bill Month: {bill_month}")
                     print(f"      Activation Date: {activation_date or 'NULL'}")
                     print(f"      Plan Name: {plan_name}")
-                    print(f"      Events Count: {events_count or 0}")
-                    if (events_count or 0) == 0:
-                        print(f"      ⚠️  ПРОБЛЕМА: Events Count = 0!")
-                    print(f"      Data Events: {data_events or 0}")
                     print(f"      Mailbox Events: {mailbox_events or 0}")
                     print(f"      Registration Events: {reg_events or 0}")
+                    print(f"      Events Count: {events_count or 0} (должно быть = Mailbox + Registration)")
+                    if (events_count or 0) == 0:
+                        print(f"      ⚠️  ПРОБЛЕМА: Events Count = 0!")
                     print(f"      Traffic Usage (bytes): {traffic or 0}")
             else:
                 print("   ⚠️  Данные не найдены в V_CONSOLIDATED_OVERAGE_REPORT")
@@ -205,10 +201,9 @@ def test_activation_date_and_events():
                     BILL_MONTH,
                     ACTIVATION_DATE,
                     PLAN_NAME,
-                    EVENTS_COUNT,
-                    DATA_USAGE_EVENTS,
                     MAILBOX_EVENTS,
                     REGISTRATION_EVENTS,
+                    EVENTS_COUNT,
                     TRAFFIC_USAGE_BYTES,
                     FEE_ACTIVATION_FEE
                 FROM V_CONSOLIDATED_REPORT_WITH_BILLING
@@ -219,7 +214,7 @@ def test_activation_date_and_events():
             if rows:
                 print(f"   ✅ Найдено записей: {len(rows)}")
                 for i, row in enumerate(rows, 1):
-                    fin_period, bill_month, activation_date, plan_name, events_count, data_events, mailbox_events, reg_events, traffic, activation_fee = row
+                    fin_period, bill_month, activation_date, plan_name, mailbox_events, reg_events, events_count, traffic, activation_fee = row
                     print(f"\n   Запись {i}:")
                     print(f"      Financial Period: {fin_period}")
                     print(f"      Bill Month: {bill_month}")
@@ -227,12 +222,11 @@ def test_activation_date_and_events():
                     if activation_date is None:
                         print(f"      ⚠️  ПРОБЛЕМА: Activation Date = NULL!")
                     print(f"      Plan Name: {plan_name}")
-                    print(f"      Events Count: {events_count or 0}")
-                    if (events_count or 0) == 0:
-                        print(f"      ⚠️  ПРОБЛЕМА: Events Count = 0!")
-                    print(f"      Data Events: {data_events or 0}")
                     print(f"      Mailbox Events: {mailbox_events or 0}")
                     print(f"      Registration Events: {reg_events or 0}")
+                    print(f"      Events Count: {events_count or 0} (должно быть = Mailbox + Registration)")
+                    if (events_count or 0) == 0:
+                        print(f"      ⚠️  ПРОБЛЕМА: Events Count = 0!")
                     print(f"      Traffic Usage (bytes): {traffic or 0}")
                     print(f"      Activation Fee: {activation_fee or 0}")
             else:

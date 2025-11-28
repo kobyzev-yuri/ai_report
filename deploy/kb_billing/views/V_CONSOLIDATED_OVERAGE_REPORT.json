@@ -1,0 +1,45 @@
+{
+  "view_name": "V_CONSOLIDATED_OVERAGE_REPORT",
+  "schema": "billing",
+  "description": "Консолидированный отчет по превышению с данными из SPNet и STECCOM. Объединяет данные трафика (SPNET_TRAFFIC) и расходов (STECCOM_EXPENSES) по каждому периоду. ВАЖНО: Каждая строка = отдельный период (BILL_MONTH), периоды НЕ суммируются!",
+  "database": "Oracle (production)",
+  "source_tables": [
+    "V_SPNET_OVERAGE_ANALYSIS",
+    "STECCOM_EXPENSES"
+  ],
+  "key_columns": {
+    "IMEI": "IMEI номер устройства",
+    "CONTRACT_ID": "ID контракта (SUB-XXXXX)",
+    "BILL_MONTH": "Месяц биллинга (формат: YYYYMM строка). Для STECCOM: INVOICE_DATE = 2025-11-02 → BILL_MONTH = '202511'",
+    "ACTIVATION_DATE": "Дата активации сервиса (из STECCOM_EXPENSES, минимальная для периода)",
+    "PLAN_NAME": "Название тарифного плана. Приоритет: текущий период → STECCOM → маппинг по contract_id → маппинг по IMEI",
+    "TRAFFIC_USAGE_BYTES": "Объем трафика в байтах (из SPNet)",
+    "MAILBOX_EVENTS": "Количество событий Mailbox Checks",
+    "REGISTRATION_EVENTS": "Количество событий Registrations",
+    "EVENTS_COUNT": "Общее количество событий",
+    "INCLUDED_KB": "Объем включенного трафика (КБ)",
+    "TOTAL_USAGE_KB": "Общий объем трафика в KB",
+    "OVERAGE_KB": "Превышение трафика в KB",
+    "CALCULATED_OVERAGE": "Рассчитанная стоимость превышения (USD)",
+    "SPNET_TOTAL_AMOUNT": "Сумма из отчета SPNet (USD)",
+    "STECCOM_PLAN_NAME_MONTHLY": "Основной план тарифа из STECCOM (RATE_TYPE не содержит 'Suspend')",
+    "STECCOM_PLAN_NAME_SUSPENDED": "Приостановленный план тарифа из STECCOM (RATE_TYPE содержит 'Suspend')"
+  },
+  "business_rules": [
+    "КАЖДАЯ СТРОКА = ОТДЕЛЬНЫЙ ПЕРИОД (BILL_MONTH). Периоды НЕ суммируются!",
+    "Группировка: IMEI + CONTRACT_ID + BILL_MONTH - одна строка на период",
+    "BILL_MONTH для STECCOM: TO_CHAR(INVOICE_DATE, 'YYYYMM') - месяц из INVOICE_DATE без вычитания",
+    "PLAN_NAME заполняется из текущего периода, если отсутствует - из маппинга по contract_id или IMEI из других периодов",
+    "STECCOM данные фильтруются: SERVICE IS NULL OR UPPER(TRIM(SERVICE)) != 'BROADBAND'",
+    "STECCOM_PLAN_NAME_MONTHLY и STECCOM_PLAN_NAME_SUSPENDED - две отдельные колонки для планов",
+    "FULL OUTER JOIN между SPNet и STECCOM данными по IMEI, CONTRACT_ID, BILL_MONTH"
+  ],
+  "usage_notes": [
+    "Основной отчет для анализа превышения трафика",
+    "Используется как источник данных для V_CONSOLIDATED_REPORT_WITH_BILLING",
+    "ВАЖНО: Не суммируйте данные по периодам - каждая строка = отдельный период",
+    "Для получения данных за конкретный период используйте WHERE BILL_MONTH = 'YYYYMM'"
+  ]
+}
+
+

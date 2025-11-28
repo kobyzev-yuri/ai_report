@@ -1,0 +1,42 @@
+{
+  "view_name": "V_SPNET_OVERAGE_ANALYSIS",
+  "schema": "billing",
+  "description": "Базовый анализ превышения трафика по IMEI с расчетом стоимости. Группирует данные SPNET_TRAFFIC по IMEI, CONTRACT_ID, BILL_MONTH и рассчитывает превышение трафика (OVERAGE_KB) и стоимость превышения (CALCULATED_OVERAGE_CHARGE) через функцию calculate_overage(). Разделяет трафик (bytes) и события (count).",
+  "database": "Oracle (production) / PostgreSQL (testing)",
+  "source_tables": [
+    "SPNET_TRAFFIC",
+    "TARIFF_PLANS"
+  ],
+  "key_columns": {
+    "IMEI": "IMEI номер устройства",
+    "CONTRACT_ID": "ID контракта (SUB-XXXXX)",
+    "BILL_MONTH": "Месяц биллинга (формат: YYYYMM или INTEGER)",
+    "PLAN_NAME": "Название тарифного плана",
+    "PLAN_CODE": "Код тарифа (из TARIFF_PLANS)",
+    "INCLUDED_KB": "Объем включенного трафика (КБ)",
+    "TRAFFIC_USAGE_BYTES": "Объем использованного трафика в байтах (только SBD Data Usage)",
+    "MAILBOX_EVENTS": "Количество событий Mailbox Checks (USAGE_TYPE = 'SBD Mailbox Checks', USAGE_UNIT = 'EVENT')",
+    "REGISTRATION_EVENTS": "Количество событий Registrations (USAGE_TYPE = 'SBD Registrations', USAGE_UNIT = 'EVENT')",
+    "EVENTS_COUNT": "Общее количество событий (MAILBOX_EVENTS + REGISTRATION_EVENTS)",
+    "TOTAL_USAGE_KB": "Общий объем трафика в KB (TRAFFIC_USAGE_BYTES / 1000)",
+    "OVERAGE_KB": "Превышение трафика в KB (TOTAL_USAGE_KB - INCLUDED_KB, если > 0)",
+    "CALCULATED_OVERAGE_CHARGE": "Рассчитанная стоимость превышения (USD) через calculate_overage(PLAN_NAME, TRAFFIC_USAGE_BYTES)",
+    "SPNET_TOTAL_AMOUNT": "Сумма из отчета SPNet (USD)"
+  },
+  "business_rules": [
+    "Группировка: IMEI, CONTRACT_ID, BILL_MONTH, PLAN_NAME",
+    "Только USAGE_TYPE = 'SBD Data Usage' считается трафиком",
+    "События (Mailbox Checks, Registrations) имеют USAGE_UNIT = 'EVENT' и не учитываются в расчете превышения",
+    "OVERAGE_KB рассчитывается только если TRAFFIC_USAGE_BYTES > 0 и TARIFF_PLANS.ACTIVE = TRUE",
+    "CALCULATED_OVERAGE_CHARGE рассчитывается через функцию calculate_overage() только для активных тарифов",
+    "EVENTS_COUNT = MAILBOX_EVENTS + REGISTRATION_EVENTS"
+  ],
+  "usage_notes": [
+    "Базовый VIEW для анализа превышения трафика",
+    "Используется как источник данных для V_CONSOLIDATED_OVERAGE_REPORT",
+    "Трафик измеряется в байтах, но для отчетов конвертируется в KB (1KB = 1000 bytes)",
+    "События не влияют на расчет превышения трафика"
+  ]
+}
+
+

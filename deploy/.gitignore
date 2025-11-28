@@ -1,0 +1,23 @@
+# Конфигурация с паролями
+config.env
+
+# Данные (загружаются через интерфейс)
+data/SPNet reports/*
+data/STECCOMLLCRussiaSBD.AccessFees_reports/*
+!data/SPNet reports/.gitkeep
+!data/STECCOMLLCRussiaSBD.AccessFees_reports/.gitkeep
+
+# Логи и временные файлы
+*.log
+*.pid
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# База данных пользователей (может быть синхронизирована отдельно)
+users.db
+
+# Streamlit кэш
+.streamlit/

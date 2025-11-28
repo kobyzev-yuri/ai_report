@@ -1,0 +1,69 @@
+{
+  "view_name": "V_CONSOLIDATED_REPORT_WITH_BILLING",
+  "schema": "billing",
+  "description": "Расширенный отчет с данными клиентов из биллинга. Объединяет данные из V_CONSOLIDATED_OVERAGE_REPORT с информацией о клиентах из V_IRIDIUM_SERVICES_INFO. Включает fees из STECCOM_EXPENSES (Activation Fee, Advance Charge, Credit, Credited, Prorated). Используется для экспорта в 1С. ВАЖНО: Включает авансы за предыдущий месяц (FEE_ADVANCE_CHARGE_PREVIOUS_MONTH).",
+  "database": "Oracle (production)",
+  "source_tables": [
+    "V_CONSOLIDATED_OVERAGE_REPORT",
+    "V_IRIDIUM_SERVICES_INFO",
+    "STECCOM_EXPENSES"
+  ],
+  "key_columns": {
+    "bill_month": "Период в формате YYYY-MM для отображения (например, '2025-10')",
+    "bill_month_yyyymm": "Период в формате YYYYMM для связи с другими таблицами (например, 202510)",
+    "financial_period": "Отчетный Период (Financial Period) - месяц на 1 меньше, чем bill_month. bill_month = 2025-11 → financial_period = 2025-10. Используется для отображения финансистам",
+    "imei": "IMEI номер устройства",
+    "contract_id": "ID контракта (SUB-XXXXX)",
+    "activation_date": "Дата активации сервиса",
+    "plan_name": "Название тарифного плана",
+    "traffic_usage_bytes": "Объем трафика в байтах",
+    "events_count": "Общее количество событий",
+    "data_usage_events": "Количество событий использования данных",
+    "mailbox_events": "Количество событий Mailbox Checks",
+    "registration_events": "Количество событий Registrations",
+    "included_kb": "Объем включенного трафика (КБ)",
+    "total_usage_kb": "Общий объем трафика в KB",
+    "overage_kb": "Превышение трафика в KB",
+    "calculated_overage": "Рассчитанная стоимость превышения (USD)",
+    "steccom_plan_name_monthly": "Основной план тарифа из STECCOM",
+    "steccom_plan_name_suspended": "Приостановленный план тарифа из STECCOM",
+    "service_id": "ID сервиса из billing",
+    "code_1c": "Код клиента из 1С",
+    "organization_name": "Название организации (для юр.лиц)",
+    "person_name": "ФИО физического лица",
+    "customer_name": "Название организации или ФИО клиента (универсальное поле)",
+    "display_name": "Отображаемое имя: организация или ФИО (для UI)",
+    "agreement_number": "Номер договора в СТЭККОМ",
+    "order_number": "Номер заказа/приложения",
+    "service_status": "Статус сервиса (1=active)",
+    "customer_id": "ID клиента",
+    "account_id": "ID аккаунта",
+    "tariff_id": "ID тарифа",
+    "imei_vsat": "IMEI из биллинга (VSAT/IMEI из IRIDIUM_SERVICES_INFO)",
+    "service_id_vsat_match": "SERVICE_ID если login LIKE SUB_% и IMEI (VSAT) совпадает с отчетным IMEI",
+    "fee_activation_fee": "Fee: Activation Fee из STECCOM_EXPENSES",
+    "fee_advance_charge": "Fee: Advance Charge из STECCOM_EXPENSES",
+    "fee_advance_charge_previous_month": "Fee: Advance Charge за предыдущий месяц из STECCOM_EXPENSES",
+    "fee_credit": "Fee: Credit из STECCOM_EXPENSES",
+    "fee_credited": "Fee: Credited из STECCOM_EXPENSES",
+    "fee_prorated": "Fee: Prorated из STECCOM_EXPENSES",
+    "fees_total": "Fees Total ($) - сумма всех fees"
+  },
+  "business_rules": [
+    "Объединяет данные из V_CONSOLIDATED_OVERAGE_REPORT с V_IRIDIUM_SERVICES_INFO",
+    "Fees агрегируются по типам для каждого периода (BILL_MONTH, CONTRACT_ID, IMEI)",
+    "Advance Charge за предыдущий месяц включается как отдельное поле (fee_advance_charge_previous_month)",
+    "financial_period = bill_month - 1 месяц (для отображения финансистам)",
+    "display_name = ORGANIZATION_NAME (если есть) или PERSON_NAME (если нет организации)",
+    "PLAN_NAME заполняется из V_CONSOLIDATED_OVERAGE_REPORT, если пустой - из маппинга по contract_id, tariff_id или IMEI",
+    "Включает строки для финансовых периодов, где есть аванс за предыдущий месяц, но нет данных о трафике за следующий месяц"
+  ],
+  "usage_notes": [
+    "Основной отчет для экспорта в 1С",
+    "Используется в Streamlit интерфейсе для отображения данных финансистам",
+    "Включает все данные о клиентах, трафике, превышениях и fees",
+    "financial_period используется для отображения финансистам (месяц на 1 меньше, чем bill_month)"
+  ]
+}
+
+

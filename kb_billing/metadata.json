@@ -1,0 +1,70 @@
+{
+  "database": "billing",
+  "schema": "billing",
+  "database_type": "Oracle (production)",
+  "total_tables": 17,
+  "total_views": 4,
+  "main_tables": [
+    "SPNET_TRAFFIC",
+    "STECCOM_EXPENSES",
+    "TARIFF_PLANS",
+    "IRIDIUM_SERVICES_INFO",
+    "SERVICES",
+    "BM_TARIFF",
+    "BM_SERVICE_TARIFF",
+    "BM_TARIFFEL",
+    "BM_TYPE",
+    "BM_INVOICE",
+    "BM_INVOICE_ITEM",
+    "ANALYTICS",
+    "BM_PERIODS",
+    "BM_RESOURCE_TYPE",
+    "BM_SERVICE_MONEY",
+    "BM_CDR_ACCT",
+    "BM_ZONE"
+  ],
+  "billing_tables": [
+    "SERVICES",
+    "BM_TARIFF",
+    "BM_SERVICE_TARIFF",
+    "BM_TARIFFEL",
+    "BM_TYPE",
+    "BM_INVOICE",
+    "BM_INVOICE_ITEM",
+    "ANALYTICS",
+    "BM_PERIODS",
+    "BM_RESOURCE_TYPE",
+    "BM_SERVICE_MONEY",
+    "BM_CDR_ACCT",
+    "BM_ZONE",
+    "CUSTOMERS",
+    "ACCOUNTS"
+  ],
+  "iridium_cost_tables": [
+    "SPNET_TRAFFIC",
+    "STECCOM_EXPENSES",
+    "TARIFF_PLANS"
+  ],
+  "main_views": [
+    "V_SPNET_OVERAGE_ANALYSIS",
+    "V_CONSOLIDATED_OVERAGE_REPORT",
+    "V_IRIDIUM_SERVICES_INFO",
+    "V_CONSOLIDATED_REPORT_WITH_BILLING"
+  ],
+  "business_domains": [
+    "Iridium M2M сервисы",
+    "Тарификация трафика",
+    "Превышение трафика (Overage)",
+    "Расходы STECCOM (затраты Иридиум)",
+    "Доходы от клиентов (ANALYTICS → BM_INVOICE, BM_INVOICE_ITEM)",
+    "Финансовые периоды (BM_PERIODS)",
+    "Расшифровки услуг для бухгалтерии (BM_RESOURCE_TYPE)",
+    "Сессии услуг и трафик (BM_SERVICE_MONEY, BM_CDR_ACCT)",
+    "Тарифные зоны (BM_ZONE)",
+    "Себестоимость услуг (COST_OF_GOODS_SOLD - концептуальная таблица)",
+    "Клиентская информация",
+    "Финансовые отчеты"
+  ],
+  "description": "База знаний для схемы billing - Iridium M2M сервисы, тарификация трафика, превышения, затраты Иридиум, доходы от клиентов и расчет себестоимости"
+}
+

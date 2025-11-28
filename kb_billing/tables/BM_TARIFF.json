@@ -1,0 +1,59 @@
+{
+  "table_name": "BM_TARIFF",
+  "schema": "billing",
+  "description": "Справочник тарифных планов биллинга (наши тарифы для клиентов). Содержит информацию о тарифах: название, описание, периоды действия, валюта. Цены хранятся в BM_TARIFFEL (тарифные элементы).",
+  "database": "Oracle (production)",
+  "key_columns": {
+    "TARIFF_ID": "Уникальный идентификатор тарифа (PRIMARY KEY). Связь с SERVICES.TARIFF_ID",
+    "TYPE_ID": "Тип услуги из BM_TYPE (например, 10 для общих услуг, может быть NULL)",
+    "NAME": "Название тарифа (например, 'SBD-(??)???? ???. 5Kb ??? ?????????? 10 ????')",
+    "DESCRIPTION": "Описание тарифа (до 2048 символов)",
+    "CURRENCY_ID": "ID валюты (связь с таблицей валют)",
+    "DATE_ACTIVE_BEG": "Дата начала действия тарифа",
+    "DATE_ACTIVE_END": "Дата окончания действия тарифа",
+    "DATE_WORK_BEG": "Дата начала работы тарифа",
+    "DATE_WORK_END": "Дата окончания работы тарифа",
+    "NEW_PRICE_DATE": "Дата установки новой цены",
+    "INSTRUCTION": "Инструкция по тарифу (до 255 символов)",
+    "DOMAIN_ID": "ID домена",
+    "SCHEDULE_ID": "ID расписания",
+    "PH_ZONE_GROUP_ID": "ID группы зон телефонии из BM_ZONE. Связь с BM_ZONE.ZONE_ID. Используется для тарификации по зонам телефонии с фиксированной ценой зоны",
+    "TR_ZONE_GROUP_ID": "ID группы зон трафика из BM_ZONE. Связь с BM_ZONE.ZONE_ID. Используется для тарификации по зонам трафика с фиксированной ценой зоны"
+  },
+  "business_rules": [
+    "TARIFF_ID связывается с SERVICES.TARIFF_ID для получения тарифа услуги",
+    "Цены и тарификация хранятся в BM_TARIFFEL (тарифные элементы)",
+    "Один тариф может иметь несколько тарифных элементов (BM_TARIFFEL) с разными ценами и условиями",
+    "Связь услуги с тарифом по периодам через BM_SERVICE_TARIFF (DATE_BEG, DATE_END)",
+    "Тариф может быть активен в определенный период (DATE_ACTIVE_BEG, DATE_ACTIVE_END)"
+  ],
+  "relationships": [
+    {
+      "table": "SERVICES",
+      "type": "JOIN",
+      "on": "BM_TARIFF.TARIFF_ID = SERVICES.TARIFF_ID"
+    },
+    {
+      "table": "BM_SERVICE_TARIFF",
+      "type": "JOIN",
+      "on": "BM_TARIFF.TARIFF_ID = BM_SERVICE_TARIFF.TARIFF_ID"
+    },
+    {
+      "table": "BM_TARIFFEL",
+      "type": "JOIN",
+      "on": "BM_TARIFF.TARIFF_ID = BM_TARIFFEL.TARIFF_ID"
+    },
+    {
+      "table": "BM_ZONE",
+      "type": "LEFT JOIN",
+      "on": "BM_TARIFF.PH_ZONE_GROUP_ID = BM_ZONE.ZONE_ID OR BM_TARIFF.TR_ZONE_GROUP_ID = BM_ZONE.ZONE_ID",
+      "note": "Тарифные зоны с фиксированной ценой (PH_ZONE_GROUP_ID - зоны телефонии, TR_ZONE_GROUP_ID - зоны трафика)"
+    }
+  ],
+  "usage_notes": [
+    "Используется для получения информации о тарифах клиентов",
+    "Для расчета доходов нужно использовать BM_TARIFFEL с полем MONEY (цена)",
+    "Один тариф может иметь несколько элементов тарификации (абонентская плата, превышение, дополнительные услуги)"
+  ]
+}
+

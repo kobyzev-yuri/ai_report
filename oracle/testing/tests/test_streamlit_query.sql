@@ -19,7 +19,6 @@ SELECT
     COALESCE(v.STECCOM_PLAN_NAME_SUSPENDED, '') AS "Plan Suspended",
     ROUND(v.TRAFFIC_USAGE_BYTES / 1000, 2) AS "Traffic Usage (KB)",
     v.EVENTS_COUNT AS "Events (Count)",
-    v.DATA_USAGE_EVENTS AS "Data Events",
     v.MAILBOX_EVENTS AS "Mailbox Events",
     v.REGISTRATION_EVENTS AS "Registration Events",
     CASE 

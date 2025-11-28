@@ -1,0 +1,63 @@
+{
+  "table_name": "IRIDIUM_SERVICES_INFO",
+  "schema": "billing",
+  "description": "Информация о Iridium сервисах с данными клиентов из биллинга. Содержит связь между контрактами (CONTRACT_ID), IMEI устройствами, клиентами (организации/ФИО), договорами и кодами 1С. Импортируется из Oracle VIEW V_IRIDIUM_SERVICES_INFO для тестирования в PostgreSQL.",
+  "database": "PostgreSQL (testing) - импорт из Oracle (production)",
+  "ddl": "CREATE TABLE IRIDIUM_SERVICES_INFO (\n    SERVICE_ID INTEGER,\n    CONTRACT_ID VARCHAR(50),\n    IMEI VARCHAR(50),\n    TARIFF_ID INTEGER,\n    AGREEMENT_NUMBER VARCHAR(200),\n    ORDER_NUMBER VARCHAR(100),\n    STATUS INTEGER,\n    ACTUAL_STATUS INTEGER,\n    CUSTOMER_ID INTEGER,\n    ORGANIZATION_NAME VARCHAR(500),\n    PERSON_NAME VARCHAR(500),\n    CUSTOMER_NAME VARCHAR(500),\n    CREATE_DATE TIMESTAMP,\n    START_DATE TIMESTAMP,\n    STOP_DATE TIMESTAMP,\n    ACCOUNT_ID INTEGER,\n    IS_SUSPENDED VARCHAR(1),\n    CODE_1C VARCHAR(100)\n);",
+  "key_columns": {
+    "SERVICE_ID": "ID сервиса из billing (SERVICES.SERVICE_ID)",
+    "CONTRACT_ID": "ID контракта (LOGIN из SERVICES) - связь с SPNET_TRAFFIC.CONTRACT_ID. Формат: SUB-XXXXX",
+    "IMEI": "IMEI устройства (VSAT из SERVICES) - связь с SPNET_TRAFFIC.IMEI",
+    "CUSTOMER_NAME": "Название организации или ФИО клиента (универсальное поле)",
+    "ORGANIZATION_NAME": "Название организации (для юр.лиц). CONTACT_DICT_ID = 23",
+    "PERSON_NAME": "ФИО физического лица. CONTACT_DICT_ID = 11",
+    "AGREEMENT_NUMBER": "Номер договора в СТЭККОМ (ACCOUNTS.DESCRIPTION)",
+    "ORDER_NUMBER": "Номер заказа/приложения к договору (SERVICES.BLANK)",
+    "CODE_1C": "Код клиента из системы 1С (из OUTER_IDS по CUSTOMER_ID, где TBL = 'CUSTOMERS')",
+    "STATUS": "Статус сервиса: 10 = активный, -10 = приостановленный",
+    "IS_SUSPENDED": "Признак приостановки: Y = есть активная услуга приостановления (TYPE_ID=9008), N = нет",
+    "START_DATE": "Начало предоставления услуги (open_date)",
+    "STOP_DATE": "Конец предоставления услуги (stop_date)",
+    "TARIFF_ID": "ID тарифа из биллинга (SERVICES.TARIFF_ID)"
+  },
+  "business_rules": [
+    "CONTRACT_ID (LOGIN) связывается с SPNET_TRAFFIC.CONTRACT_ID",
+    "IMEI (VSAT) связывается с SPNET_TRAFFIC.IMEI",
+    "TYPE_ID в SERVICES: 9002 = SBD (тарификация по трафику), 9008 = suspend (приостановление), 9014 = сообщения",
+    "Услуги 9002 и 9008 в противофазе: когда 9008 активна, 9002 приостановлена и наоборот",
+    "У 9008: LOGIN = IMEI (VSAT), у 9002: LOGIN = SUB-XXXXX (контракт)",
+    "CODE_1C получается из OUTER_IDS где TBL = 'CUSTOMERS' (регистр не важен)",
+    "CUSTOMER_NAME = ORGANIZATION_NAME (если есть) или PERSON_NAME (если нет организации)",
+    "STATUS = 10 означает активный сервис, STATUS = -10 означает приостановленный",
+    "IS_SUSPENDED = 'Y' если есть активная услуга приостановления (TYPE_ID=9008) со STATUS=10"
+  ],
+  "relationships": [
+    {
+      "table": "SPNET_TRAFFIC",
+      "type": "LEFT JOIN",
+      "on": "IRIDIUM_SERVICES_INFO.CONTRACT_ID = SPNET_TRAFFIC.CONTRACT_ID"
+    },
+    {
+      "table": "STECCOM_EXPENSES",
+      "type": "LEFT JOIN",
+      "on": "IRIDIUM_SERVICES_INFO.CONTRACT_ID = STECCOM_EXPENSES.CONTRACT_ID"
+    }
+  ],
+  "indexes": [
+    "idx_iridium_service_id ON IRIDIUM_SERVICES_INFO(SERVICE_ID)",
+    "idx_iridium_contract_id ON IRIDIUM_SERVICES_INFO(CONTRACT_ID)",
+    "idx_iridium_imei ON IRIDIUM_SERVICES_INFO(IMEI)",
+    "idx_iridium_customer_id ON IRIDIUM_SERVICES_INFO(CUSTOMER_ID)",
+    "idx_iridium_status ON IRIDIUM_SERVICES_INFO(STATUS)",
+    "idx_iridium_code_1c ON IRIDIUM_SERVICES_INFO(CODE_1C)"
+  ],
+  "usage_notes": [
+    "Используется для получения информации о клиентах в отчетах",
+    "В Oracle это VIEW V_IRIDIUM_SERVICES_INFO, в PostgreSQL - таблица (импорт)",
+    "Для активных сервисов: STATUS = 10 AND CONTRACT_ID NOT LIKE '%-clone-%'",
+    "CODE_1C используется для связи с системой 1С",
+    "CUSTOMER_NAME используется для отображения в отчетах (организация или ФИО)"
+  ]
+}
+
+
