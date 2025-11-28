@@ -41,7 +41,7 @@ load_config_env()
 
 # Конфигурация базы данных
 # Загружается из config.env через run_streamlit.sh или автоматически из config.env
-ORACLE_USER = os.getenv('ORACLE_USER', 'billing7')
+ORACLE_USER = os.getenv('ORACLE_USER')
 ORACLE_PASSWORD = os.getenv('ORACLE_PASSWORD')
 ORACLE_HOST = os.getenv('ORACLE_HOST')
 ORACLE_PORT = int(os.getenv('ORACLE_PORT', '1521'))
@@ -51,9 +51,9 @@ if not all([ORACLE_USER, ORACLE_PASSWORD, ORACLE_HOST]):
     st.error("❌ Ошибка: Не установлены переменные окружения ORACLE_USER, ORACLE_PASSWORD и ORACLE_HOST")
     st.error("Установите их в config.env или через переменные окружения")
     st.stop()
-ORACLE_SID = os.getenv('ORACLE_SID', 'bm7')
+ORACLE_SID = os.getenv('ORACLE_SID')
 # Если задан ORACLE_SERVICE, используем его, иначе ORACLE_SID
-ORACLE_SERVICE = os.getenv('ORACLE_SERVICE') or os.getenv('ORACLE_SID', 'bm7')
+ORACLE_SERVICE = os.getenv('ORACLE_SERVICE') or os.getenv('ORACLE_SID')
 
 
 def get_connection():
