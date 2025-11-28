@@ -533,12 +533,19 @@ def main():
     """Основная функция"""
     # Конфигурация Oracle (прямое подключение из интранет)
     oracle_config = {
-        'host': '192.168.3.35',  # Прямой доступ к Oracle
-        'port': 1521,
-        'service_name': 'bm7',  # Имя сервиса Oracle
-        'username': 'billing7',  # Пользователь Oracle
-        'password': 'billing'   # Пароль Oracle
+        'host': os.getenv('ORACLE_HOST'),  # Из переменной окружения
+        'port': int(os.getenv('ORACLE_PORT', '1521')),
+        'service_name': os.getenv('ORACLE_SERVICE', os.getenv('ORACLE_SID')),  # Имя сервиса Oracle
+        'username': os.getenv('ORACLE_USER'),  # Пользователь Oracle
+        'password': os.getenv('ORACLE_PASSWORD')   # Пароль Oracle
     }
+    
+    # Проверка обязательных параметров
+    required_params = ['host', 'username', 'password', 'service_name']
+    missing = [p for p in required_params if not oracle_config.get(p)]
+    if missing:
+        logger.error(f"❌ Ошибка: Не установлены переменные окружения: {', '.join(missing)}")
+        return
     
     logger.info("Запуск загрузчика данных STECCOM...")
     
