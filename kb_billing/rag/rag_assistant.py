@@ -414,8 +414,61 @@ class RAGAssistant:
             client = OpenAI(**client_kwargs)
             
             # Формирование промпта
-            system_prompt = """Ты эксперт по Oracle SQL и схеме billing для Iridium M2M сервисов.
-Твоя задача - генерировать корректные SQL запросы на основе вопросов пользователя и примеров.
+            system_prompt = """Ты - продвинутый эксперт по Oracle SQL и продвинутый финансовый эксперт в телекоммуникационной области.
+
+🚨 КРИТИЧЕСКИ ВАЖНО - ПЕРВОЕ ПРАВИЛО: Если вопрос касается финансового анализа (прибыльность, маржа, убыточность, себестоимость, тенденции, сравнение расходов и доходов), ВСЕГДА используй готовые VIEW:
+- V_PROFITABILITY_BY_PERIOD
+- V_PROFITABILITY_TREND  
+- V_UNPROFITABLE_CUSTOMERS
+
+🚨 СТРОГИЙ ЗАПРЕТ: НИКОГДА не создавай JOIN с BM_CURRENCY_RATE для финансового анализа! BM_CURRENCY_RATE не имеет колонок CURRENCY, CURRENCY_CODE, PERIOD - такие колонки НЕ СУЩЕСТВУЮТ!
+
+Твоя специализация:
+Твоя специализация:
+- Генерация точных и эффективных SQL запросов для Oracle базы данных
+- Финансовый анализ себестоимости услуг Iridium M2M
+- Выявление проблем с прибыльностью (превышение расходов над доходами)
+- Анализ тенденций в увеличении/ухудшении прибыльности клиентов и услуг
+- Предоставление дельных финансовых советов при обнаружении проблем
+
+Твоя задача - генерировать корректные SQL запросы, которые не только извлекают данные, но и помогают финансистам:
+- Выявлять убыточные клиенты и услуги (расходы > доходы)
+- Отслеживать динамику прибыльности по периодам
+- Находить причины снижения маржинальности
+- Анализировать структуру затрат и доходов
+
+⚠️ КРИТИЧЕСКИ ВАЖНО - ПЕРВЫЙ ПРИОРИТЕТ: Для финансового анализа прибыльности ВСЕГДА используй готовые VIEW вместо создания сложных CTE или JOIN!
+
+ДОСТУПНЫЕ VIEW ДЛЯ ФИНАНСОВОГО АНАЛИЗА (СТРОГИЙ ФОРМАТ КОЛОНОК - ИСПОЛЬЗУЙ ТОЧНО ТАК!):
+
+1. V_PROFITABILITY_BY_PERIOD - базовая прибыльность по периодам:
+   Колонки: PERIOD, CUSTOMER_NAME, CODE_1C, EXPENSES_USD, EXPENSES_RUB, REVENUE_RUB, PROFIT_RUB, MARGIN_PCT, COST_PCT, STATUS
+   Пример: SELECT PERIOD, CUSTOMER_NAME, CODE_1C, EXPENSES_USD, EXPENSES_RUB, REVENUE_RUB, PROFIT_RUB, MARGIN_PCT FROM V_PROFITABILITY_BY_PERIOD WHERE PERIOD = '2025-10'
+
+2. V_PROFITABILITY_TREND - тенденции прибыльности с сравнением периодов:
+   Колонки: PERIOD (текущий период), CUSTOMER_NAME, CODE_1C, EXPENSES_USD, EXPENSES_RUB, REVENUE_RUB, PROFIT_RUB (прибыль в текущем периоде), MARGIN_PCT, COST_PCT, STATUS, PREV_PROFIT_RUB (прибыль в предыдущем периоде), PROFIT_CHANGE (изменение прибыли), PROFIT_CHANGE_PCT (процент изменения), TREND ('DECREASE' или 'INCREASE')
+   ⚠️ КРИТИЧЕСКИ ВАЖНО: НЕ используй CURRENT_PERIOD, PREVIOUS_PERIOD, PROFIT_RUB_CUR, PROFIT_RUB_PREV - таких колонок НЕТ!
+   Правильные имена: PERIOD (текущий период), PREV_PROFIT_RUB (предыдущий период), PROFIT_RUB (текущий период)
+   Пример: SELECT PERIOD AS "Текущий Период", CUSTOMER_NAME, CODE_1C, PREV_PROFIT_RUB AS "Прибыль в предыдущем периоде", PROFIT_RUB AS "Прибыль в текущем периоде", PROFIT_CHANGE, PROFIT_CHANGE_PCT, TREND FROM V_PROFITABILITY_TREND WHERE TREND = 'DECREASE' ORDER BY PROFIT_CHANGE ASC
+
+3. V_UNPROFITABLE_CUSTOMERS - убыточные клиенты и клиенты с низкой маржой:
+   Колонки: PERIOD, CUSTOMER_NAME, CODE_1C, EXPENSES_USD, EXPENSES_RUB, REVENUE_RUB, PROFIT_RUB, MARGIN_PCT, COST_PCT, STATUS, ALERT_TYPE ('LOSS' или 'LOW_MARGIN')
+   Пример: SELECT PERIOD, CUSTOMER_NAME, CODE_1C, PROFIT_RUB, MARGIN_PCT, ALERT_TYPE FROM V_UNPROFITABLE_CUSTOMERS WHERE ALERT_TYPE = 'LOSS'
+
+ПРИМЕРЫ ПРАВИЛЬНЫХ ЗАПРОСОВ (ВСЕГДА используй эти паттерны!):
+- "Найди убыточных клиентов" → SELECT * FROM V_UNPROFITABLE_CUSTOMERS WHERE ALERT_TYPE = 'LOSS'
+- "Клиенты с ухудшением прибыльности" → SELECT PERIOD, CUSTOMER_NAME, CODE_1C, PREV_PROFIT_RUB, PROFIT_RUB, PROFIT_CHANGE, PROFIT_CHANGE_PCT, TREND FROM V_PROFITABILITY_TREND WHERE TREND = 'DECREASE' ORDER BY PROFIT_CHANGE ASC
+- "Клиенты с низкой маржой" → SELECT * FROM V_UNPROFITABLE_CUSTOMERS WHERE ALERT_TYPE = 'LOW_MARGIN'
+- "Клиенты с низкой маржой за октябрь" → SELECT * FROM V_UNPROFITABLE_CUSTOMERS WHERE PERIOD = '2025-10' AND ALERT_TYPE = 'LOW_MARGIN'
+- "Прибыльность за октябрь" → SELECT * FROM V_PROFITABILITY_BY_PERIOD WHERE PERIOD = '2025-10'
+
+❌ СТРОГО ЗАПРЕЩЕНО для финансового анализа (это вызовет ошибки ORA-00904!):
+- НЕ создавай запросы с JOIN V_CONSOLIDATED_REPORT_WITH_BILLING + V_REVENUE_FROM_INVOICES + BM_CURRENCY_RATE
+- НЕ используй BM_CURRENCY_RATE.CURRENCY или CR.CURRENCY - таких колонок не существует! BM_CURRENCY_RATE содержит только: RATE_ID, CURRENCY_ID, DOMAIN_ID, RATE, START_TIME, TS
+- НЕ используй JOIN BM_CURRENCY_RATE ON CR.CURRENCY = BM_CURRENCY_RATE.CURRENCY или JOIN BM_CURRENCY_RATE ON CR.CURRENCY_CODE = BM_CURRENCY_RATE.CURRENCY_CODE
+- НЕ используй MAX(BM_CURRENCY_RATE.RATE) в агрегации - VIEW уже содержат конверсию!
+- НЕ используй SUM(SPNET_TOTAL_AMOUNT + FEES_TOTAL) * MAX(BM_CURRENCY_RATE.RATE) - VIEW уже содержат EXPENSES_RUB!
+- НЕ используй JOIN с CUSTOMERS для получения CUSTOMER_NAME - VIEW уже содержат это поле! CUSTOMERS.ORGANIZATION_NAME и CUSTOMERS.CUSTOMER_NAME НЕ СУЩЕСТВУЮТ!
 
 Важные правила:
 1. Используй только таблицы и представления из предоставленного контекста
@@ -437,17 +490,183 @@ class RAGAssistant:
    - PERIOD_YYYYMM всегда в формате 'YYYY-MM' (например, '2025-10' для октября)
    - НЕ используй FINANCIAL_PERIOD для доходов! Используй только PERIOD_YYYYMM
    
-3. Для IMEI используй точное совпадение: IMEI = '300234069606340'
-4. Для расходов используй V_CONSOLIDATED_REPORT_WITH_BILLING с полями CALCULATED_OVERAGE, SPNET_TOTAL_AMOUNT, FEES_TOTAL
-5. Для доходов используй V_REVENUE_FROM_INVOICES с полями REVENUE_SBD_TRAFFIC, REVENUE_SBD_ABON, REVENUE_TOTAL и т.д.
-6. Генерируй только SQL запрос, без объяснений и комментариев
-7. Используй формат Oracle SQL (TO_CHAR, TO_NUMBER, NVL и т.д.)
+3. СТРУКТУРА SELECT для отчетов (КРИТИЧЕСКИ ВАЖНО):
+   - Если НЕТ агрегации (GROUP BY) → ВСЕГДА включай в SELECT:
+     * FINANCIAL_PERIOD AS "Отчетный Период" (для расходов) или PERIOD_YYYYMM (для доходов)
+     * IMEI - номер устройства
+     * CONTRACT_ID - ID договора
+     * CUSTOMER_NAME или COALESCE(ORGANIZATION_NAME, CUSTOMER_NAME, '') AS "Organization/Person" - клиент
+     * CODE_1C - код клиента в 1С
+     * AGREEMENT_NUMBER - номер договора (если доступен)
+     * Плюс запрашиваемые поля (например, CALCULATED_OVERAGE, REVENUE_TOTAL и т.д.)
+   - Если ЕСТЬ агрегация (GROUP BY) → включай:
+     * Поля группировки (CUSTOMER_NAME, CODE_1C, CONTRACT_ID и т.д.)
+     * SUM() для суммируемых полей
+     * COUNT() для подсчета записей
+   - Отчет должен быть понятным для финансиста - всегда показывай клиента, договор и устройство (если нет агрегации)
+
+4. ПЕРИОДЫ (если месяц не указан):
+   - Для расходов: используй текущий финансовый период = TO_CHAR(ADD_MONTHS(TRUNC(SYSDATE, 'MM'), -1), 'YYYY-MM')
+   - Для доходов: используй текущий период = TO_CHAR(TRUNC(SYSDATE, 'MM'), 'YYYY-MM')
+
+5. ФИНАНСОВЫЙ АНАЛИЗ (КРИТИЧЕСКИ ВАЖНО):
+   - Всегда вычисляй прибыль: ПРИБЫЛЬ = ДОХОДЫ - РАСХОДЫ
+   - Вычисляй маржу: МАРЖА % = (ПРИБЫЛЬ / ДОХОДЫ) * 100
+   - Вычисляй % себестоимости: СЕБЕСТОИМОСТЬ % = (РАСХОДЫ / ДОХОДЫ) * 100
+   - Выявляй убыточные позиции: WHERE РАСХОДЫ > ДОХОДЫ или ПРИБЫЛЬ < 0
+   - Выявляй низкую маржу: WHERE МАРЖА < 10% или СЕБЕСТОИМОСТЬ > 90%
+   - Для сравнения по периодам используй оконные функции (LAG, LEAD) или подзапросы
+   - При анализе тенденций сравнивай текущий период с предыдущим
+   - ВАЛЮТЫ (КРИТИЧЕСКИ ВАЖНО):
+     * Расходы из V_CONSOLIDATED_REPORT_WITH_BILLING всегда в USD (уе)
+     * Доходы из V_REVENUE_FROM_INVOICES всегда в RUB (валюта счетов-фактур, конверсия уже выполнена)
+     * ВСЕГДА показывай расходы в ОБЕИХ валютах: "Расходы (USD)" и "Расходы (RUB)"
+     * КОНВЕРСИЯ ВАЛЮТ ДЛЯ СРАВНЕНИЯ С ДОХОДАМИ (КРИТИЧЕСКИ ВАЖНО):
+       - Для конверсии расходов из USD в RUB при сравнении с доходами ВСЕГДА используй курс из счетов-фактур (BM_INVOICE_ITEM.RATE)
+       - Курс из счетов-фактур соответствует курсу, который реально использовался при формировании счетов для этого периода
+       - Получение курса из счетов-фактур по периоду: 
+         WITH currency_rate AS (
+           SELECT TO_CHAR(pm.START_DATE, 'YYYY-MM') AS PERIOD_YYYYMM, AVG(ii.RATE) AS RATE 
+           FROM BM_INVOICE_ITEM ii 
+           JOIN BM_PERIOD pm ON ii.PERIOD_ID = pm.PERIOD_ID 
+           WHERE (ii.CURRENCY_ID = 4 OR ii.ACC_CURRENCY_ID = 4) AND ii.RATE IS NOT NULL 
+           GROUP BY TO_CHAR(pm.START_DATE, 'YYYY-MM')
+         )
+       - Если курс из счетов недоступен для периода, используй BM_CURRENCY_RATE на последний день периода как запасной вариант
+       - Для одного периода: SELECT AVG(ii.RATE) AS RATE FROM BM_INVOICE_ITEM ii JOIN BM_PERIOD pm ON ii.PERIOD_ID = pm.PERIOD_ID WHERE TO_CHAR(pm.START_DATE, 'YYYY-MM') = '2025-10' AND (ii.CURRENCY_ID = 4 OR ii.ACC_CURRENCY_ID = 4) AND ii.RATE IS NOT NULL
+       - ВАЖНО: Таблица называется BM_PERIOD (без S), а не BM_PERIODS! Используй TO_CHAR(pm.START_DATE, 'YYYY-MM') для получения PERIOD_YYYYMM
+       - Это обеспечивает корректное сравнение расходов и доходов, так как используется тот же курс, что и в счетах-фактурах
+     * Пример: SUM(CALCULATED_OVERAGE + SPNET_TOTAL_AMOUNT + FEES_TOTAL) AS "Расходы (USD)", SUM((CALCULATED_OVERAGE + SPNET_TOTAL_AMOUNT + FEES_TOTAL) * cr.RATE) AS "Расходы (RUB)"
+     * Это позволяет финансистам видеть исходные расходы в USD и конвертированные в RUB для сравнения с доходами из счетов-фактур
+   - ФИЛЬТРАЦИЯ (КРИТИЧЕСКИ ВАЖНО ДЛЯ ПРОИЗВОДИТЕЛЬНОСТИ):
+     * ВСЕГДА поддерживай возможность фильтрации по клиентам и периодам
+     * Для фильтрации по клиенту используй: WHERE UPPER(CUSTOMER_NAME) LIKE UPPER('%имя_клиента%') или WHERE CODE_1C = 'код_1с'
+     * Для фильтрации по периоду используй: WHERE FINANCIAL_PERIOD >= 'YYYY-MM' AND FINANCIAL_PERIOD <= 'YYYY-MM' (для расходов) или WHERE PERIOD_YYYYMM >= 'YYYY-MM' AND PERIOD_YYYYMM <= 'YYYY-MM' (для доходов)
+     * Для квартала: WHERE FINANCIAL_PERIOD IN ('2025-01', '2025-02', '2025-03') для Q1
+     * Для года: WHERE FINANCIAL_PERIOD >= '2025-01' AND FINANCIAL_PERIOD <= '2025-12'
+     * Фильтры должны применяться в CTE ДО агрегации для максимальной производительности
+     * Примеры фильтров должны быть легко модифицируемыми пользователем
+
+6. Для IMEI используй точное совпадение: IMEI = '300234069606340'
+7. Для расходов используй V_CONSOLIDATED_REPORT_WITH_BILLING с полями CALCULATED_OVERAGE, SPNET_TOTAL_AMOUNT, FEES_TOTAL
+8. Для доходов используй V_REVENUE_FROM_INVOICES с полями REVENUE_SBD_TRAFFIC, REVENUE_SBD_ABON, REVENUE_TOTAL и т.д.
+9. КРИТИЧЕСКИ ВАЖНО - СТРОГИЙ ЗАПРЕТ: Для финансового анализа прибыльности ВСЕГДА используй готовые VIEW вместо создания сложных CTE или JOIN. НИКОГДА не создавай запросы с JOIN V_CONSOLIDATED_REPORT_WITH_BILLING + V_REVENUE_FROM_INVOICES + BM_CURRENCY_RATE!
+   - V_PROFITABILITY_BY_PERIOD - базовая прибыльность по периодам (содержит: PERIOD, CUSTOMER_NAME, CODE_1C, EXPENSES_USD, EXPENSES_RUB, REVENUE_RUB, PROFIT_RUB, MARGIN_PCT, COST_PCT, STATUS)
+   - V_PROFITABILITY_TREND - тенденции прибыльности с LAG (содержит все поля из V_PROFITABILITY_BY_PERIOD + PREV_PROFIT_RUB, PROFIT_CHANGE, PROFIT_CHANGE_PCT, TREND)
+     ⚠️ КРИТИЧЕСКИ ВАЖНО - СТРОГИЙ ФОРМАТ КОЛОНОК V_PROFITABILITY_TREND:
+     * PERIOD - текущий период (формат 'YYYY-MM', например '2025-10')
+     * CUSTOMER_NAME, CODE_1C - данные клиента
+     * EXPENSES_USD, EXPENSES_RUB, REVENUE_RUB, PROFIT_RUB - финансовые показатели текущего периода
+     * MARGIN_PCT, COST_PCT, STATUS - маржа и статус
+     * PREV_PROFIT_RUB - прибыль в ПРЕДЫДУЩЕМ периоде (через LAG)
+     * PROFIT_RUB - прибыль в ТЕКУЩЕМ периоде
+     * PROFIT_CHANGE - изменение прибыли (PROFIT_RUB - PREV_PROFIT_RUB)
+     * PROFIT_CHANGE_PCT - процент изменения прибыли
+     * TREND - 'DECREASE' (ухудшение), 'INCREASE' (улучшение) или NULL
+     ❌ ЗАПРЕЩЕНО использовать несуществующие колонки: CURRENT_PERIOD, PREVIOUS_PERIOD, PROFIT_RUB_CUR, PROFIT_RUB_PREV - таких колонок НЕТ!
+     ✅ ПРАВИЛЬНО: SELECT PERIOD, CUSTOMER_NAME, PREV_PROFIT_RUB, PROFIT_RUB, PROFIT_CHANGE, TREND FROM V_PROFITABILITY_TREND WHERE TREND = 'DECREASE'
+   - V_UNPROFITABLE_CUSTOMERS - убыточные клиенты и клиенты с низкой маржой (содержит: PERIOD, CUSTOMER_NAME, CODE_1C, EXPENSES_USD, EXPENSES_RUB, REVENUE_RUB, PROFIT_RUB, MARGIN_PCT, COST_PCT, STATUS, ALERT_TYPE). ALERT_TYPE: 'LOSS' (убыток), 'LOW_MARGIN' (низкая маржа) или 'PROFITABLE'
+   - Эти VIEW уже содержат конверсию валют через курс из счетов-фактур (BM_INVOICE_ITEM.RATE)
+   - Эти VIEW уже содержат CUSTOMER_NAME - НЕ нужно JOIN с CUSTOMERS!
+   - Примеры использования:
+     * SELECT * FROM V_PROFITABILITY_BY_PERIOD WHERE PERIOD = '2025-10' - прибыльность за октябрь
+     * SELECT * FROM V_PROFITABILITY_BY_PERIOD WHERE CUSTOMER_NAME LIKE '%Обь-Иртышское%' - по клиенту
+     * SELECT * FROM V_PROFITABILITY_BY_PERIOD WHERE PERIOD >= '2025-01' AND PERIOD <= '2025-12' - за год
+     * SELECT PERIOD, CUSTOMER_NAME, PREV_PROFIT_RUB, PROFIT_RUB, PROFIT_CHANGE, TREND FROM V_PROFITABILITY_TREND WHERE TREND = 'DECREASE' ORDER BY PROFIT_CHANGE ASC - клиенты с ухудшением
+     * SELECT * FROM V_UNPROFITABLE_CUSTOMERS WHERE PERIOD = '2025-10' AND ALERT_TYPE = 'LOSS' - убыточные за октябрь
+     * SELECT * FROM V_UNPROFITABLE_CUSTOMERS WHERE ALERT_TYPE = 'LOW_MARGIN' - клиенты с низкой маржой
+     * SELECT * FROM V_UNPROFITABLE_CUSTOMERS WHERE MARGIN_PCT < 10 - клиенты с низкой маржой
+   - ЗАПРЕЩЕНО для финансового анализа (это вызовет ошибки!):
+     * НЕ создавай сложные CTE с JOIN V_CONSOLIDATED_REPORT_WITH_BILLING + V_REVENUE_FROM_INVOICES + BM_CURRENCY_RATE + CUSTOMERS
+     * НЕ используй JOIN с CUSTOMERS для получения CUSTOMER_NAME - VIEW уже содержат это поле! CUSTOMERS.ORGANIZATION_NAME и CUSTOMERS.CUSTOMER_NAME НЕ СУЩЕСТВУЮТ!
+     * НЕ используй BM_CURRENCY_RATE напрямую - VIEW уже содержат конверсию валют! BM_CURRENCY_RATE не имеет колонок CURRENCY или PERIOD!
+     * НЕ используй CUSTOMERS.ORGANIZATION_NAME или CUSTOMERS.CUSTOMER_NAME - таких колонок не существует!
+   - Если нужна детализация по IMEI/CONTRACT_ID для конкретного клиента, используй V_CONSOLIDATED_REPORT_WITH_BILLING и V_REVENUE_FROM_INVOICES напрямую, но НЕ для агрегированного финансового анализа по клиентам!
+   - ПРИМЕРЫ ПРАВИЛЬНЫХ ЗАПРОСОВ (ВСЕГДА используй эти паттерны!):
+     * "Найди убыточных клиентов" → SELECT * FROM V_UNPROFITABLE_CUSTOMERS WHERE ALERT_TYPE = 'LOSS'
+     * "Клиенты с ухудшением прибыльности" → SELECT PERIOD, CUSTOMER_NAME, CODE_1C, PREV_PROFIT_RUB, PROFIT_RUB, PROFIT_CHANGE, PROFIT_CHANGE_PCT, TREND FROM V_PROFITABILITY_TREND WHERE TREND = 'DECREASE' ORDER BY PROFIT_CHANGE ASC
+     * "Клиенты с низкой маржой" → SELECT * FROM V_UNPROFITABLE_CUSTOMERS WHERE ALERT_TYPE = 'LOW_MARGIN'
+     * "Клиенты с низкой маржой за октябрь" → SELECT * FROM V_UNPROFITABLE_CUSTOMERS WHERE PERIOD = '2025-10' AND ALERT_TYPE = 'LOW_MARGIN'
+     * "Прибыльность за октябрь" → SELECT * FROM V_PROFITABILITY_BY_PERIOD WHERE PERIOD = '2025-10'
+   - ЗАПРЕЩЕНО (это вызовет ошибки ORA-00904!):
+     * НЕ используй BM_CURRENCY_RATE.CURRENCY или CR.CURRENCY - таких колонок не существует! BM_CURRENCY_RATE содержит только: RATE_ID, CURRENCY_ID, DOMAIN_ID, RATE, START_TIME, TS
+     * НЕ используй JOIN BM_CURRENCY_RATE ON CR.CURRENCY = BM_CURRENCY_RATE.CURRENCY - колонки CURRENCY не существует!
+     * НЕ создавай запросы типа: SELECT ... FROM V_CONSOLIDATED_REPORT_WITH_BILLING CR JOIN BM_CURRENCY_RATE ON CR.CURRENCY = BM_CURRENCY_RATE.CURRENCY
+     * НЕ используй MAX(BM_CURRENCY_RATE.RATE) в агрегации - VIEW уже содержат конверсию!
+     * НЕ используй SUM(SPNET_TOTAL_AMOUNT + FEES_TOTAL) * MAX(BM_CURRENCY_RATE.RATE) - VIEW уже содержат EXPENSES_RUB!
+10. ВАЖНО: Таблица CUSTOMERS НЕ содержит колонки CUSTOMER_NAME и ORGANIZATION_NAME! Для получения имени клиента используй:
+   - ЛУЧШИЙ ВАРИАНТ: Используй BM_CUSTOMER_CONTACT и BM_CONTACT_DICT по аналогии с V_IRIDIUM_SERVICES_INFO:
+     * ORGANIZATION_NAME: MAX(CASE WHEN cd.MNEMONIC = 'description' AND cc.CONTACT_DICT_ID = 23 THEN cc.VALUE END)
+     * PERSON_NAME: TRIM(NVL(MAX(CASE WHEN cd.MNEMONIC = 'last_name' AND cc.CONTACT_DICT_ID = 11 THEN cc.VALUE END), '') || ' ' || NVL(MAX(CASE WHEN cd.MNEMONIC = 'first_name' AND cc.CONTACT_DICT_ID = 11 THEN cc.VALUE END), '') || ' ' || NVL(MAX(CASE WHEN cd.MNEMONIC = 'middle_name' AND cc.CONTACT_DICT_ID = 11 THEN cc.VALUE END), ''))
+     * CUSTOMER_NAME: NVL(ORGANIZATION_NAME, PERSON_NAME)
+     * JOIN: LEFT JOIN BM_CUSTOMER_CONTACT cc ON c.CUSTOMER_ID = cc.CUSTOMER_ID LEFT JOIN BM_CONTACT_DICT cd ON cc.CONTACT_DICT_ID = cd.CONTACT_DICT_ID AND ((cd.MNEMONIC = 'description' AND cc.CONTACT_DICT_ID = 23) OR (cd.MNEMONIC IN ('first_name', 'last_name', 'middle_name') AND cc.CONTACT_DICT_ID = 11))
+     * ВАЖНО: При использовании GROUP BY нужно включить все поля из SELECT, которые не являются агрегатными функциями
+   - АЛЬТЕРНАТИВА: Используй V_IRIDIUM_SERVICES_INFO.CUSTOMER_NAME, V_CONSOLIDATED_REPORT_WITH_BILLING.CUSTOMER_NAME или V_REVENUE_FROM_INVOICES.CUSTOMER_NAME, которые уже содержат имя клиента
+   - НЕ используй CUSTOMERS.CUSTOMER_NAME или CUSTOMERS.ORGANIZATION_NAME - таких колонок не существует!
+   - КРИТИЧЕСКИ ВАЖНО: Если вопрос касается финансового анализа (прибыльность, убыточность, маржа, тенденции), ВСЕГДА используй готовые VIEW (V_PROFITABILITY_BY_PERIOD, V_PROFITABILITY_TREND, V_UNPROFITABLE_CUSTOMERS) вместо JOIN с CUSTOMERS или создания сложных CTE!
+11. ВАЖНО: Таблица периодов называется BM_PERIOD (без S), а не BM_PERIODS! 
+   - Используй BM_PERIOD.START_DATE (не DATE_BEG!) для получения PERIOD_YYYYMM через TO_CHAR(pm.START_DATE, 'YYYY-MM')
+   - BM_PERIOD содержит колонки: PERIOD_ID, START_DATE, STOP_DATE, MONTH (не DATE_BEG и DATE_END!)
+12. ВАЖНО: Для расходов лучше использовать V_CONSOLIDATED_REPORT_WITH_BILLING вместо прямого использования STECCOM_EXPENSES:
+   - V_CONSOLIDATED_REPORT_WITH_BILLING уже содержит агрегированные расходы (CALCULATED_OVERAGE, SPNET_TOTAL_AMOUNT, FEES_TOTAL)
+   - V_CONSOLIDATED_REPORT_WITH_BILLING содержит CUSTOMER_NAME, ORGANIZATION_NAME, CODE_1C, IMEI, CONTRACT_ID
+   - Если нужно использовать STECCOM_EXPENSES напрямую, помни что колонка IMEI называется ICC_ID_IMEI (не IMEI!)
+9. Для получения курса валют (КРИТИЧЕСКИ ВАЖНО ДЛЯ ПРОИЗВОДИТЕЛЬНОСТИ):
+   - ВСЕГДА используй курс из счетов-фактур (BM_INVOICE_ITEM.RATE) для конверсии расходов
+   - Для нескольких периодов: SELECT TO_CHAR(pm.START_DATE, 'YYYY-MM') AS PERIOD_YYYYMM, AVG(ii.RATE) AS RATE FROM BM_INVOICE_ITEM ii JOIN BM_PERIOD pm ON ii.PERIOD_ID = pm.PERIOD_ID WHERE TO_CHAR(pm.START_DATE, 'YYYY-MM') >= 'YYYY-MM' AND (ii.CURRENCY_ID = 4 OR ii.ACC_CURRENCY_ID = 4) AND ii.RATE IS NOT NULL GROUP BY TO_CHAR(pm.START_DATE, 'YYYY-MM')
+   - НЕ используй ROWNUM в подзапросах CTE - это неэффективно и может вызвать ошибки
+   - НЕ используй BM_CURRENCY_RATE напрямую - используй курс из счетов-фактур!
+   - Если курс из счетов недоступен, используй BM_CURRENCY_RATE как запасной вариант: SELECT RATE FROM BM_CURRENCY_RATE WHERE CURRENCY_ID = 4 AND START_TIME <= LAST_DAY(TO_DATE('2025-10', 'YYYY-MM')) ORDER BY START_TIME DESC FETCH FIRST 1 ROW ONLY
+   
+10. ОПТИМИЗАЦИЯ ПРОИЗВОДИТЕЛЬНОСТИ (КРИТИЧЕСКИ ВАЖНО):
+   - Фильтруй данные ДО JOIN, а не после: WHERE r.REVENUE_RUB > 0 лучше применять в CTE revenue_by_period
+   - Используй HAVING для фильтрации после агрегации вместо WHERE после JOIN
+   - Для JOIN по нескольким полям (FINANCIAL_PERIOD, CUSTOMER_NAME, CODE_1C) убедись, что фильтрация по периоду применена ДО агрегации
+   - Минимизируй количество строк перед JOIN: фильтруй по периоду в CTE, а не в основном запросе
+11. Генерируй только SQL запрос, БЕЗ точки с запятой в конце, без объяснений и комментариев
+12. Используй формат Oracle SQL (TO_CHAR, TO_NUMBER, NVL и т.д.)
+"""
+            
+            # Проверяем, является ли вопрос финансовым анализом
+            financial_keywords = ['прибыль', 'убыток', 'марж', 'себестоимость', 'тенденц', 'ухудшени', 'улучшени', 'низкой марж', 'низкая маржа', 'убыточн', 'структур', 'затрат', 'доходов', 'расходов', 'динамик', 'анализ', 'сравнен', 'низкой', 'маржинальн']
+            is_financial_analysis = any(keyword in question.lower() for keyword in financial_keywords)
+            
+            financial_warning = ""
+            if is_financial_analysis:
+                financial_warning = """
+⚠️ КРИТИЧЕСКИ ВАЖНО: Это вопрос финансового анализа! ОБЯЗАТЕЛЬНО используй готовые VIEW!
+
+СТРОГИЙ ЗАПРЕТ для финансового анализа:
+❌ НЕ создавай JOIN с V_CONSOLIDATED_REPORT_WITH_BILLING + V_REVENUE_FROM_INVOICES + BM_CURRENCY_RATE!
+❌ НЕ используй BM_CURRENCY_RATE.CURRENCY_CODE, BM_CURRENCY_RATE.PERIOD - таких колонок НЕТ!
+❌ НЕ используй JOIN BM_CURRENCY_RATE ON CRATE.CURRENCY_CODE = 'USD' - BM_CURRENCY_RATE не имеет колонки CURRENCY_CODE!
+❌ НЕ используй JOIN BM_CURRENCY_RATE ON CRATE.PERIOD = CR.FINANCIAL_PERIOD - BM_CURRENCY_RATE не имеет колонки PERIOD!
+❌ НЕ создавай CTE с конверсией валют для финансового анализа - VIEW уже содержат конверсию!
+
+✅ ОБЯЗАТЕЛЬНО используй готовые VIEW:
+- "убыточных клиентов" или "убыток" → SELECT * FROM V_UNPROFITABLE_CUSTOMERS WHERE ALERT_TYPE = 'LOSS'
+- "низкой маржой" или "низкая маржа" → SELECT * FROM V_UNPROFITABLE_CUSTOMERS WHERE ALERT_TYPE = 'LOW_MARGIN' OR SELECT * FROM V_UNPROFITABLE_CUSTOMERS WHERE MARGIN_PCT < 10
+- "ухудшением прибыльности" или "тенденции" → SELECT PERIOD, CUSTOMER_NAME, PREV_PROFIT_RUB, PROFIT_RUB, PROFIT_CHANGE, TREND FROM V_PROFITABILITY_TREND WHERE TREND = 'DECREASE'
+- "прибыльность", "структура затрат", "структура доходов", "анализ затрат", "анализ доходов" → SELECT * FROM V_PROFITABILITY_BY_PERIOD
+- "динамика прибыльности" → SELECT * FROM V_PROFITABILITY_BY_PERIOD ORDER BY PERIOD
+- "сравнение расходов и доходов" → SELECT * FROM V_PROFITABILITY_BY_PERIOD
+
+ПРАВИЛЬНЫЕ ПРИМЕРЫ:
+✅ "Найди клиентов с низкой маржой" → SELECT * FROM V_UNPROFITABLE_CUSTOMERS WHERE ALERT_TYPE = 'LOW_MARGIN'
+✅ "Клиенты с низкой маржой за октябрь" → SELECT * FROM V_UNPROFITABLE_CUSTOMERS WHERE PERIOD = '2025-10' AND ALERT_TYPE = 'LOW_MARGIN'
+✅ "Прибыльность за октябрь" → SELECT * FROM V_PROFITABILITY_BY_PERIOD WHERE PERIOD = '2025-10'
+
+НЕПРАВИЛЬНЫЕ ПРИМЕРЫ (НЕ ДЕЛАЙ ТАК!):
+❌ SELECT ... FROM V_CONSOLIDATED_REPORT_WITH_BILLING CR JOIN V_REVENUE_FROM_INVOICES RI ... JOIN BM_CURRENCY_RATE CRATE ...
+❌ SELECT ... FROM V_CONSOLIDATED_REPORT_WITH_BILLING CR JOIN BM_CURRENCY_RATE CRATE ON CRATE.CURRENCY_CODE = 'USD' ...
+❌ SELECT ... FROM V_CONSOLIDATED_REPORT_WITH_BILLING CR JOIN BM_CURRENCY_RATE CRATE ON CRATE.PERIOD = CR.FINANCIAL_PERIOD ...
+
 """
             
             user_prompt = f"""Контекст:
 {formatted_context}
 
-Вопрос пользователя: {question}
+{financial_warning}Вопрос пользователя: {question}
 
 Сгенерируй SQL запрос для Oracle базы данных на основе вопроса и примеров из контекста.
 Верни только SQL запрос, без дополнительных объяснений."""
@@ -478,6 +697,84 @@ class RAGAssistant:
             if sql.endswith("```"):
                 sql = sql[:-3]
             sql = sql.strip()
+            
+            # Удаляем точку с запятой в конце (Oracle через pandas может не принимать её)
+            sql = sql.rstrip(';').strip()
+            
+            # Валидация SQL для финансового анализа - проверка на запрещенные паттерны
+            if is_financial_analysis:
+                sql_upper = sql.upper()
+                forbidden_patterns = [
+                    ('JOIN BM_CURRENCY_RATE', 'Для финансового анализа используй готовые VIEW (V_PROFITABILITY_BY_PERIOD, V_UNPROFITABLE_CUSTOMERS, V_PROFITABILITY_TREND) вместо JOIN с BM_CURRENCY_RATE'),
+                    ('BM_CURRENCY_RATE.CURRENCY', 'BM_CURRENCY_RATE не имеет колонки CURRENCY. Используй готовые VIEW для финансового анализа'),
+                    ('BM_CURRENCY_RATE.PERIOD', 'BM_CURRENCY_RATE не имеет колонки PERIOD. Используй готовые VIEW для финансового анализа'),
+                    ('CRATE.CURRENCY', 'BM_CURRENCY_RATE не имеет колонки CURRENCY. Используй готовые VIEW для финансового анализа'),
+                    ('CRATE.PERIOD', 'BM_CURRENCY_RATE не имеет колонки PERIOD. Используй готовые VIEW для финансового анализа'),
+                    ('V_CONSOLIDATED_REPORT_WITH_BILLING.*JOIN.*V_REVENUE_FROM_INVOICES', 'Для финансового анализа используй готовые VIEW вместо JOIN V_CONSOLIDATED_REPORT_WITH_BILLING + V_REVENUE_FROM_INVOICES'),
+                ]
+                
+                for pattern, error_msg in forbidden_patterns:
+                    if pattern in sql_upper:
+                        logger.warning(f"Обнаружен запрещенный паттерн в SQL: {pattern}")
+                        logger.warning(f"Ошибка: {error_msg}")
+                        # Попытка исправить: заменить на использование VIEW
+                        if 'низкой марж' in question.lower() or 'низкая марж' in question.lower():
+                            # Определяем период из запроса или используем текущий
+                            period_match = None
+                            import re
+                            month_names = {'январ': '01', 'феврал': '02', 'март': '03', 'апрел': '04', 'май': '05', 'мае': '05',
+                                         'июн': '06', 'июл': '07', 'август': '08', 'сентябр': '09', 'октябр': '10', 'ноябр': '11', 'декабр': '12'}
+                            for month_name, month_num in month_names.items():
+                                if month_name in question.lower():
+                                    # Пытаемся найти год
+                                    year_match = re.search(r'20\d{2}', question)
+                                    year = year_match.group() if year_match else '2025'
+                                    period_match = f"{year}-{month_num}"
+                                    break
+                            
+                            if period_match:
+                                sql = f"SELECT * FROM V_UNPROFITABLE_CUSTOMERS WHERE PERIOD = '{period_match}' AND ALERT_TYPE = 'LOW_MARGIN' ORDER BY MARGIN_PCT ASC"
+                            else:
+                                sql = "SELECT * FROM V_UNPROFITABLE_CUSTOMERS WHERE ALERT_TYPE = 'LOW_MARGIN' ORDER BY MARGIN_PCT ASC"
+                            logger.info(f"SQL исправлен на использование VIEW: {sql[:100]}...")
+                            break
+                        elif 'убыточн' in question.lower() or 'убыток' in question.lower():
+                            period_match = None
+                            import re
+                            month_names = {'январ': '01', 'феврал': '02', 'март': '03', 'апрел': '04', 'май': '05', 'мае': '05',
+                                         'июн': '06', 'июл': '07', 'август': '08', 'сентябр': '09', 'октябр': '10', 'ноябр': '11', 'декабр': '12'}
+                            for month_name, month_num in month_names.items():
+                                if month_name in question.lower():
+                                    year_match = re.search(r'20\d{2}', question)
+                                    year = year_match.group() if year_match else '2025'
+                                    period_match = f"{year}-{month_num}"
+                                    break
+                            
+                            if period_match:
+                                sql = f"SELECT * FROM V_UNPROFITABLE_CUSTOMERS WHERE PERIOD = '{period_match}' AND ALERT_TYPE = 'LOSS' ORDER BY PROFIT_RUB ASC"
+                            else:
+                                sql = "SELECT * FROM V_UNPROFITABLE_CUSTOMERS WHERE ALERT_TYPE = 'LOSS' ORDER BY PROFIT_RUB ASC"
+                            logger.info(f"SQL исправлен на использование VIEW: {sql[:100]}...")
+                            break
+                        else:
+                            # Общий случай - используем V_PROFITABILITY_BY_PERIOD
+                            period_match = None
+                            import re
+                            month_names = {'январ': '01', 'феврал': '02', 'март': '03', 'апрел': '04', 'май': '05', 'мае': '05',
+                                         'июн': '06', 'июл': '07', 'август': '08', 'сентябр': '09', 'октябр': '10', 'ноябр': '11', 'декабр': '12'}
+                            for month_name, month_num in month_names.items():
+                                if month_name in question.lower():
+                                    year_match = re.search(r'20\d{2}', question)
+                                    year = year_match.group() if year_match else '2025'
+                                    period_match = f"{year}-{month_num}"
+                                    break
+                            
+                            if period_match:
+                                sql = f"SELECT * FROM V_PROFITABILITY_BY_PERIOD WHERE PERIOD = '{period_match}' ORDER BY CUSTOMER_NAME"
+                            else:
+                                sql = "SELECT * FROM V_PROFITABILITY_BY_PERIOD ORDER BY PERIOD DESC, CUSTOMER_NAME"
+                            logger.info(f"SQL исправлен на использование VIEW: {sql[:100]}...")
+                            break
             
             logger.info(f"Сгенерирован SQL через LLM: {sql[:100]}...")
             return sql

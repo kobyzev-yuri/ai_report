@@ -582,7 +582,7 @@ def main():
     
     # Основное приложение для авторизованных пользователей
     st.set_page_config(
-        page_title="Iridium M2M Overage Report (Oracle)",
+        page_title="Iridium M2M KB Assistant",
         page_icon="📊",
         layout="wide"
     )
@@ -619,7 +619,7 @@ def main():
         st.stop()
     
     # Заголовок
-    st.title("📊 Iridium M2M Overage Report")
+    st.title("📊 Iridium M2M KB Assistant")
     
     st.markdown("---")
     
@@ -680,9 +680,38 @@ def main():
             except ValueError:
                 st.session_state.selected_period_index = 0
         
-        plans = get_plans()
-        plan_options = ["All Plans"] + plans
-        selected_plan = st.selectbox("Plan", plan_options, key='plan_selectbox')
+        # Фильтр по планам (ленивая загрузка - только при необходимости)
+        # Используем session_state для хранения выбранного плана
+        if 'selected_plan' not in st.session_state:
+            st.session_state.selected_plan = "All Plans"
+        if 'use_plan_filter' not in st.session_state:
+            st.session_state.use_plan_filter = False
+        
+        # Чекбокс для включения фильтра по планам
+        use_plan_filter = st.checkbox(
+            "📋 Использовать фильтр по тарифному плану",
+            value=st.session_state.use_plan_filter,
+            key='use_plan_filter_checkbox',
+            help="Включите для фильтрации по тарифному плану"
+        )
+        st.session_state.use_plan_filter = use_plan_filter
+        
+        if use_plan_filter:
+            # Загружаем планы только если фильтр включен
+            plans = get_plans()
+            plan_options = ["All Plans"] + plans
+            selected_plan = st.selectbox(
+                "Plan", 
+                plan_options, 
+                key='plan_selectbox',
+                index=0,
+                help="Выберите тарифный план для фильтрации"
+            )
+            st.session_state.selected_plan = selected_plan
+        else:
+            # Если фильтр выключен, используем "All Plans"
+            selected_plan = "All Plans"
+            st.session_state.selected_plan = "All Plans"
         
         st.markdown("---")
         st.subheader("🔍 Additional Filters")
@@ -734,9 +763,10 @@ def main():
         
         st.info("💡 Конфигурация загружается из config.env при запуске через run_streamlit.sh")
     
-    # Создаем вкладки для отчета, доходов, загрузки данных и ассистента
-    tab_assistant, tab_report, tab_revenue, tab_loader = st.tabs([
-        "🤖 Ассистент", 
+    # Создаем вкладки для отчета, доходов, загрузки данных, ассистента и финансового анализа
+    tab_assistant, tab_financial, tab_report, tab_revenue, tab_loader = st.tabs([
+        "🤖 Ассистент",
+        "📊 Финансовый анализ",
         "💰 Расходы Иридиум", 
         "💰 Доходы", 
         "📥 Data Loader"
@@ -759,6 +789,27 @@ def main():
             """)
         except Exception as e:
             st.error(f"❌ Ошибка при загрузке ассистента: {e}")
+            import traceback
+            with st.expander("Детали ошибки"):
+                st.code(traceback.format_exc())
+    
+    # ========== FINANCIAL ANALYSIS TAB ==========
+    with tab_financial:
+        try:
+            # Убеждаемся, что переменная окружения установлена перед импортом
+            os.environ['PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION'] = 'python'
+            from kb_billing.rag.streamlit_assistant import show_financial_analysis_tab
+            show_financial_analysis_tab()
+        except ImportError as e:
+            st.error(f"❌ Ошибка импорта модуля финансового анализа: {e}")
+            st.info("""
+            Убедитесь, что:
+            1. Установлены зависимости: `pip install qdrant-client sentence-transformers`
+            2. Qdrant запущен: `docker run -d -p 6333:6333 qdrant/qdrant`
+            3. KB инициализирована: `python kb_billing/rag/init_kb.py`
+            """)
+        except Exception as e:
+            st.error(f"❌ Ошибка при загрузке финансового анализа: {e}")
             import traceback
             with st.expander("Детали ошибки"):
                 st.code(traceback.format_exc())
