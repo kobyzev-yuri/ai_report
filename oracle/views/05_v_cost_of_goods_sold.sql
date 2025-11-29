@@ -200,3 +200,6 @@ COMMENT ON COLUMN V_COST_OF_GOODS_SOLD.COST_PERCENTAGE IS 'Себестоимо�
 COMMENT ON COLUMN V_COST_OF_GOODS_SOLD.MARGIN_PERCENTAGE IS 'Маржинальность в процентах: ((Доходы - Затраты) / Доходы) * 100';
 
 
+
+
+

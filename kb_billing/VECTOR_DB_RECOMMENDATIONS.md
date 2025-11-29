@@ -382,3 +382,6 @@ embedding = model.encode(text, normalize_embeddings=True)
 3. Создать скрипт загрузки kb_billing в Qdrant
 4. Протестировать поиск на реальных запросах
 
+
+
+

@@ -505,3 +505,6 @@ recommendations = generate_recommendations(error_analysis)
 - Фокусироваться на финансовых отчетах и поиске соответствий
 - Использовать категории и бизнес-сущности специфичные для billing
 
+
+
+
