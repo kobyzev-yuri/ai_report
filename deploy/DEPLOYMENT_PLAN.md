@@ -284,3 +284,4 @@ cd /usr/local/projects/ai_report
 - Развертывание RAG: `DEPLOYMENT_RAG.md`
 - Резюме: `DEPLOYMENT_SUMMARY.md`
 
+

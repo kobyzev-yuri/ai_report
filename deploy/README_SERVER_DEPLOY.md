@@ -241,3 +241,4 @@ ssh root@82.114.2.2 "kill -9 <PID>"
 - Быстрый старт: `QUICK_DEPLOY.md`
 - Резюме: `DEPLOYMENT_SUMMARY.md`
 
+

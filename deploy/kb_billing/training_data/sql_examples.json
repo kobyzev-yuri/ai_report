@@ -40,6 +40,86 @@
     "category": "Клиенты"
   },
   {
+    "question": "Найди информацию по клиенту АК Ямал Салехардский филиал - интересует код 1С",
+    "sql": "SELECT DISTINCT c.CUSTOMER_ID, NVL(MAX(CASE WHEN cd.MNEMONIC = 'description' AND cc.CONTACT_DICT_ID = 23 THEN cc.VALUE END), TRIM(NVL(MAX(CASE WHEN cd.MNEMONIC = 'last_name' AND cc.CONTACT_DICT_ID = 11 THEN cc.VALUE END), '') || ' ' || NVL(MAX(CASE WHEN cd.MNEMONIC = 'first_name' AND cc.CONTACT_DICT_ID = 11 THEN cc.VALUE END), '') || ' ' || NVL(MAX(CASE WHEN cd.MNEMONIC = 'middle_name' AND cc.CONTACT_DICT_ID = 11 THEN cc.VALUE END), ''))) AS CUSTOMER_NAME, (SELECT oi.EXT_ID FROM OUTER_IDS oi WHERE oi.ID = c.CUSTOMER_ID AND UPPER(TRIM(oi.TBL)) = 'CUSTOMERS' AND ROWNUM = 1) AS CODE_1C FROM CUSTOMERS c LEFT JOIN BM_CUSTOMER_CONTACT cc ON c.CUSTOMER_ID = cc.CUSTOMER_ID LEFT JOIN BM_CONTACT_DICT cd ON cc.CONTACT_DICT_ID = cd.CONTACT_DICT_ID WHERE (UPPER(cc.VALUE) LIKE UPPER('%АК Ямал Салехардский филиал%') OR UPPER(cc.VALUE) LIKE UPPER('%АК ЯМАЛ САЛЕХАРДСКИЙ ФИЛИАЛ%')) AND ((cd.MNEMONIC = 'description' AND cc.CONTACT_DICT_ID = 23) OR (cd.MNEMONIC IN ('first_name', 'last_name', 'middle_name') AND cc.CONTACT_DICT_ID = 11)) GROUP BY c.CUSTOMER_ID ORDER BY CUSTOMER_NAME",
+    "context": "Поиск кода 1С клиента по имени. ВАЖНО: Клиента может не быть в V_IRIDIUM_SERVICES_INFO, но код 1С есть в OUTER_IDS. Нужно найти customer_id по имени в BM_CUSTOMER_CONTACT (для организаций CONTACT_DICT_ID = 23, MNEMONIC = 'description'; для физлиц CONTACT_DICT_ID = 11, MNEMONIC IN ('first_name', 'last_name', 'middle_name')), затем найти код 1С в OUTER_IDS по customer_id (где TBL = 'CUSTOMERS', регистр не важен). Используй UPPER для поиска по имени, так как регистр может отличаться.",
+    "business_entity": "customers",
+    "complexity": 3,
+    "category": "Клиенты"
+  },
+  {
+    "question": "Найди все сервисы клиента АК Ямал Салехардский филиал",
+    "sql": "SELECT service_id, contract_id, imei, customer_name, code_1c, agreement_number, order_number, status, actual_status, tariff_id, create_date, start_date FROM v_iridium_services_info WHERE UPPER(customer_name) LIKE UPPER('%АК Ямал Салехардский филиал%') ORDER BY contract_id, create_date DESC",
+    "context": "Поиск всех сервисов клиента по имени. Включает SBD сервисы (TYPE_ID=9002), мониторинг (9005), приостановление (9008), блокировку мониторинга (9013), сообщения (9014). Показывает контракты (SUB-), IMEI, договоры, статусы и другую информацию об услугах.",
+    "business_entity": "services",
+    "complexity": 2,
+    "category": "Клиенты"
+  },
+  {
+    "question": "Покажи все сервисы клиента по коду 1С 1C00123",
+    "sql": "SELECT service_id, contract_id, imei, customer_name, code_1c, agreement_number, order_number, status, actual_status, tariff_id, create_date, start_date FROM v_iridium_services_info WHERE code_1c = '1C00123' ORDER BY contract_id, create_date DESC",
+    "context": "Поиск всех сервисов клиента по коду 1С. Включает все типы услуг (SBD, мониторинг, приостановление и т.д.). Показывает контракты, IMEI, договоры, статусы.",
+    "business_entity": "services",
+    "complexity": 2,
+    "category": "Клиенты"
+  },
+  {
+    "question": "Найди все сервисы клиента с customer_id 12345",
+    "sql": "SELECT service_id, contract_id, imei, customer_name, code_1c, agreement_number, order_number, status, actual_status, tariff_id, create_date, start_date FROM v_iridium_services_info WHERE customer_id = 12345 ORDER BY contract_id, create_date DESC",
+    "context": "Поиск всех сервисов клиента по customer_id. Включает все типы услуг Iridium (SBD, мониторинг, приостановление, блокировка мониторинга, сообщения).",
+    "business_entity": "services",
+    "complexity": 1,
+    "category": "Клиенты"
+  },
+  {
+    "question": "Покажи информацию о клиенте по customer_id 12345",
+    "sql": "SELECT DISTINCT c.CUSTOMER_ID, NVL(MAX(CASE WHEN cd.MNEMONIC = 'description' AND cc.CONTACT_DICT_ID = 23 THEN cc.VALUE END), TRIM(NVL(MAX(CASE WHEN cd.MNEMONIC = 'last_name' AND cc.CONTACT_DICT_ID = 11 THEN cc.VALUE END), '') || ' ' || NVL(MAX(CASE WHEN cd.MNEMONIC = 'first_name' AND cc.CONTACT_DICT_ID = 11 THEN cc.VALUE END), '') || ' ' || NVL(MAX(CASE WHEN cd.MNEMONIC = 'middle_name' AND cc.CONTACT_DICT_ID = 11 THEN cc.VALUE END), ''))) AS CUSTOMER_NAME, (SELECT oi.EXT_ID FROM OUTER_IDS oi WHERE oi.ID = c.CUSTOMER_ID AND UPPER(TRIM(oi.TBL)) = 'CUSTOMERS' AND ROWNUM = 1) AS CODE_1C FROM CUSTOMERS c LEFT JOIN BM_CUSTOMER_CONTACT cc ON c.CUSTOMER_ID = cc.CUSTOMER_ID LEFT JOIN BM_CONTACT_DICT cd ON cc.CONTACT_DICT_ID = cd.CONTACT_DICT_ID WHERE c.CUSTOMER_ID = 12345 GROUP BY c.CUSTOMER_ID",
+    "context": "Поиск информации о клиенте по customer_id. Возвращает имя клиента (организация или ФИО) и код 1С из OUTER_IDS.",
+    "business_entity": "customers",
+    "complexity": 2,
+    "category": "Клиенты"
+  },
+  {
+    "question": "Найди сервис по контракту SUB-12345",
+    "sql": "SELECT service_id, contract_id, imei, customer_name, code_1c, agreement_number, order_number, status, actual_status, tariff_id, create_date, start_date FROM v_iridium_services_info WHERE contract_id = 'SUB-12345' ORDER BY service_id",
+    "context": "Поиск сервиса по контракту (SUB-). Может вернуть несколько записей, если есть связанные услуги (SBD, мониторинг, приостановление и т.д.) с одним контрактом.",
+    "business_entity": "services",
+    "complexity": 1,
+    "category": "Поиск"
+  },
+  {
+    "question": "Покажи все типы услуг клиента по имени",
+    "sql": "SELECT s.SERVICE_ID, s.LOGIN AS CONTRACT_ID, s.VSAT AS IMEI, s.TYPE_ID, rt.DESCRIPTION AS SERVICE_TYPE, vi.CUSTOMER_NAME, vi.CODE_1C, vi.AGREEMENT_NUMBER, s.STATUS, s.ACTUAL_STATUS, s.CREATE_DATE FROM SERVICES s JOIN BM_RESOURCE_TYPE rt ON s.TYPE_ID = rt.RESOURCE_TYPE_ID LEFT JOIN V_IRIDIUM_SERVICES_INFO vi ON s.LOGIN = vi.CONTRACT_ID WHERE UPPER(vi.CUSTOMER_NAME) LIKE UPPER('%АК Ямал Салехардский филиал%') AND s.TYPE_ID IN (9002, 9005, 9008, 9013, 9014) ORDER BY s.TYPE_ID, s.CONTRACT_ID",
+    "context": "Поиск всех типов услуг клиента (SBD 9002, мониторинг 9005, приостановление 9008, блокировка мониторинга 9013, сообщения 9014) по имени. Показывает тип услуги, контракт, IMEI, статусы.",
+    "business_entity": "services",
+    "complexity": 2,
+    "category": "Клиенты"
+  },
+  {
+    "question": "Найди информацию о клиенте по коду 1С 1C00123",
+    "sql": "SELECT DISTINCT c.CUSTOMER_ID, NVL(MAX(CASE WHEN cd.MNEMONIC = 'description' AND cc.CONTACT_DICT_ID = 23 THEN cc.VALUE END), TRIM(NVL(MAX(CASE WHEN cd.MNEMONIC = 'last_name' AND cc.CONTACT_DICT_ID = 11 THEN cc.VALUE END), '') || ' ' || NVL(MAX(CASE WHEN cd.MNEMONIC = 'first_name' AND cc.CONTACT_DICT_ID = 11 THEN cc.VALUE END), '') || ' ' || NVL(MAX(CASE WHEN cd.MNEMONIC = 'middle_name' AND cc.CONTACT_DICT_ID = 11 THEN cc.VALUE END), ''))) AS CUSTOMER_NAME, oi.EXT_ID AS CODE_1C FROM CUSTOMERS c LEFT JOIN BM_CUSTOMER_CONTACT cc ON c.CUSTOMER_ID = cc.CUSTOMER_ID LEFT JOIN BM_CONTACT_DICT cd ON cc.CONTACT_DICT_ID = cd.CONTACT_DICT_ID LEFT JOIN OUTER_IDS oi ON oi.ID = c.CUSTOMER_ID AND UPPER(TRIM(oi.TBL)) = 'CUSTOMERS' WHERE oi.EXT_ID = '1C00123' GROUP BY c.CUSTOMER_ID, oi.EXT_ID",
+    "context": "Поиск информации о клиенте по коду 1С. Возвращает customer_id и имя клиента (организация или ФИО) по коду 1С из OUTER_IDS.",
+    "business_entity": "customers",
+    "complexity": 2,
+    "category": "Клиенты"
+  },
+  {
+    "question": "Покажи все активные SBD сервисы клиента по имени",
+    "sql": "SELECT service_id, contract_id, imei, customer_name, code_1c, agreement_number, order_number, tariff_id, create_date, start_date FROM v_iridium_services_info WHERE UPPER(customer_name) LIKE UPPER('%АК Ямал Салехардский филиал%') AND status = 10 AND contract_id LIKE 'SUB-%' ORDER BY contract_id",
+    "context": "Поиск только активных SBD сервисов (TYPE_ID=9002) клиента по имени. SBD сервисы имеют контракты формата SUB-XXXXX и status = 10 (активный).",
+    "business_entity": "services",
+    "complexity": 2,
+    "category": "Клиенты"
+  },
+  {
+    "question": "Найди все IMEI клиента по имени",
+    "sql": "SELECT DISTINCT imei, contract_id, customer_name, code_1c, agreement_number FROM v_iridium_services_info WHERE UPPER(customer_name) LIKE UPPER('%АК Ямал Салехардский филиал%') AND imei IS NOT NULL ORDER BY imei",
+    "context": "Поиск всех уникальных IMEI устройств клиента по имени. Показывает IMEI, связанные контракты, имя клиента и код 1С.",
+    "business_entity": "services",
+    "complexity": 2,
+    "category": "Клиенты"
+  },
+  {
     "question": "Сумма превышения трафика по организациям за последний месяц",
     "sql": "SELECT organization_name, code_1c, COUNT(DISTINCT service_id) as services, SUM(calculated_overage) as total_overage FROM v_consolidated_report_with_billing WHERE organization_name IS NOT NULL AND bill_month_yyyymm = TO_NUMBER(TO_CHAR(TRUNC(SYSDATE, 'MM'), 'YYYYMM')) GROUP BY organization_name, code_1c ORDER BY total_overage DESC",
     "context": "Агрегация превышения трафика по организациям",

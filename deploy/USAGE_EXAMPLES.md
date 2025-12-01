@@ -125,3 +125,4 @@ SSH_CMD="ssh -p 1194" ./sync_deploy.sh root@82.114.2.2
    source ~/.bashrc
    ```
 
+

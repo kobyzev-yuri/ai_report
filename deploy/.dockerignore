@@ -62,3 +62,4 @@ qdrant_storage/
 # Streamlit cache (будет в volume)
 .streamlit/
 
+

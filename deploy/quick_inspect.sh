@@ -48,3 +48,4 @@ echo ""
 # Запуск полного обследования с определенной SSH командой
 SSH_CMD="$SSH_CMD" ./server_inspection.sh "$SERVER"
 
+

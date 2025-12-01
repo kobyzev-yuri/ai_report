@@ -192,3 +192,4 @@ curl http://localhost:8504/_stcore/health
 - Конфигурация: `kb_billing/rag/ORACLE_CONFIG.md`
 - Быстрый старт: `kb_billing/rag/QUICK_START.md`
 
+

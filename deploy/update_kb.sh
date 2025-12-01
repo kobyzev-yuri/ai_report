@@ -42,3 +42,4 @@ python3 kb_billing/rag/init_kb.py \
 echo ""
 echo "✅ KB обновлена"
 
+

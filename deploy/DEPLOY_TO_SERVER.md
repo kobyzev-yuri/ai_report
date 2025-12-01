@@ -159,3 +159,4 @@ ssh root@82.114.2.2 "curl http://localhost:8504/_stcore/health"
 - Развертывание RAG: `DEPLOYMENT_RAG.md`
 - Резюме: `DEPLOYMENT_SUMMARY.md`
 
+

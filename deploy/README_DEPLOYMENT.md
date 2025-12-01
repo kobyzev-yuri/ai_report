@@ -150,3 +150,4 @@ pip install -r requirements.txt
 - Конфигурация Oracle: `kb_billing/rag/ORACLE_CONFIG.md`
 - Быстрый старт RAG: `kb_billing/rag/QUICK_START.md`
 
+

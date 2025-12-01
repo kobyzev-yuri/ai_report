@@ -195,3 +195,4 @@ pip install qdrant-client sentence-transformers torch transformers
 - Быстрый старт: `kb_billing/rag/QUICK_START.md`
 - Архитектура: `kb_billing/RAG_ARCHITECTURE_RECOMMENDATION.md`
 
+

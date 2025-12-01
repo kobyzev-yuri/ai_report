@@ -58,3 +58,4 @@ curl http://localhost:8504/_stcore/health
 - Резюме: `DEPLOYMENT_SUMMARY.md`
 - Быстрый старт: `README_DEPLOYMENT.md`
 
+

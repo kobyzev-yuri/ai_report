@@ -242,11 +242,9 @@ def show_assistant_tab():
                 st.code(generated_sql, language="sql")
                 
                 # Кнопки для анализа и выполнения
-                col_exec, col_plan, col_stats = st.columns([2, 1, 1])
+                col_exec, col_stats = st.columns([2, 1])
                 with col_exec:
                     execute_btn = st.button("▶️ Выполнить запрос", key="execute_generated", type="primary", use_container_width=True)
-                with col_plan:
-                    plan_btn = st.button("📊 План выполнения", key="explain_plan_generated", use_container_width=True)
                 with col_stats:
                     stats_btn = st.button("📈 Со статистикой", key="execute_with_stats_generated", use_container_width=True)
                 
@@ -254,18 +252,7 @@ def show_assistant_tab():
                 if execute_btn:
                     st.markdown("**Результаты выполнения:**")
                     execute_sql_query(generated_sql)
-                
-                if plan_btn:
-                    with st.spinner("Анализ плана выполнения..."):
-                        plan_text, plan_error = explain_plan(generated_sql)
-                        if plan_text:
-                            st.markdown("**План выполнения (EXPLAIN PLAN):**")
-                            st.code(plan_text, language="text")
-                            st.info("💡 Анализируйте план на наличие FULL TABLE SCAN, отсутствие индексов и высокую стоимость операций")
-                        elif plan_error:
-                            st.warning(f"⚠️ {plan_error}")
-                
-                if stats_btn:
+                elif stats_btn:
                     st.markdown("**Результаты выполнения со статистикой:**")
                     st.info("💡 **Примечание:** Эта функция показывает фактический план выполнения запроса. Она НЕ собирает статистику таблиц для оптимизатора Oracle. Для улучшения плана выполнения используйте кнопку '📊 Собрать статистику' после выполнения запроса.")
                     
@@ -308,10 +295,9 @@ def show_assistant_tab():
                                 mime="text/csv",
                                 key=f"download_generated_with_stats"
                             )
-                
-                # Автоматическое выполнение SQL (если не нажаты другие кнопки)
-                if not (plan_btn or stats_btn):
-                    if execute_btn or 'last_generated_sql' not in st.session_state or st.session_state.last_generated_sql != generated_sql:
+                else:
+                    # Автоматическое выполнение SQL только если не нажата ни одна кнопка
+                    if 'last_generated_sql' not in st.session_state or st.session_state.last_generated_sql != generated_sql:
                         st.markdown("**Результаты выполнения:**")
                         execute_sql_query(generated_sql)
                 else:
@@ -496,11 +482,9 @@ def show_financial_analysis_tab():
             st.code(generated_sql, language="sql")
             
             # Кнопки для анализа и выполнения
-            col_exec, col_plan, col_stats = st.columns([2, 1, 1])
+            col_exec, col_stats = st.columns([2, 1])
             with col_exec:
                 execute_btn = st.button("▶️ Выполнить запрос", key="execute_financial", type="primary", use_container_width=True)
-            with col_plan:
-                plan_btn = st.button("📊 План выполнения", key="explain_plan_financial", use_container_width=True)
             with col_stats:
                 stats_btn = st.button("📈 Со статистикой", key="execute_with_stats_financial", use_container_width=True)
             
@@ -508,18 +492,7 @@ def show_financial_analysis_tab():
             if execute_btn:
                 st.markdown("**Результаты выполнения:**")
                 execute_sql_query(generated_sql, result_key="financial_result")
-            
-            if plan_btn:
-                with st.spinner("Анализ плана выполнения..."):
-                    plan_text, plan_error = explain_plan(generated_sql)
-                    if plan_text:
-                        st.markdown("**План выполнения (EXPLAIN PLAN):**")
-                        st.code(plan_text, language="text")
-                        st.info("💡 Анализируйте план на наличие FULL TABLE SCAN, отсутствие индексов и высокую стоимость операций")
-                    elif plan_error:
-                        st.warning(f"⚠️ {plan_error}")
-            
-            if stats_btn:
+            elif stats_btn:
                 st.markdown("**Результаты выполнения со статистикой:**")
                 
                 # Информация о фактическом плане выполнения
@@ -606,32 +579,8 @@ def show_financial_analysis_tab():
                             key=f"download_financial_with_stats"
                         )
             
-            # Отображение результатов выполнения (если запрос был выполнен)
-            if execute_btn and "financial_result" in st.session_state:
-                result = st.session_state["financial_result"]
-                if "df" in result and result["df"] is not None:
-                    if result["df"].empty:
-                        st.info("ℹ️ Запрос выполнен успешно, но результатов нет")
-                    else:
-                        st.success(f"✅ Запрос выполнен успешно. Найдено записей: {len(result['df'])}")
-                        st.dataframe(result["df"], use_container_width=True, height=400)
-                        
-                        # Кнопка экспорта
-                        csv = result["df"].to_csv(index=False).encode('utf-8')
-                        st.download_button(
-                            label="📥 Скачать CSV",
-                            data=csv,
-                            file_name=f"financial_result_{result['timestamp'].strftime('%Y%m%d_%H%M%S')}.csv",
-                            mime="text/csv",
-                            key=f"download_financial_result_saved"
-                        )
-                elif "error" in result:
-                    st.error(f"❌ Ошибка: {result['error']}")
-                    with st.expander("🔍 Детали ошибки", expanded=False):
-                        st.code(result.get("traceback", ""), language="python")
-                
-                # Анализ результатов (если есть данные)
-                if "financial_result" in st.session_state:
+            # Финансовый анализ результатов (если есть данные)
+            if "financial_result" in st.session_state:
                     result = st.session_state["financial_result"]
                     if "df" in result and result["df"] is not None and not result["df"].empty:
                         df = result["df"]

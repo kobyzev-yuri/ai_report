@@ -352,3 +352,4 @@ embedding = model.encode(text, normalize_embeddings=True)
 - [Multilingual E5 Models](https://huggingface.co/intfloat/multilingual-e5-large)
 - [Sentence Transformers](https://www.sbert.net/)
 
+

@@ -149,3 +149,4 @@ pip list | grep -E "qdrant|sentence-transformers"
 - Рекомендации по архитектуре: `kb_billing/RAG_ARCHITECTURE_RECOMMENDATION.md`
 - Выбор векторной БД: `kb_billing/VECTOR_DB_FINAL_RECOMMENDATION.md`
 
+

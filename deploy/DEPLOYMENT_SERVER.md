@@ -263,3 +263,4 @@ curl http://localhost:6333/collections/kb_billing | jq '.result.points_count'
 - Быстрый старт: `QUICK_DEPLOY.md`
 - Резюме: `DEPLOYMENT_SUMMARY.md`
 
+
