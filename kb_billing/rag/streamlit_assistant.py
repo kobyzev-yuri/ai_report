@@ -151,7 +151,7 @@ def show_assistant_tab():
             
             # Обработка кнопок
             if execute_btn:
-                execute_sql_query(generated_sql, result_key="sql_result")
+                execute_sql_query(generated_sql, result_key="sql_result", check_plan=True)
             elif stats_btn:
                 st.info("💡 **Примечание:** Эта функция показывает фактический план выполнения запроса. Она НЕ собирает статистику таблиц для оптимизатора Oracle. Для улучшения плана выполнения используйте кнопку '📊 Собрать статистику' после выполнения запроса.")
                 
@@ -392,7 +392,7 @@ def show_financial_analysis_tab():
             
             # Обработка кнопок
             if execute_btn:
-                execute_sql_query(generated_sql, result_key="financial_result")
+                execute_sql_query(generated_sql, result_key="financial_result", check_plan=True)
             elif stats_btn:
                 # Информация о фактическом плане выполнения
                 with st.expander("ℹ️ О фактическом плане выполнения", expanded=False):
@@ -649,17 +649,28 @@ def get_connection():
         return None
 
 
-def explain_plan(sql: str):
-    """Выполнение EXPLAIN PLAN для SQL запроса и возврат плана выполнения"""
+def explain_plan(sql: str, return_analysis: bool = False):
+    """Выполнение EXPLAIN PLAN для SQL запроса и возврат плана выполнения
+    
+    Args:
+        sql: SQL запрос для анализа
+        return_analysis: Если True, возвращает также стоимость и предупреждения
+    
+    Returns:
+        Если return_analysis=False: (plan_text, error) - для обратной совместимости
+        Если return_analysis=True: (cost, plan_text, warnings, error) - расширенный анализ
+    """
     try:
         conn = get_connection()
         if not conn:
-            return None, "❌ Не удалось подключиться к базе данных"
+            return None, None, [], "❌ Не удалось подключиться к базе данных"
         
         cursor = conn.cursor()
         
         # Очистка SQL запроса: удаляем точку с запятой в конце и лишние пробелы
         sql_clean = sql.strip().rstrip(';').strip()
+        
+        warnings = []
         
         # Выполнение EXPLAIN PLAN
         try:
@@ -677,10 +688,11 @@ def explain_plan(sql: str):
             explain_sql = f"EXPLAIN PLAN SET STATEMENT_ID = '{statement_id}' FOR {sql_clean}"
             cursor.execute(explain_sql)
             
-            # Пробуем получить план с разными форматами
-            # Сначала пробуем формат SERIAL, который может обойти проблему с длинными именами
+            # Получаем план с форматом ALL для анализа стоимости
             plan_text = None
-            for format_type in ['SERIAL', 'BASIC', 'TYPICAL']:
+            plan_data = None
+            
+            for format_type in ['ALL', 'TYPICAL', 'BASIC', 'SERIAL']:
                 try:
                     plan_query = f"""
                         SELECT * FROM TABLE(DBMS_XPLAN.DISPLAY('PLAN_TABLE', '{statement_id}', '{format_type}'))
@@ -689,22 +701,80 @@ def explain_plan(sql: str):
                     plan_rows = cursor.fetchall()
                     if plan_rows:
                         plan_text = "\n".join([row[0] for row in plan_rows])
+                        plan_data = plan_rows
                         break
                 except Exception as format_error:
-                    # Если формат не поддерживается, пробуем следующий
                     continue
             
             # Если не получилось с statement_id, пробуем без него
             if not plan_text:
                 try:
                     cursor.execute("""
-                        SELECT * FROM TABLE(DBMS_XPLAN.DISPLAY('PLAN_TABLE', NULL, 'SERIAL'))
+                        SELECT * FROM TABLE(DBMS_XPLAN.DISPLAY('PLAN_TABLE', NULL, 'ALL'))
                     """)
                     plan_rows = cursor.fetchall()
                     if plan_rows:
                         plan_text = "\n".join([row[0] for row in plan_rows])
+                        plan_data = plan_rows
                 except:
                     pass
+            
+            # Извлекаем стоимость из плана
+            cost = None
+            if plan_data:
+                # Ищем строку с Cost в плане (обычно в первой строке или в строке с "Plan hash value")
+                for row in plan_data:
+                    row_text = row[0] if isinstance(row, tuple) else str(row)
+                    # Ищем паттерн "Cost (%d)" или "Cost=(%d)"
+                    import re
+                    cost_match = re.search(r'Cost\s*[=:]\s*(\d+)', row_text, re.IGNORECASE)
+                    if cost_match:
+                        cost = int(cost_match.group(1))
+                        break
+                    
+                    # Альтернативный паттерн: "cost (%d)"
+                    cost_match = re.search(r'cost\s*\((\d+)\)', row_text, re.IGNORECASE)
+                    if cost_match:
+                        cost = int(cost_match.group(1))
+                        break
+                
+                # Если не нашли в тексте, пробуем получить из PLAN_TABLE напрямую
+                if cost is None:
+                    try:
+                        cursor.execute(f"""
+                            SELECT COST FROM PLAN_TABLE 
+                            WHERE STATEMENT_ID = '{statement_id}' 
+                            AND COST IS NOT NULL 
+                            ORDER BY COST DESC 
+                            FETCH FIRST 1 ROW ONLY
+                        """)
+                        cost_row = cursor.fetchone()
+                        if cost_row and cost_row[0]:
+                            cost = int(cost_row[0])
+                    except:
+                        pass
+            
+            # Анализ плана на потенциальные проблемы
+            if plan_text:
+                plan_lower = plan_text.lower()
+                
+                # Проверка на TABLE ACCESS FULL (полное сканирование таблиц)
+                full_scan_count = plan_lower.count('table access full')
+                if full_scan_count > 0:
+                    warnings.append(f"⚠️ Обнаружено {full_scan_count} полных сканирований таблиц (TABLE ACCESS FULL) - запрос может быть медленным")
+                
+                # Проверка на CARTESIAN JOIN (декартово произведение)
+                if 'cartesian' in plan_lower:
+                    warnings.append("🚨 ОБНАРУЖЕНО ДЕКАРТОВО ПРОИЗВЕДЕНИЕ (CARTESIAN JOIN) - запрос может выполняться очень долго!")
+                
+                # Проверка на высокую стоимость
+                if cost:
+                    if cost > 1000000:
+                        warnings.append(f"🚨 ОЧЕНЬ ВЫСОКАЯ СТОИМОСТЬ ({cost:,}) - запрос может выполняться несколько часов или дней!")
+                    elif cost > 100000:
+                        warnings.append(f"⚠️ Высокая стоимость ({cost:,}) - запрос может выполняться долго (минуты или часы)")
+                    elif cost > 10000:
+                        warnings.append(f"ℹ️ Средняя стоимость ({cost:,}) - запрос может выполняться несколько секунд или минут")
             
             # Очищаем план после получения
             try:
@@ -715,11 +785,21 @@ def explain_plan(sql: str):
             cursor.close()
             conn.close()
             
-            if plan_text:
-                return plan_text, None
+            # Возвращаем результат в зависимости от режима
+            if return_analysis:
+                return cost, plan_text, warnings, None
             else:
-                return None, "Не удалось получить план выполнения. Возможно, запрос слишком сложный для EXPLAIN PLAN."
-                
+                # Обратная совместимость: возвращаем (plan_text, error)
+                if plan_text:
+                    # Добавляем предупреждения к плану, если есть
+                    if warnings:
+                        plan_text_with_warnings = "\n".join(warnings) + "\n\n" + plan_text
+                    else:
+                        plan_text_with_warnings = plan_text
+                    return plan_text_with_warnings, None
+                else:
+                    return None, "Не удалось получить план выполнения. Возможно, запрос слишком сложный для EXPLAIN PLAN."
+            
         except Exception as e:
             error_msg = str(e)
             error_code = None
@@ -735,12 +815,16 @@ def explain_plan(sql: str):
             if error_code == "12899" or "value too large" in error_msg.lower() or "object_name" in error_msg.lower():
                 cursor.close()
                 conn.close()
-                return None, (
+                error_message = (
                     f"⚠️ EXPLAIN PLAN не может обработать этот запрос из-за длинных имен объектов в PLAN_TABLE.\n\n"
                     f"**Рекомендация:** Используйте кнопку **📈 Со статистикой** для выполнения запроса с анализом производительности.\n"
                     f"Этот метод использует DBMS_XPLAN.DISPLAY_CURSOR и работает для любых запросов, включая сложные CTE.\n\n"
                     f"**Альтернатива:** Упростите запрос или выполните его части отдельно для анализа."
                 )
+                if return_analysis:
+                    return None, None, [], error_message
+                else:
+                    return None, error_message
             
             # Если ошибка связана с синтаксисом или идентификаторами
             if "invalid identifier" in error_msg.lower() or "ora-00904" in error_msg.lower():
@@ -758,20 +842,31 @@ def explain_plan(sql: str):
                         plan_text = "\n".join([row[0] for row in plan_rows])
                         cursor.close()
                         conn.close()
-                        return plan_text, None
+                        if return_analysis:
+                            return None, plan_text, [], None
+                        else:
+                            return plan_text, None
                 except:
                     pass
             
             cursor.close()
             conn.close()
-            return None, (
+            error_message = (
                 f"Ошибка при выполнении EXPLAIN PLAN: {error_msg}\n\n"
                 f"💡 **Совет:** Используйте кнопку **📈 Со статистикой** для анализа производительности запроса.\n"
                 f"Этот метод работает для любых запросов, включая сложные CTE и подзапросы."
             )
+            if return_analysis:
+                return None, None, [], error_message
+            else:
+                return None, error_message
             
     except Exception as e:
-        return None, f"Ошибка подключения: {str(e)}"
+        error_message = f"Ошибка подключения: {str(e)}"
+        if return_analysis:
+            return None, None, [], error_message
+        else:
+            return None, error_message
 
 
 def get_table_stats_date(table_name: str, schema: str = None):
@@ -998,8 +1093,14 @@ def execute_sql_with_stats(sql: str, result_key: str = "sql_result"):
         return None, None, None
 
 
-def execute_sql_query(sql: str, result_key: str = "sql_result"):
-    """Выполнение SQL запроса в Oracle и сохранение результата в session_state (без отображения)"""
+def execute_sql_query(sql: str, result_key: str = "sql_result", check_plan: bool = True):
+    """Выполнение SQL запроса в Oracle и сохранение результата в session_state (без отображения)
+    
+    Args:
+        sql: SQL запрос для выполнения
+        result_key: Ключ для сохранения результата в session_state
+        check_plan: Проверять ли план выполнения перед выполнением запроса
+    """
     try:
         conn = get_connection()
         if not conn:
@@ -1013,26 +1114,96 @@ def execute_sql_query(sql: str, result_key: str = "sql_result"):
         # Очистка SQL запроса: удаляем точку с запятой в конце и лишние пробелы
         sql_clean = sql.strip().rstrip(';').strip()
         
+        # Проверка плана выполнения перед выполнением запроса
+        if check_plan:
+            cost, plan_text, warnings, plan_error = explain_plan(sql_clean, return_analysis=True)
+            
+            # Если есть предупреждения о высокой стоимости, показываем их
+            if warnings:
+                # Проверяем критичность предупреждений
+                critical_warnings = [w for w in warnings if '🚨' in w or 'ОЧЕНЬ ВЫСОКАЯ' in w]
+                high_warnings = [w for w in warnings if '⚠️' in w and '🚨' not in w]
+                
+                if critical_warnings:
+                    # Критические предупреждения - требуем подтверждения
+                    st.error("🚨 **КРИТИЧЕСКОЕ ПРЕДУПРЕЖДЕНИЕ:**")
+                    for warning in critical_warnings:
+                        st.error(warning)
+                    if high_warnings:
+                        for warning in high_warnings:
+                            st.warning(warning)
+                    
+                    st.markdown("---")
+                    st.warning("**Запрос может выполняться очень долго (часы или дни) и блокировать систему!**")
+                    
+                    # Проверяем, было ли уже подтверждение для этого запроса
+                    confirm_key = f"confirm_execute_{result_key}"
+                    if confirm_key not in st.session_state:
+                        col1, col2 = st.columns(2)
+                        with col1:
+                            if st.button("✅ Продолжить выполнение", key=f"confirm_{result_key}", type="primary"):
+                                st.session_state[confirm_key] = True
+                                st.rerun()
+                        with col2:
+                            if st.button("❌ Отменить выполнение", key=f"cancel_{result_key}"):
+                                st.session_state[result_key] = {
+                                    "sql": sql_clean,
+                                    "error": "Выполнение отменено пользователем из-за высокой стоимости запроса",
+                                    "traceback": "",
+                                    "plan_cost": cost,
+                                    "warnings": warnings
+                                }
+                                conn.close()
+                                return
+                        conn.close()
+                        return  # Ждем подтверждения
+                    else:
+                        # Подтверждение получено, продолжаем
+                        st.info("✅ Выполнение подтверждено пользователем")
+                        st.markdown("---")
+                elif high_warnings:
+                    # Высокие предупреждения - показываем, но не блокируем
+                    for warning in high_warnings:
+                        st.warning(warning)
+            
+            # Сохраняем информацию о плане в session_state
+            plan_info = {
+                "cost": cost,
+                "warnings": warnings,
+                "plan_text": plan_text
+            }
+        else:
+            plan_info = None
+        
         # Выполнение запроса
         with st.spinner("Выполнение SQL запроса..."):
             df = pd.read_sql(sql_clean, conn)
             conn.close()
         
         # Сохранение результата в session_state (без отображения)
-        st.session_state[result_key] = {
+        result_data = {
             "sql": sql_clean,
             "df": df,
             "timestamp": pd.Timestamp.now()
         }
+        if plan_info:
+            result_data["plan_info"] = plan_info
+        
+        st.session_state[result_key] = result_data
+        
     except Exception as e:
         error_msg = str(e)
         import traceback
         traceback_str = traceback.format_exc()
         
         # Сохранение ошибки в session_state (без отображения)
-        st.session_state[result_key] = {
+        error_data = {
             "sql": sql_clean if 'sql_clean' in locals() else sql.strip().rstrip(';').strip(),
             "error": error_msg,
             "traceback": traceback_str
         }
+        if 'plan_info' in locals():
+            error_data["plan_info"] = plan_info
+        
+        st.session_state[result_key] = error_data
 
