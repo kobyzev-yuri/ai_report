@@ -17,16 +17,32 @@
   },
   {
     "question": "Покажи превышение трафика за октябрь 2025",
-    "sql": "SELECT imei, contract_id, customer_name, plan_name, total_usage_kb, overage_kb, calculated_overage FROM v_consolidated_report_with_billing WHERE bill_month_yyyymm = 202510 ORDER BY calculated_overage DESC",
-    "context": "Анализ превышения трафика за период",
+    "sql": "SELECT FINANCIAL_PERIOD AS \"Отчетный Период\", IMEI, CONTRACT_ID, COALESCE(ORGANIZATION_NAME, CUSTOMER_NAME, '') AS \"Organization/Person\", CODE_1C, AGREEMENT_NUMBER, PLAN_NAME, TOTAL_USAGE_KB, OVERAGE_KB, CALCULATED_OVERAGE FROM V_CONSOLIDATED_REPORT_WITH_BILLING WHERE FINANCIAL_PERIOD = '2025-10' ORDER BY CALCULATED_OVERAGE DESC",
+    "context": "Анализ превышения трафика за финансовый период. ВАЖНО: Используй FINANCIAL_PERIOD, не BILL_MONTH_YYYMM. Включай IMEI, клиента, договор для понятности отчета.",
+    "business_entity": "overage",
+    "complexity": 2,
+    "category": "Превышение трафика"
+  },
+  {
+    "question": "Покажи превышение трафика в затратах Иридиум за октябрь",
+    "sql": "SELECT FINANCIAL_PERIOD AS \"Отчетный Период\", IMEI, CONTRACT_ID, COALESCE(ORGANIZATION_NAME, CUSTOMER_NAME, '') AS \"Organization/Person\", CODE_1C, AGREEMENT_NUMBER, PLAN_NAME, OVERAGE_KB, CALCULATED_OVERAGE AS \"Превышение трафика ($)\" FROM V_CONSOLIDATED_REPORT_WITH_BILLING WHERE FINANCIAL_PERIOD = '2025-10' AND CALCULATED_OVERAGE > 0 ORDER BY CALCULATED_OVERAGE DESC",
+    "context": "Превышение трафика в затратах Иридиум за финансовый период. ВАЖНО: Используй FINANCIAL_PERIOD, не BILL_MONTH_YYYMM. Включай IMEI, клиента, договор для понятности отчета.",
+    "business_entity": "overage",
+    "complexity": 2,
+    "category": "Превышение трафика"
+  },
+  {
+    "question": "Покажи превышение трафика в затратах Иридиум",
+    "sql": "SELECT FINANCIAL_PERIOD AS \"Отчетный Период\", IMEI, CONTRACT_ID, COALESCE(ORGANIZATION_NAME, CUSTOMER_NAME, '') AS \"Organization/Person\", CODE_1C, AGREEMENT_NUMBER, PLAN_NAME, OVERAGE_KB, CALCULATED_OVERAGE AS \"Превышение трафика ($)\" FROM V_CONSOLIDATED_REPORT_WITH_BILLING WHERE FINANCIAL_PERIOD = TO_CHAR(ADD_MONTHS(TRUNC(SYSDATE, 'MM'), -1), 'YYYY-MM') AND CALCULATED_OVERAGE > 0 ORDER BY CALCULATED_OVERAGE DESC",
+    "context": "Превышение трафика в затратах Иридиум за текущий финансовый период. Если месяц не указан, используй текущий финансовый период.",
     "business_entity": "overage",
     "complexity": 2,
     "category": "Превышение трафика"
   },
   {
     "question": "Сервисы с высоким превышением трафика больше 50 долларов",
-    "sql": "SELECT imei, contract_id, customer_name, code_1c, bill_month, plan_name, total_usage_kb, overage_kb, calculated_overage FROM v_consolidated_report_with_billing WHERE calculated_overage > 50 AND service_status = 1 ORDER BY calculated_overage DESC",
-    "context": "Выявление сервисов с высоким превышением",
+    "sql": "SELECT FINANCIAL_PERIOD AS \"Отчетный Период\", IMEI, CONTRACT_ID, COALESCE(ORGANIZATION_NAME, CUSTOMER_NAME, '') AS \"Organization/Person\", CODE_1C, AGREEMENT_NUMBER, PLAN_NAME, TOTAL_USAGE_KB, OVERAGE_KB, CALCULATED_OVERAGE FROM V_CONSOLIDATED_REPORT_WITH_BILLING WHERE CALCULATED_OVERAGE > 50 AND SERVICE_STATUS = 1 ORDER BY CALCULATED_OVERAGE DESC",
+    "context": "Выявление сервисов с высоким превышением. ВАЖНО: Используй FINANCIAL_PERIOD, не BILL_MONTH. Включай IMEI, клиента, договор.",
     "business_entity": "overage",
     "complexity": 2,
     "category": "Финансовые алерты"
@@ -286,6 +302,590 @@
     "business_entity": "cost_of_goods_sold",
     "complexity": 3,
     "category": "Себестоимость"
+  },
+  {
+    "question": "Покажи расходы по IMEI 300234069606340 за октябрь",
+    "sql": "SELECT FINANCIAL_PERIOD AS \"Отчетный Период\", IMEI, CONTRACT_ID, CUSTOMER_NAME, CODE_1C, CALCULATED_OVERAGE, SPNET_TOTAL_AMOUNT, FEE_ACTIVATION_FEE, FEE_ADVANCE_CHARGE, FEE_ADVANCE_CHARGE_PREVIOUS_MONTH, FEE_CREDIT, FEES_TOTAL, CALCULATED_OVERAGE + SPNET_TOTAL_AMOUNT + FEES_TOTAL AS TOTAL_COST FROM V_CONSOLIDATED_REPORT_WITH_BILLING WHERE IMEI = '300234069606340' AND FINANCIAL_PERIOD = '2025-10' ORDER BY FINANCIAL_PERIOD DESC",
+    "context": "Расходы по IMEI за финансовый период. ВАЖНО: \"за октябрь\" = FINANCIAL_PERIOD = '2025-10', НЕ BILL_MONTH_YYYMM. Показывай только FINANCIAL_PERIOD, не BILL_MONTH.",
+    "business_entity": "expenses",
+    "complexity": 2,
+    "category": "Расходы"
+  },
+  {
+    "question": "Покажи затраты Иридиум по IMEI 300234069606340 за октябрь",
+    "sql": "SELECT se.ICC_ID_IMEI AS IMEI, se.CONTRACT_ID, se.INVOICE_DATE, se.DESCRIPTION, se.AMOUNT, se.PLAN_NAME FROM STECCOM_EXPENSES se WHERE se.ICC_ID_IMEI = '300234069606340' AND TO_CHAR(ADD_MONTHS(se.INVOICE_DATE, -1), 'YYYYMM') = '202510' ORDER BY se.INVOICE_DATE DESC",
+    "context": "Затраты Иридиум (STECCOM_EXPENSES) по IMEI за период",
+    "business_entity": "expenses",
+    "complexity": 2,
+    "category": "Расходы"
+  },
+  {
+    "question": "Покажи превышение трафика по IMEI 300234069606340 за октябрь",
+    "sql": "SELECT IMEI, CONTRACT_ID, CUSTOMER_NAME, BILL_MONTH, OVERAGE_KB, CALCULATED_OVERAGE, SPNET_TOTAL_AMOUNT, TOTAL_USAGE_KB, INCLUDED_KB FROM V_CONSOLIDATED_OVERAGE_REPORT WHERE IMEI = '300234069606340' AND BILL_MONTH = '202510' ORDER BY BILL_MONTH DESC",
+    "context": "Превышение трафика по IMEI за период",
+    "business_entity": "overage",
+    "complexity": 2,
+    "category": "Превышение трафика"
+  },
+  {
+    "question": "Найди расходы по IMEI 300234069606340",
+    "sql": "SELECT IMEI, CONTRACT_ID, CUSTOMER_NAME, BILL_MONTH, CALCULATED_OVERAGE, SPNET_TOTAL_AMOUNT, FEES_TOTAL, CALCULATED_OVERAGE + SPNET_TOTAL_AMOUNT + FEES_TOTAL AS TOTAL_COST FROM V_CONSOLIDATED_REPORT_WITH_BILLING WHERE IMEI = '300234069606340' ORDER BY BILL_MONTH DESC",
+    "context": "Поиск расходов по IMEI из консолидированного отчета",
+    "business_entity": "expenses",
+    "complexity": 2,
+    "category": "Расходы"
+  },
+  {
+    "question": "Покажи доходы по IMEI 300234069606340 за октябрь",
+    "sql": "SELECT PERIOD_YYYYMM AS \"Период\", CONTRACT_ID, IMEI, CUSTOMER_NAME, CODE_1C, REVENUE_SBD_TRAFFIC, REVENUE_SBD_ABON, REVENUE_SBD_TOTAL, REVENUE_SUSPEND_ABON, REVENUE_MONITORING_ABON, REVENUE_MSG_ABON, REVENUE_TOTAL FROM V_REVENUE_FROM_INVOICES WHERE IMEI = '300234069606340' AND PERIOD_YYYYMM = '2025-10' ORDER BY CONTRACT_ID",
+    "context": "Доходы по IMEI за конкретный период из счетов-фактур. ВАЖНО: Для доходов используется PERIOD_YYYYMM (из period_id.start_date), а не FINANCIAL_PERIOD. PERIOD_YYYYMM = '2025-10' для октября.",
+    "business_entity": "revenue",
+    "complexity": 2,
+    "category": "Доходы"
+  },
+  {
+    "question": "Покажи доходы за отчетный период октябрь",
+    "sql": "SELECT PERIOD_YYYYMM AS \"Период\", CONTRACT_ID, IMEI, CUSTOMER_NAME, CODE_1C, REVENUE_SBD_TRAFFIC, REVENUE_SBD_ABON, REVENUE_SBD_TOTAL, REVENUE_SUSPEND_ABON, REVENUE_MONITORING_ABON, REVENUE_MONITORING_BLOCK_ABON, REVENUE_MSG_ABON, REVENUE_TOTAL FROM V_REVENUE_FROM_INVOICES WHERE PERIOD_YYYYMM = '2025-10' ORDER BY CUSTOMER_NAME, IMEI",
+    "context": "Доходы за отчетный период. ВАЖНО: Для доходов (V_REVENUE_FROM_INVOICES) используется PERIOD_YYYYMM (из BM_PERIOD.START_DATE), а не FINANCIAL_PERIOD. \"отчетный период октябрь\" = PERIOD_YYYYMM = '2025-10'.",
+    "business_entity": "revenue",
+    "complexity": 2,
+    "category": "Доходы"
+  },
+  {
+    "question": "Покажи доходы по IMEI за октябрь 2025",
+    "sql": "SELECT IMEI, CONTRACT_ID, CUSTOMER_NAME, CODE_1C, REVENUE_SBD_TRAFFIC, REVENUE_SBD_ABON, REVENUE_SBD_TOTAL, REVENUE_TOTAL FROM V_REVENUE_FROM_INVOICES WHERE PERIOD_YYYYMM = '2025-10' AND IMEI IS NOT NULL ORDER BY REVENUE_TOTAL DESC",
+    "context": "Доходы по всем IMEI за период",
+    "business_entity": "revenue",
+    "complexity": 2,
+    "category": "Доходы"
+  },
+  {
+    "question": "Найди доходы по IMEI 300234069606340",
+    "sql": "SELECT PERIOD_YYYYMM, CONTRACT_ID, IMEI, CUSTOMER_NAME, REVENUE_SBD_TOTAL, REVENUE_TOTAL FROM V_REVENUE_FROM_INVOICES WHERE IMEI = '300234069606340' ORDER BY PERIOD_YYYYMM DESC",
+    "context": "Поиск доходов по IMEI устройства",
+    "business_entity": "revenue",
+    "complexity": 1,
+    "category": "Доходы"
+  },
+  {
+    "question": "Покажи себестоимость по IMEI 300234069606340 за октябрь",
+    "sql": "SELECT IMEI, CONTRACT_ID, CUSTOMER_NAME, BILL_MONTH, REVENUE_TOTAL AS REVENUE, TOTAL_COST_IRIDIUM AS COST, REVENUE_TOTAL - TOTAL_COST_IRIDIUM AS PROFIT, ROUND((TOTAL_COST_IRIDIUM / REVENUE_TOTAL * 100), 2) AS COST_PERCENTAGE FROM V_COST_OF_GOODS_SOLD WHERE IMEI = '300234069606340' AND BILL_MONTH_YYYMM = 202510 AND REVENUE_TOTAL > 0 ORDER BY BILL_MONTH DESC",
+    "context": "Себестоимость как разность доходов и расходов по IMEI за период",
+    "business_entity": "cost_of_goods_sold",
+    "complexity": 2,
+    "category": "Себестоимость"
+  },
+  {
+    "question": "Покажи себестоимость по всем SUB- за октябрь",
+    "sql": "SELECT CONTRACT_ID, IMEI, CUSTOMER_NAME, BILL_MONTH, REVENUE_TOTAL AS REVENUE, TOTAL_COST_IRIDIUM AS COST, REVENUE_TOTAL - TOTAL_COST_IRIDIUM AS PROFIT, ROUND((TOTAL_COST_IRIDIUM / REVENUE_TOTAL * 100), 2) AS COST_PERCENTAGE FROM V_COST_OF_GOODS_SOLD WHERE BILL_MONTH_YYYMM = 202510 AND REVENUE_TOTAL > 0 ORDER BY PROFIT DESC",
+    "context": "Себестоимость как разность доходов и расходов по всем контрактам за период",
+    "business_entity": "cost_of_goods_sold",
+    "complexity": 2,
+    "category": "Себестоимость"
+  },
+  {
+    "question": "Покажи разность доходов и расходов по IMEI за октябрь",
+    "sql": "SELECT IMEI, CONTRACT_ID, CUSTOMER_NAME, BILL_MONTH, REVENUE_TOTAL AS REVENUE, TOTAL_COST_IRIDIUM AS COST, REVENUE_TOTAL - TOTAL_COST_IRIDIUM AS PROFIT FROM V_COST_OF_GOODS_SOLD WHERE BILL_MONTH_YYYMM = 202510 AND IMEI IS NOT NULL AND REVENUE_TOTAL > 0 ORDER BY PROFIT DESC",
+    "context": "Прибыль как разность доходов и расходов по IMEI",
+    "business_entity": "cost_of_goods_sold",
+    "complexity": 2,
+    "category": "Себестоимость"
+  },
+  {
+    "question": "Покажи себестоимость по контракту SUB-12345 за октябрь",
+    "sql": "SELECT CONTRACT_ID, IMEI, CUSTOMER_NAME, BILL_MONTH, REVENUE_TOTAL AS REVENUE, TOTAL_COST_IRIDIUM AS COST, REVENUE_TOTAL - TOTAL_COST_IRIDIUM AS PROFIT, ROUND((TOTAL_COST_IRIDIUM / REVENUE_TOTAL * 100), 2) AS COST_PERCENTAGE FROM V_COST_OF_GOODS_SOLD WHERE CONTRACT_ID = 'SUB-12345' AND BILL_MONTH_YYYMM = 202510 ORDER BY BILL_MONTH DESC",
+    "context": "Себестоимость по контракту как разность доходов и расходов",
+    "business_entity": "cost_of_goods_sold",
+    "complexity": 2,
+    "category": "Себестоимость"
+  },
+  {
+    "question": "Покажи трафик по IMEI 300234069606340 за октябрь",
+    "sql": "SELECT a.VSAT AS IMEI, s.LOGIN AS CONTRACT_ID, TO_CHAR(p.START_DATE, 'YYYY-MM') AS PERIOD_YYYYMM, SUM(a.TRAF) AS TRAFFIC, SUM(a.TOTAL_TRAF) AS TOTAL_TRAFFIC, SUM(a.CBYTE) AS TRAFFIC_BYTES, SUM(a.MONEY) AS REVENUE FROM ANALYTICS a JOIN SERVICES s ON a.SERVICE_ID = s.SERVICE_ID LEFT JOIN BM_PERIOD p ON a.PERIOD_ID = p.PERIOD_ID WHERE a.VSAT = '300234069606340' AND s.TYPE_ID = 9002 AND TO_CHAR(p.START_DATE, 'YYYY-MM') = '2025-10' AND a.INVOICE_ITEM_ID IS NOT NULL GROUP BY a.VSAT, s.LOGIN, TO_CHAR(p.START_DATE, 'YYYY-MM') ORDER BY TO_CHAR(p.START_DATE, 'YYYY-MM') DESC",
+    "context": "Трафик из ANALYTICS по IMEI за период",
+    "business_entity": "traffic",
+    "complexity": 2,
+    "category": "Трафик"
+  },
+  {
+    "question": "Покажи трафик по зонам за октябрь",
+    "sql": "SELECT z.DESCRIPTION AS ZONE_NAME, z.TRAFFIC_TYPE, a.ZONE_ID, SUM(a.TRAF) AS TRAFFIC, SUM(a.TOTAL_TRAF) AS TOTAL_TRAFFIC, SUM(a.MONEY) AS REVENUE, COUNT(*) AS RECORDS FROM ANALYTICS a LEFT JOIN BM_ZONE z ON a.ZONE_ID = z.ZONE_ID JOIN SERVICES s ON a.SERVICE_ID = s.SERVICE_ID LEFT JOIN BM_PERIOD p ON a.PERIOD_ID = p.PERIOD_ID WHERE s.TYPE_ID = 9002 AND TO_CHAR(p.START_DATE, 'YYYY-MM') = '2025-10' AND a.INVOICE_ITEM_ID IS NOT NULL AND a.ZONE_ID IS NOT NULL GROUP BY z.DESCRIPTION, z.TRAFFIC_TYPE, a.ZONE_ID ORDER BY TRAFFIC DESC",
+    "context": "Трафик из ANALYTICS по зонам за период",
+    "business_entity": "traffic",
+    "complexity": 2,
+    "category": "Трафик"
+  },
+  {
+    "question": "Покажи трафик по IMEI 300234069606340 по зонам за октябрь",
+    "sql": "SELECT a.VSAT AS IMEI, z.DESCRIPTION AS ZONE_NAME, z.TRAFFIC_TYPE, a.ZONE_ID, SUM(a.TRAF) AS TRAFFIC, SUM(a.TOTAL_TRAF) AS TOTAL_TRAFFIC, SUM(a.MONEY) AS REVENUE FROM ANALYTICS a JOIN SERVICES s ON a.SERVICE_ID = s.SERVICE_ID LEFT JOIN BM_ZONE z ON a.ZONE_ID = z.ZONE_ID LEFT JOIN BM_PERIOD p ON a.PERIOD_ID = p.PERIOD_ID WHERE a.VSAT = '300234069606340' AND s.TYPE_ID = 9002 AND TO_CHAR(p.START_DATE, 'YYYY-MM') = '2025-10' AND a.INVOICE_ITEM_ID IS NOT NULL AND a.ZONE_ID IS NOT NULL GROUP BY a.VSAT, z.DESCRIPTION, z.TRAFFIC_TYPE, a.ZONE_ID ORDER BY TRAFFIC DESC",
+    "context": "Трафик из ANALYTICS по IMEI и зонам за период",
+    "business_entity": "traffic",
+    "complexity": 3,
+    "category": "Трафик"
+  },
+  {
+    "question": "Найди трафик по IMEI 300234069606340",
+    "sql": "SELECT a.VSAT AS IMEI, s.LOGIN AS CONTRACT_ID, TO_CHAR(p.START_DATE, 'YYYY-MM') AS PERIOD_YYYYMM, SUM(a.TRAF) AS TRAFFIC, SUM(a.TOTAL_TRAF) AS TOTAL_TRAFFIC, SUM(a.CBYTE) AS TRAFFIC_BYTES FROM ANALYTICS a JOIN SERVICES s ON a.SERVICE_ID = s.SERVICE_ID LEFT JOIN BM_PERIOD p ON a.PERIOD_ID = p.PERIOD_ID WHERE a.VSAT = '300234069606340' AND s.TYPE_ID = 9002 AND a.INVOICE_ITEM_ID IS NOT NULL GROUP BY a.VSAT, s.LOGIN, TO_CHAR(p.START_DATE, 'YYYY-MM') ORDER BY TO_CHAR(p.START_DATE, 'YYYY-MM') DESC",
+    "context": "Поиск трафика из ANALYTICS по IMEI",
+    "business_entity": "traffic",
+    "complexity": 2,
+    "category": "Трафик"
+  },
+  {
+    "question": "Покажи трафик по всем зонам за период",
+    "sql": "SELECT z.DESCRIPTION AS ZONE_NAME, z.TRAFFIC_TYPE, z.IS_INCOMING, a.ZONE_ID, SUM(a.TRAF) AS TRAFFIC, SUM(a.TOTAL_TRAF) AS TOTAL_TRAFFIC, SUM(a.MONEY) AS REVENUE, COUNT(DISTINCT a.VSAT) AS IMEI_COUNT FROM ANALYTICS a LEFT JOIN BM_ZONE z ON a.ZONE_ID = z.ZONE_ID JOIN SERVICES s ON a.SERVICE_ID = s.SERVICE_ID LEFT JOIN BM_PERIOD p ON a.PERIOD_ID = p.PERIOD_ID WHERE s.TYPE_ID = 9002 AND TO_CHAR(p.START_DATE, 'YYYY-MM') = '2025-10' AND a.INVOICE_ITEM_ID IS NOT NULL AND a.ZONE_ID IS NOT NULL GROUP BY z.DESCRIPTION, z.TRAFFIC_TYPE, z.IS_INCOMING, a.ZONE_ID ORDER BY TRAFFIC DESC",
+    "context": "Трафик из ANALYTICS по всем зонам с детализацией",
+    "business_entity": "traffic",
+    "complexity": 3,
+    "category": "Трафик"
+  },
+  {
+    "question": "Покажи трафик SBD по зонам за октябрь",
+    "sql": "SELECT z.DESCRIPTION AS ZONE_NAME, z.TRAFFIC_TYPE, rt.MNEMONIC AS RESOURCE_TYPE, a.ZONE_ID, SUM(a.TRAF) AS TRAFFIC, SUM(a.TOTAL_TRAF) AS TOTAL_TRAFFIC, SUM(a.MONEY) AS REVENUE FROM ANALYTICS a JOIN SERVICES s ON a.SERVICE_ID = s.SERVICE_ID LEFT JOIN BM_ZONE z ON a.ZONE_ID = z.ZONE_ID LEFT JOIN BM_RESOURCE_TYPE rt ON a.RESOURCE_TYPE_ID = rt.RESOURCE_TYPE_ID LEFT JOIN BM_PERIOD p ON a.PERIOD_ID = p.PERIOD_ID WHERE s.TYPE_ID = 9002 AND TO_CHAR(p.START_DATE, 'YYYY-MM') = '2025-10' AND a.INVOICE_ITEM_ID IS NOT NULL AND (rt.MNEMONIC LIKE '%traffic%' OR rt.MNEMONIC LIKE '%sbd%') AND a.ZONE_ID IS NOT NULL GROUP BY z.DESCRIPTION, z.TRAFFIC_TYPE, rt.MNEMONIC, a.ZONE_ID ORDER BY TRAFFIC DESC",
+    "context": "Трафик SBD из ANALYTICS по зонам с типом ресурса",
+    "business_entity": "traffic",
+    "complexity": 3,
+    "category": "Трафик"
+  },
+  {
+    "question": "Покажи трафик превышения по периодам",
+    "sql": "SELECT BILL_MONTH, COUNT(DISTINCT IMEI) AS IMEI_COUNT, COUNT(DISTINCT CONTRACT_ID) AS CONTRACT_COUNT, SUM(OVERAGE_KB) AS TOTAL_OVERAGE_KB, SUM(CALCULATED_OVERAGE) AS TOTAL_OVERAGE_CHARGE, SUM(SPNET_TOTAL_AMOUNT) AS TOTAL_SPNET_AMOUNT FROM V_CONSOLIDATED_OVERAGE_REPORT WHERE OVERAGE_KB > 0 GROUP BY BILL_MONTH ORDER BY BILL_MONTH DESC",
+    "context": "Трафик превышения по периодам из консолидированного отчета",
+    "business_entity": "overage",
+    "complexity": 2,
+    "category": "Превышение трафика"
+  },
+  {
+    "question": "Покажи трафик превышения по IMEI 300234069606340 по периодам",
+    "sql": "SELECT IMEI, CONTRACT_ID, BILL_MONTH, OVERAGE_KB, CALCULATED_OVERAGE, SPNET_TOTAL_AMOUNT, TOTAL_USAGE_KB, INCLUDED_KB FROM V_CONSOLIDATED_OVERAGE_REPORT WHERE IMEI = '300234069606340' AND OVERAGE_KB > 0 ORDER BY BILL_MONTH DESC",
+    "context": "Трафик превышения по IMEI по периодам",
+    "business_entity": "overage",
+    "complexity": 2,
+    "category": "Превышение трафика"
+  },
+  {
+    "question": "Покажи доходы по периодам в счетах-фактурах",
+    "sql": "SELECT PERIOD_YYYYMM, COUNT(DISTINCT CONTRACT_ID) AS CONTRACT_COUNT, COUNT(DISTINCT IMEI) AS IMEI_COUNT, SUM(REVENUE_SBD_TRAFFIC) AS REVENUE_TRAFFIC, SUM(REVENUE_SBD_ABON) AS REVENUE_ABON, SUM(REVENUE_SBD_TOTAL) AS REVENUE_SBD, SUM(REVENUE_TOTAL) AS REVENUE_TOTAL FROM V_REVENUE_FROM_INVOICES GROUP BY PERIOD_YYYYMM ORDER BY PERIOD_YYYYMM DESC",
+    "context": "Доходы по периодам из счетов-фактур (V_REVENUE_FROM_INVOICES)",
+    "business_entity": "revenue",
+    "complexity": 2,
+    "category": "Доходы"
+  },
+  {
+    "question": "Покажи доходы по периодам в analytics",
+    "sql": "SELECT TO_CHAR(p.START_DATE, 'YYYY-MM') AS PERIOD_YYYYMM, COUNT(DISTINCT s.LOGIN) AS CONTRACT_COUNT, COUNT(DISTINCT a.VSAT) AS IMEI_COUNT, SUM(a.MONEY) AS REVENUE_TOTAL, COUNT(*) AS RECORDS_COUNT FROM ANALYTICS a JOIN SERVICES s ON a.SERVICE_ID = s.SERVICE_ID LEFT JOIN BM_PERIOD p ON a.PERIOD_ID = p.PERIOD_ID WHERE s.TYPE_ID = 9002 AND a.INVOICE_ITEM_ID IS NOT NULL GROUP BY TO_CHAR(p.START_DATE, 'YYYY-MM') ORDER BY TO_CHAR(p.START_DATE, 'YYYY-MM') DESC",
+    "context": "Доходы по периодам из таблицы ANALYTICS",
+    "business_entity": "revenue",
+    "complexity": 2,
+    "category": "Доходы"
+  },
+  {
+    "question": "Покажи доходы по IMEI 300234069606340 по периодам в счетах-фактурах",
+    "sql": "SELECT PERIOD_YYYYMM, IMEI, CONTRACT_ID, CUSTOMER_NAME, REVENUE_SBD_TRAFFIC, REVENUE_SBD_ABON, REVENUE_SBD_TOTAL, REVENUE_TOTAL FROM V_REVENUE_FROM_INVOICES WHERE IMEI = '300234069606340' ORDER BY PERIOD_YYYYMM DESC",
+    "context": "Доходы по IMEI по периодам из счетов-фактур",
+    "business_entity": "revenue",
+    "complexity": 2,
+    "category": "Доходы"
+  },
+  {
+    "question": "Покажи доходы по IMEI 300234069606340 по периодам в analytics",
+    "sql": "SELECT TO_CHAR(p.START_DATE, 'YYYY-MM') AS PERIOD_YYYYMM, a.VSAT AS IMEI, s.LOGIN AS CONTRACT_ID, SUM(a.MONEY) AS REVENUE_TOTAL, COUNT(*) AS RECORDS_COUNT FROM ANALYTICS a JOIN SERVICES s ON a.SERVICE_ID = s.SERVICE_ID LEFT JOIN BM_PERIOD p ON a.PERIOD_ID = p.PERIOD_ID WHERE a.VSAT = '300234069606340' AND s.TYPE_ID = 9002 AND a.INVOICE_ITEM_ID IS NOT NULL GROUP BY TO_CHAR(p.START_DATE, 'YYYY-MM'), a.VSAT, s.LOGIN ORDER BY TO_CHAR(p.START_DATE, 'YYYY-MM') DESC",
+    "context": "Доходы по IMEI по периодам из таблицы ANALYTICS",
+    "business_entity": "revenue",
+    "complexity": 2,
+    "category": "Доходы"
+  },
+  {
+    "question": "Покажи доходы за октябрь в счетах-фактурах",
+    "sql": "SELECT PERIOD_YYYYMM, CONTRACT_ID, IMEI, CUSTOMER_NAME, REVENUE_SBD_TRAFFIC, REVENUE_SBD_ABON, REVENUE_SBD_TOTAL, REVENUE_TOTAL FROM V_REVENUE_FROM_INVOICES WHERE PERIOD_YYYYMM = '2025-10' ORDER BY REVENUE_TOTAL DESC",
+    "context": "Доходы за период из счетов-фактур",
+    "business_entity": "revenue",
+    "complexity": 2,
+    "category": "Доходы"
+  },
+  {
+    "question": "Покажи доходы за октябрь в analytics",
+    "sql": "SELECT TO_CHAR(p.START_DATE, 'YYYY-MM') AS PERIOD_YYYYMM, s.LOGIN AS CONTRACT_ID, a.VSAT AS IMEI, SUM(a.MONEY) AS REVENUE_TOTAL, COUNT(*) AS RECORDS_COUNT FROM ANALYTICS a JOIN SERVICES s ON a.SERVICE_ID = s.SERVICE_ID LEFT JOIN BM_PERIOD p ON a.PERIOD_ID = p.PERIOD_ID WHERE s.TYPE_ID = 9002 AND TO_CHAR(p.START_DATE, 'YYYY-MM') = '2025-10' AND a.INVOICE_ITEM_ID IS NOT NULL GROUP BY TO_CHAR(p.START_DATE, 'YYYY-MM'), s.LOGIN, a.VSAT ORDER BY REVENUE_TOTAL DESC",
+    "context": "Доходы за период из таблицы ANALYTICS",
+    "business_entity": "revenue",
+    "complexity": 2,
+    "category": "Доходы"
+  },
+  {
+    "question": "Сравни доходы по периодам в счетах-фактурах и в analytics",
+    "sql": "SELECT v.PERIOD_YYYYMM, SUM(v.REVENUE_TOTAL) AS REVENUE_INVOICES, SUM(a.MONEY) AS REVENUE_ANALYTICS, SUM(v.REVENUE_TOTAL) - SUM(a.MONEY) AS DIFFERENCE FROM V_REVENUE_FROM_INVOICES v FULL OUTER JOIN (SELECT TO_CHAR(p.START_DATE, 'YYYY-MM') AS PERIOD_YYYYMM, a.MONEY FROM ANALYTICS a JOIN SERVICES s ON a.SERVICE_ID = s.SERVICE_ID LEFT JOIN BM_PERIOD p ON a.PERIOD_ID = p.PERIOD_ID WHERE s.TYPE_ID = 9002 AND a.INVOICE_ITEM_ID IS NOT NULL) a ON v.PERIOD_YYYYMM = a.PERIOD_YYYYMM GROUP BY v.PERIOD_YYYYMM ORDER BY v.PERIOD_YYYYMM DESC",
+    "context": "Сравнение доходов по периодам между счетами-фактурами и ANALYTICS",
+    "business_entity": "revenue",
+    "complexity": 4,
+    "category": "Доходы"
+  },
+  {
+    "question": "Покажи трафик превышения за октябрь",
+    "sql": "SELECT IMEI, CONTRACT_ID, BILL_MONTH, OVERAGE_KB, CALCULATED_OVERAGE, SPNET_TOTAL_AMOUNT, TOTAL_USAGE_KB, INCLUDED_KB FROM V_CONSOLIDATED_OVERAGE_REPORT WHERE BILL_MONTH = '202510' AND OVERAGE_KB > 0 ORDER BY OVERAGE_KB DESC",
+    "context": "Трафик превышения за конкретный период",
+    "business_entity": "overage",
+    "complexity": 2,
+    "category": "Превышение трафика"
+  },
+  {
+    "question": "Покажи доходы по всем периодам в счетах-фактурах",
+    "sql": "SELECT PERIOD_YYYYMM, COUNT(DISTINCT CONTRACT_ID) AS CONTRACT_COUNT, SUM(REVENUE_TOTAL) AS REVENUE_TOTAL FROM V_REVENUE_FROM_INVOICES GROUP BY PERIOD_YYYYMM ORDER BY PERIOD_YYYYMM DESC",
+    "context": "Доходы по всем периодам из счетов-фактур",
+    "business_entity": "revenue",
+    "complexity": 2,
+    "category": "Доходы"
+  },
+  {
+    "question": "Покажи доходы по всем периодам в analytics",
+    "sql": "SELECT TO_CHAR(p.START_DATE, 'YYYY-MM') AS PERIOD_YYYYMM, COUNT(DISTINCT s.LOGIN) AS CONTRACT_COUNT, SUM(a.MONEY) AS REVENUE_TOTAL FROM ANALYTICS a JOIN SERVICES s ON a.SERVICE_ID = s.SERVICE_ID LEFT JOIN BM_PERIOD p ON a.PERIOD_ID = p.PERIOD_ID WHERE s.TYPE_ID = 9002 AND a.INVOICE_ITEM_ID IS NOT NULL GROUP BY TO_CHAR(p.START_DATE, 'YYYY-MM') ORDER BY TO_CHAR(p.START_DATE, 'YYYY-MM') DESC",
+    "context": "Доходы по всем периодам из таблицы ANALYTICS",
+    "business_entity": "revenue",
+    "complexity": 2,
+    "category": "Доходы"
+  },
+  {
+    "question": "Покажи доходы суммарно по клиентам за октябрь",
+    "sql": "SELECT CUSTOMER_NAME, CODE_1C, COUNT(DISTINCT CONTRACT_ID) AS CONTRACT_COUNT, COUNT(DISTINCT IMEI) AS IMEI_COUNT, SUM(REVENUE_SBD_TRAFFIC) AS REVENUE_TRAFFIC, SUM(REVENUE_SBD_ABON) AS REVENUE_ABON, SUM(REVENUE_SBD_TOTAL) AS REVENUE_SBD, SUM(REVENUE_TOTAL) AS REVENUE_TOTAL FROM V_REVENUE_FROM_INVOICES WHERE PERIOD_YYYYMM = '2025-10' GROUP BY CUSTOMER_NAME, CODE_1C ORDER BY REVENUE_TOTAL DESC",
+    "context": "Доходы суммарно по клиентам из счетов-фактур",
+    "business_entity": "revenue",
+    "complexity": 2,
+    "category": "Доходы"
+  },
+  {
+    "question": "Покажи доходы суммарно по договорам за октябрь",
+    "sql": "SELECT CONTRACT_ID, AGREEMENT_NUMBER, CUSTOMER_NAME, CODE_1C, COUNT(DISTINCT IMEI) AS IMEI_COUNT, SUM(REVENUE_SBD_TRAFFIC) AS REVENUE_TRAFFIC, SUM(REVENUE_SBD_ABON) AS REVENUE_ABON, SUM(REVENUE_SBD_TOTAL) AS REVENUE_SBD, SUM(REVENUE_TOTAL) AS REVENUE_TOTAL FROM V_REVENUE_FROM_INVOICES WHERE PERIOD_YYYYMM = '2025-10' GROUP BY CONTRACT_ID, AGREEMENT_NUMBER, CUSTOMER_NAME, CODE_1C ORDER BY REVENUE_TOTAL DESC",
+    "context": "Доходы суммарно по договорам из счетов-фактур",
+    "business_entity": "revenue",
+    "complexity": 2,
+    "category": "Доходы"
+  },
+  {
+    "question": "Покажи доходы суммарно по клиентам в analytics за октябрь",
+    "sql": "SELECT ci.CUSTOMER_NAME, ci.CODE_1C, COUNT(DISTINCT s.LOGIN) AS CONTRACT_COUNT, COUNT(DISTINCT a.VSAT) AS IMEI_COUNT, SUM(a.MONEY) AS REVENUE_TOTAL FROM ANALYTICS a JOIN SERVICES s ON a.SERVICE_ID = s.SERVICE_ID LEFT JOIN V_IRIDIUM_SERVICES_INFO ci ON s.LOGIN = ci.CONTRACT_ID LEFT JOIN BM_PERIOD p ON a.PERIOD_ID = p.PERIOD_ID WHERE s.TYPE_ID = 9002 AND TO_CHAR(p.START_DATE, 'YYYY-MM') = '2025-10' AND a.INVOICE_ITEM_ID IS NOT NULL GROUP BY ci.CUSTOMER_NAME, ci.CODE_1C ORDER BY REVENUE_TOTAL DESC",
+    "context": "Доходы суммарно по клиентам из таблицы ANALYTICS",
+    "business_entity": "revenue",
+    "complexity": 3,
+    "category": "Доходы"
+  },
+  {
+    "question": "Покажи доходы суммарно по договорам в analytics за октябрь",
+    "sql": "SELECT s.LOGIN AS CONTRACT_ID, ci.AGREEMENT_NUMBER, ci.CUSTOMER_NAME, ci.CODE_1C, COUNT(DISTINCT a.VSAT) AS IMEI_COUNT, SUM(a.MONEY) AS REVENUE_TOTAL FROM ANALYTICS a JOIN SERVICES s ON a.SERVICE_ID = s.SERVICE_ID LEFT JOIN V_IRIDIUM_SERVICES_INFO ci ON s.LOGIN = ci.CONTRACT_ID LEFT JOIN BM_PERIOD p ON a.PERIOD_ID = p.PERIOD_ID WHERE s.TYPE_ID = 9002 AND TO_CHAR(p.START_DATE, 'YYYY-MM') = '2025-10' AND a.INVOICE_ITEM_ID IS NOT NULL GROUP BY s.LOGIN, ci.AGREEMENT_NUMBER, ci.CUSTOMER_NAME, ci.CODE_1C ORDER BY REVENUE_TOTAL DESC",
+    "context": "Доходы суммарно по договорам из таблицы ANALYTICS",
+    "business_entity": "revenue",
+    "complexity": 3,
+    "category": "Доходы"
+  },
+  {
+    "question": "Покажи трафик превышения суммарно по клиентам за октябрь",
+    "sql": "SELECT cor.CUSTOMER_NAME, cor.CODE_1C, COUNT(DISTINCT cor.CONTRACT_ID) AS CONTRACT_COUNT, COUNT(DISTINCT cor.IMEI) AS IMEI_COUNT, SUM(cor.OVERAGE_KB) AS TOTAL_OVERAGE_KB, SUM(cor.CALCULATED_OVERAGE) AS TOTAL_OVERAGE_CHARGE, SUM(cor.SPNET_TOTAL_AMOUNT) AS TOTAL_SPNET_AMOUNT FROM V_CONSOLIDATED_OVERAGE_REPORT cor WHERE cor.BILL_MONTH = '202510' AND cor.OVERAGE_KB > 0 GROUP BY cor.CUSTOMER_NAME, cor.CODE_1C ORDER BY TOTAL_OVERAGE_KB DESC",
+    "context": "Трафик превышения суммарно по клиентам",
+    "business_entity": "overage",
+    "complexity": 2,
+    "category": "Превышение трафика"
+  },
+  {
+    "question": "Покажи трафик превышения суммарно по договорам за октябрь",
+    "sql": "SELECT CONTRACT_ID, CUSTOMER_NAME, CODE_1C, COUNT(DISTINCT IMEI) AS IMEI_COUNT, SUM(OVERAGE_KB) AS TOTAL_OVERAGE_KB, SUM(CALCULATED_OVERAGE) AS TOTAL_OVERAGE_CHARGE, SUM(SPNET_TOTAL_AMOUNT) AS TOTAL_SPNET_AMOUNT FROM V_CONSOLIDATED_OVERAGE_REPORT WHERE BILL_MONTH = '202510' AND OVERAGE_KB > 0 GROUP BY CONTRACT_ID, CUSTOMER_NAME, CODE_1C ORDER BY TOTAL_OVERAGE_KB DESC",
+    "context": "Трафик превышения суммарно по договорам",
+    "business_entity": "overage",
+    "complexity": 2,
+    "category": "Превышение трафика"
+  },
+  {
+    "question": "Покажи трафик суммарно по клиентам за октябрь",
+    "sql": "SELECT ci.CUSTOMER_NAME, ci.CODE_1C, COUNT(DISTINCT s.LOGIN) AS CONTRACT_COUNT, COUNT(DISTINCT a.VSAT) AS IMEI_COUNT, SUM(a.TRAF) AS TRAFFIC, SUM(a.TOTAL_TRAF) AS TOTAL_TRAFFIC, SUM(a.CBYTE) AS TRAFFIC_BYTES FROM ANALYTICS a JOIN SERVICES s ON a.SERVICE_ID = s.SERVICE_ID LEFT JOIN V_IRIDIUM_SERVICES_INFO ci ON s.LOGIN = ci.CONTRACT_ID LEFT JOIN BM_PERIOD p ON a.PERIOD_ID = p.PERIOD_ID WHERE s.TYPE_ID = 9002 AND TO_CHAR(p.START_DATE, 'YYYY-MM') = '2025-10' AND a.INVOICE_ITEM_ID IS NOT NULL GROUP BY ci.CUSTOMER_NAME, ci.CODE_1C ORDER BY TRAFFIC DESC",
+    "context": "Трафик суммарно по клиентам из ANALYTICS",
+    "business_entity": "traffic",
+    "complexity": 3,
+    "category": "Трафик"
+  },
+  {
+    "question": "Покажи трафик суммарно по договорам за октябрь",
+    "sql": "SELECT s.LOGIN AS CONTRACT_ID, ci.CUSTOMER_NAME, ci.CODE_1C, ci.AGREEMENT_NUMBER, COUNT(DISTINCT a.VSAT) AS IMEI_COUNT, SUM(a.TRAF) AS TRAFFIC, SUM(a.TOTAL_TRAF) AS TOTAL_TRAFFIC, SUM(a.CBYTE) AS TRAFFIC_BYTES FROM ANALYTICS a JOIN SERVICES s ON a.SERVICE_ID = s.SERVICE_ID LEFT JOIN V_IRIDIUM_SERVICES_INFO ci ON s.LOGIN = ci.CONTRACT_ID LEFT JOIN BM_PERIOD p ON a.PERIOD_ID = p.PERIOD_ID WHERE s.TYPE_ID = 9002 AND TO_CHAR(p.START_DATE, 'YYYY-MM') = '2025-10' AND a.INVOICE_ITEM_ID IS NOT NULL GROUP BY s.LOGIN, ci.CUSTOMER_NAME, ci.CODE_1C, ci.AGREEMENT_NUMBER ORDER BY TRAFFIC DESC",
+    "context": "Трафик суммарно по договорам из ANALYTICS. ВАЖНО: В таблице BM_PERIOD нет колонки PERIOD_YYYYMM. Для фильтрации по периоду используй TO_CHAR(p.START_DATE, 'YYYY-MM') = '2025-10' в WHERE. Колонка START_DATE содержит дату начала периода.",
+    "business_entity": "traffic",
+    "complexity": 3,
+    "category": "Трафик"
+  },
+  {
+    "question": "Покажи клиента с максимальным трафиком за октябрь",
+    "sql": "SELECT ci.CUSTOMER_NAME, ci.CODE_1C, SUM(a.TRAF) AS TOTAL_TRAFFIC FROM ANALYTICS a JOIN SERVICES s ON a.SERVICE_ID = s.SERVICE_ID LEFT JOIN V_IRIDIUM_SERVICES_INFO ci ON s.LOGIN = ci.CONTRACT_ID LEFT JOIN BM_PERIOD p ON a.PERIOD_ID = p.PERIOD_ID WHERE s.TYPE_ID = 9002 AND TO_CHAR(p.START_DATE, 'YYYY-MM') = '2025-10' AND a.INVOICE_ITEM_ID IS NOT NULL GROUP BY ci.CUSTOMER_NAME, ci.CODE_1C ORDER BY TOTAL_TRAFFIC DESC FETCH FIRST 1 ROW ONLY",
+    "context": "Клиент с максимальным трафиком за период. ВАЖНО: В таблице BM_PERIOD нет колонки PERIOD_YYYYMM. Для фильтрации по периоду используй TO_CHAR(p.START_DATE, 'YYYY-MM') = '2025-10' в WHERE. Колонка START_DATE содержит дату начала периода.",
+    "business_entity": "traffic",
+    "complexity": 2,
+    "category": "Трафик"
+  },
+  {
+    "question": "Покажи себестоимость суммарно по клиентам за октябрь",
+    "sql": "SELECT CUSTOMER_NAME, CODE_1C, COUNT(DISTINCT CONTRACT_ID) AS CONTRACT_COUNT, COUNT(DISTINCT IMEI) AS IMEI_COUNT, SUM(REVENUE_TOTAL) AS REVENUE, SUM(TOTAL_COST_IRIDIUM) AS COST, SUM(REVENUE_TOTAL - TOTAL_COST_IRIDIUM) AS PROFIT, ROUND(AVG((TOTAL_COST_IRIDIUM / REVENUE_TOTAL * 100)), 2) AS AVG_COST_PERCENTAGE FROM V_COST_OF_GOODS_SOLD WHERE BILL_MONTH_YYYMM = 202510 AND REVENUE_TOTAL > 0 GROUP BY CUSTOMER_NAME, CODE_1C ORDER BY REVENUE DESC",
+    "context": "Себестоимость суммарно по клиентам",
+    "business_entity": "cost_of_goods_sold",
+    "complexity": 3,
+    "category": "Себестоимость"
+  },
+  {
+    "question": "Покажи себестоимость суммарно по договорам за октябрь",
+    "sql": "SELECT CONTRACT_ID, CUSTOMER_NAME, CODE_1C, AGREEMENT_NUMBER, COUNT(DISTINCT IMEI) AS IMEI_COUNT, SUM(REVENUE_TOTAL) AS REVENUE, SUM(TOTAL_COST_IRIDIUM) AS COST, SUM(REVENUE_TOTAL - TOTAL_COST_IRIDIUM) AS PROFIT, ROUND(AVG((TOTAL_COST_IRIDIUM / REVENUE_TOTAL * 100)), 2) AS AVG_COST_PERCENTAGE FROM V_COST_OF_GOODS_SOLD WHERE BILL_MONTH_YYYMM = 202510 AND REVENUE_TOTAL > 0 GROUP BY CONTRACT_ID, CUSTOMER_NAME, CODE_1C, AGREEMENT_NUMBER ORDER BY REVENUE DESC",
+    "context": "Себестоимость суммарно по договорам",
+    "business_entity": "cost_of_goods_sold",
+    "complexity": 3,
+    "category": "Себестоимость"
+  },
+  {
+    "question": "Покажи доходы суммарно по клиентам по периодам",
+    "sql": "SELECT PERIOD_YYYYMM, CUSTOMER_NAME, CODE_1C, COUNT(DISTINCT CONTRACT_ID) AS CONTRACT_COUNT, SUM(REVENUE_TOTAL) AS REVENUE_TOTAL FROM V_REVENUE_FROM_INVOICES GROUP BY PERIOD_YYYYMM, CUSTOMER_NAME, CODE_1C ORDER BY PERIOD_YYYYMM DESC, REVENUE_TOTAL DESC",
+    "context": "Доходы суммарно по клиентам по периодам из счетов-фактур",
+    "business_entity": "revenue",
+    "complexity": 3,
+    "category": "Доходы"
+  },
+  {
+    "question": "Покажи доходы суммарно по договорам по периодам",
+    "sql": "SELECT PERIOD_YYYYMM, CONTRACT_ID, AGREEMENT_NUMBER, CUSTOMER_NAME, SUM(REVENUE_TOTAL) AS REVENUE_TOTAL FROM V_REVENUE_FROM_INVOICES GROUP BY PERIOD_YYYYMM, CONTRACT_ID, AGREEMENT_NUMBER, CUSTOMER_NAME ORDER BY PERIOD_YYYYMM DESC, REVENUE_TOTAL DESC",
+    "context": "Доходы суммарно по договорам по периодам из счетов-фактур",
+    "business_entity": "revenue",
+    "complexity": 3,
+    "category": "Доходы"
+  },
+  {
+    "question": "Покажи трафик превышения суммарно по клиентам по периодам",
+    "sql": "SELECT BILL_MONTH, CUSTOMER_NAME, CODE_1C, COUNT(DISTINCT CONTRACT_ID) AS CONTRACT_COUNT, SUM(OVERAGE_KB) AS TOTAL_OVERAGE_KB, SUM(CALCULATED_OVERAGE) AS TOTAL_OVERAGE_CHARGE FROM V_CONSOLIDATED_OVERAGE_REPORT WHERE OVERAGE_KB > 0 GROUP BY BILL_MONTH, CUSTOMER_NAME, CODE_1C ORDER BY BILL_MONTH DESC, TOTAL_OVERAGE_KB DESC",
+    "context": "Трафик превышения суммарно по клиентам по периодам",
+    "business_entity": "overage",
+    "complexity": 3,
+    "category": "Превышение трафика"
+  },
+  {
+    "question": "Покажи трафик превышения суммарно по договорам по периодам",
+    "sql": "SELECT BILL_MONTH, CONTRACT_ID, CUSTOMER_NAME, SUM(OVERAGE_KB) AS TOTAL_OVERAGE_KB, SUM(CALCULATED_OVERAGE) AS TOTAL_OVERAGE_CHARGE FROM V_CONSOLIDATED_OVERAGE_REPORT WHERE OVERAGE_KB > 0 GROUP BY BILL_MONTH, CONTRACT_ID, CUSTOMER_NAME ORDER BY BILL_MONTH DESC, TOTAL_OVERAGE_KB DESC",
+    "context": "Трафик превышения суммарно по договорам по периодам",
+    "business_entity": "overage",
+    "complexity": 3,
+    "category": "Превышение трафика"
+  },
+  {
+    "question": "Покажи расходы по клиенту Обь-Иртышское УГМС ФГБУ за отчетный период октябрь по каждому IMEI",
+    "sql": "SELECT FINANCIAL_PERIOD AS \"Отчетный Период\", BILL_MONTH, IMEI, CONTRACT_ID, COALESCE(ORGANIZATION_NAME, CUSTOMER_NAME, '') AS \"Organization/Person\", CODE_1C, SERVICE_ID, AGREEMENT_NUMBER, CASE WHEN ACTIVATION_DATE IS NOT NULL THEN TO_CHAR(ACTIVATION_DATE, 'YYYY-MM-DD') ELSE NULL END AS \"Activation Date\", COALESCE(PLAN_NAME, '') AS \"Plan Name\", COALESCE(STECCOM_PLAN_NAME_MONTHLY, '') AS \"Plan Monthly\", COALESCE(STECCOM_PLAN_NAME_SUSPENDED, '') AS \"Plan Suspended\", ROUND(TRAFFIC_USAGE_BYTES / 1000, 2) AS \"Traffic Usage (KB)\", MAILBOX_EVENTS AS \"Mailbox Events\", REGISTRATION_EVENTS AS \"Registration Events\", OVERAGE_KB AS \"Overage (KB)\", CALCULATED_OVERAGE AS \"Calculated Overage ($)\", NVL(SPNET_TOTAL_AMOUNT, 0) AS \"Total Amount ($)\", NVL(FEE_ACTIVATION_FEE, 0) AS \"Activation Fee\", NVL(FEE_ADVANCE_CHARGE, 0) AS \"Advance Charge\", NVL(FEE_ADVANCE_CHARGE_PREVIOUS_MONTH, 0) AS \"Advance Charge Previous Month\", NVL(FEE_CREDIT, 0) AS \"Credit\", NVL(FEE_CREDITED, 0) AS \"Credited\", NVL(FEE_PRORATED, 0) AS \"Prorated\" FROM V_CONSOLIDATED_REPORT_WITH_BILLING WHERE UPPER(CUSTOMER_NAME) LIKE '%ОБЬ-ИРТЫШСКОЕ%УГМС%' AND FINANCIAL_PERIOD = '2025-10' ORDER BY IMEI, BILL_MONTH DESC",
+    "context": "Расходы по клиенту за отчетный период по каждому IMEI. КРИТИЧЕСКИ ВАЖНО: \"отчетный период октябрь\" = FINANCIAL_PERIOD = '2025-10' (НЕ '2025-08', НЕ '2025-09', НЕ BILL_MONTH_YYYMM!). FINANCIAL_PERIOD всегда на месяц меньше BILL_MONTH.",
+    "business_entity": "expenses",
+    "complexity": 3,
+    "category": "Расходы"
+  },
+  {
+    "question": "Покажи расходы по клиенту Обь-Иртышское УГМС ФГБУ за октябрь по каждому IMEI",
+    "sql": "SELECT FINANCIAL_PERIOD AS \"Отчетный Период\", IMEI, CONTRACT_ID, COALESCE(ORGANIZATION_NAME, CUSTOMER_NAME, '') AS \"Organization/Person\", CODE_1C, SERVICE_ID, AGREEMENT_NUMBER, CASE WHEN ACTIVATION_DATE IS NOT NULL THEN TO_CHAR(ACTIVATION_DATE, 'YYYY-MM-DD') ELSE NULL END AS \"Activation Date\", COALESCE(PLAN_NAME, '') AS \"Plan Name\", COALESCE(STECCOM_PLAN_NAME_MONTHLY, '') AS \"Plan Monthly\", COALESCE(STECCOM_PLAN_NAME_SUSPENDED, '') AS \"Plan Suspended\", ROUND(TRAFFIC_USAGE_BYTES / 1000, 2) AS \"Traffic Usage (KB)\", MAILBOX_EVENTS AS \"Mailbox Events\", REGISTRATION_EVENTS AS \"Registration Events\", OVERAGE_KB AS \"Overage (KB)\", CALCULATED_OVERAGE AS \"Calculated Overage ($)\", NVL(SPNET_TOTAL_AMOUNT, 0) AS \"Total Amount ($)\", NVL(FEE_ACTIVATION_FEE, 0) AS \"Activation Fee\", NVL(FEE_ADVANCE_CHARGE, 0) AS \"Advance Charge\", NVL(FEE_ADVANCE_CHARGE_PREVIOUS_MONTH, 0) AS \"Advance Charge Previous Month\", NVL(FEE_CREDIT, 0) AS \"Credit\", NVL(FEE_CREDITED, 0) AS \"Credited\", NVL(FEE_PRORATED, 0) AS \"Prorated\" FROM V_CONSOLIDATED_REPORT_WITH_BILLING WHERE UPPER(CUSTOMER_NAME) LIKE '%ОБЬ-ИРТЫШСКОЕ%УГМС%' AND FINANCIAL_PERIOD = '2025-10' ORDER BY IMEI, FINANCIAL_PERIOD DESC",
+    "context": "Расходы по клиенту за финансовый период по каждому IMEI. ВАЖНО: \"за октябрь\" = FINANCIAL_PERIOD = '2025-10', НЕ BILL_MONTH_YYYMM. Показывай только FINANCIAL_PERIOD, не BILL_MONTH.",
+    "business_entity": "expenses",
+    "complexity": 3,
+    "category": "Расходы"
+  },
+  {
+    "question": "Покажи расходы по клиенту за отчетный период октябрь по каждому IMEI",
+    "sql": "SELECT FINANCIAL_PERIOD AS \"Отчетный Период\", IMEI, CONTRACT_ID, COALESCE(ORGANIZATION_NAME, CUSTOMER_NAME, '') AS \"Organization/Person\", CODE_1C, SERVICE_ID, AGREEMENT_NUMBER, CASE WHEN ACTIVATION_DATE IS NOT NULL THEN TO_CHAR(ACTIVATION_DATE, 'YYYY-MM-DD') ELSE NULL END AS \"Activation Date\", COALESCE(PLAN_NAME, '') AS \"Plan Name\", COALESCE(STECCOM_PLAN_NAME_MONTHLY, '') AS \"Plan Monthly\", COALESCE(STECCOM_PLAN_NAME_SUSPENDED, '') AS \"Plan Suspended\", ROUND(TRAFFIC_USAGE_BYTES / 1000, 2) AS \"Traffic Usage (KB)\", MAILBOX_EVENTS AS \"Mailbox Events\", REGISTRATION_EVENTS AS \"Registration Events\", OVERAGE_KB AS \"Overage (KB)\", CALCULATED_OVERAGE AS \"Calculated Overage ($)\", NVL(SPNET_TOTAL_AMOUNT, 0) AS \"Total Amount ($)\", NVL(FEE_ACTIVATION_FEE, 0) AS \"Activation Fee\", NVL(FEE_ADVANCE_CHARGE, 0) AS \"Advance Charge\", NVL(FEE_ADVANCE_CHARGE_PREVIOUS_MONTH, 0) AS \"Advance Charge Previous Month\", NVL(FEE_CREDIT, 0) AS \"Credit\", NVL(FEE_CREDITED, 0) AS \"Credited\", NVL(FEE_PRORATED, 0) AS \"Prorated\" FROM V_CONSOLIDATED_REPORT_WITH_BILLING WHERE FINANCIAL_PERIOD = '2025-10' ORDER BY CUSTOMER_NAME, IMEI, FINANCIAL_PERIOD DESC",
+    "context": "Расходы по клиентам за отчетный период по каждому IMEI. КРИТИЧЕСКИ ВАЖНО: \"отчетный период октябрь\" = FINANCIAL_PERIOD = '2025-10' (НЕ '2025-08', НЕ '2025-09', НЕ BILL_MONTH_YYYMM!). Показывай только FINANCIAL_PERIOD, не BILL_MONTH.",
+    "business_entity": "expenses",
+    "complexity": 3,
+    "category": "Расходы"
+  },
+  {
+    "question": "Покажи расходы за отчетный период октябрь 2025",
+    "sql": "SELECT FINANCIAL_PERIOD AS \"Отчетный Период\", IMEI, CONTRACT_ID, COALESCE(ORGANIZATION_NAME, CUSTOMER_NAME, '') AS \"Organization/Person\", CODE_1C, CALCULATED_OVERAGE AS \"Calculated Overage ($)\", NVL(SPNET_TOTAL_AMOUNT, 0) AS \"Total Amount ($)\", NVL(FEE_ACTIVATION_FEE, 0) AS \"Activation Fee\", NVL(FEE_ADVANCE_CHARGE, 0) AS \"Advance Charge\", NVL(FEE_ADVANCE_CHARGE_PREVIOUS_MONTH, 0) AS \"Advance Charge Previous Month\", NVL(FEE_CREDIT, 0) AS \"Credit\", NVL(FEE_PRORATED, 0) AS \"Prorated\" FROM V_CONSOLIDATED_REPORT_WITH_BILLING WHERE FINANCIAL_PERIOD = '2025-10' ORDER BY CUSTOMER_NAME, IMEI",
+    "context": "Расходы за отчетный период. КРИТИЧЕСКИ ВАЖНО: \"отчетный период октябрь 2025\" = FINANCIAL_PERIOD = '2025-10' (НЕ '2025-08', НЕ '2025-09', НЕ BILL_MONTH_YYYMM!). Показывай только FINANCIAL_PERIOD, не BILL_MONTH.",
+    "business_entity": "expenses",
+    "complexity": 2,
+    "category": "Расходы"
+  },
+  {
+    "question": "Покажи расходы по клиенту за октябрь по каждому IMEI в формате основного отчета",
+    "sql": "SELECT FINANCIAL_PERIOD AS \"Отчетный Период\", IMEI, CONTRACT_ID, COALESCE(ORGANIZATION_NAME, CUSTOMER_NAME, '') AS \"Organization/Person\", CODE_1C, SERVICE_ID, AGREEMENT_NUMBER, CASE WHEN ACTIVATION_DATE IS NOT NULL THEN TO_CHAR(ACTIVATION_DATE, 'YYYY-MM-DD') ELSE NULL END AS \"Activation Date\", COALESCE(PLAN_NAME, '') AS \"Plan Name\", COALESCE(STECCOM_PLAN_NAME_MONTHLY, '') AS \"Plan Monthly\", COALESCE(STECCOM_PLAN_NAME_SUSPENDED, '') AS \"Plan Suspended\", ROUND(TRAFFIC_USAGE_BYTES / 1000, 2) AS \"Traffic Usage (KB)\", MAILBOX_EVENTS AS \"Mailbox Events\", REGISTRATION_EVENTS AS \"Registration Events\", OVERAGE_KB AS \"Overage (KB)\", CALCULATED_OVERAGE AS \"Calculated Overage ($)\", NVL(SPNET_TOTAL_AMOUNT, 0) AS \"Total Amount ($)\", NVL(FEE_ACTIVATION_FEE, 0) AS \"Activation Fee\", NVL(FEE_ADVANCE_CHARGE, 0) AS \"Advance Charge\", NVL(FEE_ADVANCE_CHARGE_PREVIOUS_MONTH, 0) AS \"Advance Charge Previous Month\", NVL(FEE_CREDIT, 0) AS \"Credit\", NVL(FEE_CREDITED, 0) AS \"Credited\", NVL(FEE_PRORATED, 0) AS \"Prorated\" FROM V_CONSOLIDATED_REPORT_WITH_BILLING WHERE FINANCIAL_PERIOD = '2025-10' ORDER BY CUSTOMER_NAME, IMEI, FINANCIAL_PERIOD DESC",
+    "context": "Расходы по клиентам за финансовый период по каждому IMEI. ВАЖНО: \"за октябрь\" = FINANCIAL_PERIOD = '2025-10', НЕ BILL_MONTH_YYYMM. Показывай только FINANCIAL_PERIOD, не BILL_MONTH.",
+    "business_entity": "expenses",
+    "complexity": 3,
+    "category": "Расходы"
+  },
+  {
+    "question": "Покажи расходы по клиенту за октябрь по каждому IMEI со всеми статьями",
+    "sql": "SELECT FINANCIAL_PERIOD AS \"Отчетный Период\", IMEI, CONTRACT_ID, COALESCE(ORGANIZATION_NAME, CUSTOMER_NAME, '') AS \"Organization/Person\", CODE_1C, SERVICE_ID, AGREEMENT_NUMBER, CASE WHEN ACTIVATION_DATE IS NOT NULL THEN TO_CHAR(ACTIVATION_DATE, 'YYYY-MM-DD') ELSE NULL END AS \"Activation Date\", COALESCE(PLAN_NAME, '') AS \"Plan Name\", COALESCE(STECCOM_PLAN_NAME_MONTHLY, '') AS \"Plan Monthly\", COALESCE(STECCOM_PLAN_NAME_SUSPENDED, '') AS \"Plan Suspended\", ROUND(TRAFFIC_USAGE_BYTES / 1000, 2) AS \"Traffic Usage (KB)\", MAILBOX_EVENTS AS \"Mailbox Events\", REGISTRATION_EVENTS AS \"Registration Events\", OVERAGE_KB AS \"Overage (KB)\", CALCULATED_OVERAGE AS \"Calculated Overage ($)\", NVL(SPNET_TOTAL_AMOUNT, 0) AS \"Total Amount ($)\", NVL(FEE_ACTIVATION_FEE, 0) AS \"Activation Fee\", NVL(FEE_ADVANCE_CHARGE, 0) AS \"Advance Charge\", NVL(FEE_ADVANCE_CHARGE_PREVIOUS_MONTH, 0) AS \"Advance Charge Previous Month\", NVL(FEE_CREDIT, 0) AS \"Credit\", NVL(FEE_CREDITED, 0) AS \"Credited\", NVL(FEE_PRORATED, 0) AS \"Prorated\" FROM V_CONSOLIDATED_REPORT_WITH_BILLING WHERE FINANCIAL_PERIOD = '2025-10' ORDER BY CUSTOMER_NAME, IMEI, FINANCIAL_PERIOD DESC",
+    "context": "Полные расходы по клиентам за финансовый период по каждому IMEI. ВАЖНО: \"за октябрь\" = FINANCIAL_PERIOD = '2025-10', НЕ BILL_MONTH_YYYMM. Показывай только FINANCIAL_PERIOD, не BILL_MONTH.",
+    "business_entity": "expenses",
+    "complexity": 3,
+    "category": "Расходы"
+  },
+  {
+    "question": "Покажи полные расходы по клиенту за октябрь",
+    "sql": "SELECT FINANCIAL_PERIOD AS \"Отчетный Период\", CUSTOMER_NAME, CODE_1C, COUNT(DISTINCT IMEI) AS IMEI_COUNT, COUNT(DISTINCT CONTRACT_ID) AS CONTRACT_COUNT, SUM(CALCULATED_OVERAGE) AS TOTAL_OVERAGE_COST, SUM(SPNET_TOTAL_AMOUNT) AS TOTAL_SPNET_COST, SUM(FEES_TOTAL) AS TOTAL_ABONENTKA_AND_FEES, SUM(CALCULATED_OVERAGE + SPNET_TOTAL_AMOUNT + FEES_TOTAL) AS TOTAL_COST FROM V_CONSOLIDATED_REPORT_WITH_BILLING WHERE FINANCIAL_PERIOD = '2025-10' GROUP BY FINANCIAL_PERIOD, CUSTOMER_NAME, CODE_1C ORDER BY TOTAL_COST DESC",
+    "context": "Полные расходы по клиентам за финансовый период со всеми компонентами. ВАЖНО: \"за октябрь\" = FINANCIAL_PERIOD = '2025-10', НЕ BILL_MONTH_YYYMM.",
+    "business_entity": "expenses",
+    "complexity": 3,
+    "category": "Расходы"
+  },
+  {
+    "question": "Покажи расходы по клиенту по каждому IMEI со всеми компонентами",
+    "sql": "SELECT FINANCIAL_PERIOD AS \"Отчетный Период\", IMEI, CONTRACT_ID, COALESCE(ORGANIZATION_NAME, CUSTOMER_NAME, '') AS \"Organization/Person\", CODE_1C, SERVICE_ID, AGREEMENT_NUMBER, CASE WHEN ACTIVATION_DATE IS NOT NULL THEN TO_CHAR(ACTIVATION_DATE, 'YYYY-MM-DD') ELSE NULL END AS \"Activation Date\", COALESCE(PLAN_NAME, '') AS \"Plan Name\", COALESCE(STECCOM_PLAN_NAME_MONTHLY, '') AS \"Plan Monthly\", COALESCE(STECCOM_PLAN_NAME_SUSPENDED, '') AS \"Plan Suspended\", ROUND(TRAFFIC_USAGE_BYTES / 1000, 2) AS \"Traffic Usage (KB)\", MAILBOX_EVENTS AS \"Mailbox Events\", REGISTRATION_EVENTS AS \"Registration Events\", OVERAGE_KB AS \"Overage (KB)\", CALCULATED_OVERAGE AS \"Calculated Overage ($)\", NVL(SPNET_TOTAL_AMOUNT, 0) AS \"Total Amount ($)\", NVL(FEE_ACTIVATION_FEE, 0) AS \"Activation Fee\", NVL(FEE_ADVANCE_CHARGE, 0) AS \"Advance Charge\", NVL(FEE_ADVANCE_CHARGE_PREVIOUS_MONTH, 0) AS \"Advance Charge Previous Month\", NVL(FEE_CREDIT, 0) AS \"Credit\", NVL(FEE_CREDITED, 0) AS \"Credited\", NVL(FEE_PRORATED, 0) AS \"Prorated\" FROM V_CONSOLIDATED_REPORT_WITH_BILLING WHERE CUSTOMER_NAME LIKE '%Обь-Иртышское%' ORDER BY IMEI, FINANCIAL_PERIOD DESC",
+    "context": "Расходы по клиенту по каждому IMEI. ВАЖНО: Показывай только FINANCIAL_PERIOD, не BILL_MONTH. Финансисты спрашивают только про финансовый период.",
+    "business_entity": "expenses",
+    "complexity": 3,
+    "category": "Расходы"
+  },
+  {
+    "question": "Покажи все статьи расходов по клиенту за октябрь",
+    "sql": "SELECT FINANCIAL_PERIOD AS \"Отчетный Период\", IMEI, CONTRACT_ID, COALESCE(ORGANIZATION_NAME, CUSTOMER_NAME, '') AS \"Organization/Person\", CODE_1C, SERVICE_ID, AGREEMENT_NUMBER, CASE WHEN ACTIVATION_DATE IS NOT NULL THEN TO_CHAR(ACTIVATION_DATE, 'YYYY-MM-DD') ELSE NULL END AS \"Activation Date\", COALESCE(PLAN_NAME, '') AS \"Plan Name\", COALESCE(STECCOM_PLAN_NAME_MONTHLY, '') AS \"Plan Monthly\", COALESCE(STECCOM_PLAN_NAME_SUSPENDED, '') AS \"Plan Suspended\", ROUND(TRAFFIC_USAGE_BYTES / 1000, 2) AS \"Traffic Usage (KB)\", MAILBOX_EVENTS AS \"Mailbox Events\", REGISTRATION_EVENTS AS \"Registration Events\", OVERAGE_KB AS \"Overage (KB)\", CALCULATED_OVERAGE AS \"Calculated Overage ($)\", NVL(SPNET_TOTAL_AMOUNT, 0) AS \"Total Amount ($)\", NVL(FEE_ACTIVATION_FEE, 0) AS \"Activation Fee\", NVL(FEE_ADVANCE_CHARGE, 0) AS \"Advance Charge\", NVL(FEE_ADVANCE_CHARGE_PREVIOUS_MONTH, 0) AS \"Advance Charge Previous Month\", NVL(FEE_CREDIT, 0) AS \"Credit\", NVL(FEE_CREDITED, 0) AS \"Credited\", NVL(FEE_PRORATED, 0) AS \"Prorated\" FROM V_CONSOLIDATED_REPORT_WITH_BILLING WHERE FINANCIAL_PERIOD = '2025-10' ORDER BY CUSTOMER_NAME, IMEI",
+    "context": "Все статьи расходов по клиентам за финансовый период. ВАЖНО: \"за октябрь\" = FINANCIAL_PERIOD = '2025-10', НЕ BILL_MONTH_YYYMM. Показывай только FINANCIAL_PERIOD, не BILL_MONTH.",
+    "business_entity": "expenses",
+    "complexity": 3,
+    "category": "Расходы"
+  },
+  {
+    "question": "Покажи расходы по клиенту за сентябрь по каждому IMEI",
+    "sql": "SELECT FINANCIAL_PERIOD AS \"Отчетный Период\", IMEI, CONTRACT_ID, COALESCE(ORGANIZATION_NAME, CUSTOMER_NAME, '') AS \"Organization/Person\", CODE_1C, SERVICE_ID, AGREEMENT_NUMBER, CASE WHEN ACTIVATION_DATE IS NOT NULL THEN TO_CHAR(ACTIVATION_DATE, 'YYYY-MM-DD') ELSE NULL END AS \"Activation Date\", COALESCE(PLAN_NAME, '') AS \"Plan Name\", COALESCE(STECCOM_PLAN_NAME_MONTHLY, '') AS \"Plan Monthly\", COALESCE(STECCOM_PLAN_NAME_SUSPENDED, '') AS \"Plan Suspended\", ROUND(TRAFFIC_USAGE_BYTES / 1000, 2) AS \"Traffic Usage (KB)\", MAILBOX_EVENTS AS \"Mailbox Events\", REGISTRATION_EVENTS AS \"Registration Events\", OVERAGE_KB AS \"Overage (KB)\", CALCULATED_OVERAGE AS \"Calculated Overage ($)\", NVL(SPNET_TOTAL_AMOUNT, 0) AS \"Total Amount ($)\", NVL(FEE_ACTIVATION_FEE, 0) AS \"Activation Fee\", NVL(FEE_ADVANCE_CHARGE, 0) AS \"Advance Charge\", NVL(FEE_ADVANCE_CHARGE_PREVIOUS_MONTH, 0) AS \"Advance Charge Previous Month\", NVL(FEE_CREDIT, 0) AS \"Credit\", NVL(FEE_CREDITED, 0) AS \"Credited\", NVL(FEE_PRORATED, 0) AS \"Prorated\" FROM V_CONSOLIDATED_REPORT_WITH_BILLING WHERE FINANCIAL_PERIOD = '2025-09' ORDER BY CUSTOMER_NAME, IMEI, FINANCIAL_PERIOD DESC",
+    "context": "Полные расходы по клиентам за финансовый период сентябрь. ВАЖНО: \"за сентябрь\" = FINANCIAL_PERIOD = '2025-09', НЕ BILL_MONTH_YYYMM. Показывай только FINANCIAL_PERIOD, не BILL_MONTH.",
+    "business_entity": "expenses",
+    "complexity": 3,
+    "category": "Расходы"
+  },
+  {
+    "question": "Покажи доходы по клиенту Обь-Иртышское УГМС ФГБУ за октябрь по каждому IMEI со всеми статьями",
+    "sql": "SELECT PERIOD_YYYYMM AS \"Период\", CONTRACT_ID, IMEI, CUSTOMER_NAME, CODE_1C, REVENUE_SBD_TRAFFIC AS \"SBD Трафик\", REVENUE_SBD_ABON AS \"SBD Абонентка\", REVENUE_SBD_TOTAL AS \"SBD Всего\", REVENUE_SUSPEND_ABON AS \"Приостановление (9008)\", REVENUE_MONITORING_ABON AS \"Мониторинг (9005)\", REVENUE_MONITORING_BLOCK_ABON AS \"Блокировка мониторинга (9013)\", REVENUE_MSG_ABON AS \"Сообщения (9014)\", REVENUE_TOTAL AS \"Итого доходов\" FROM V_REVENUE_FROM_INVOICES WHERE UPPER(CUSTOMER_NAME) LIKE '%ОБЬ-ИРТЫШСКОЕ%УГМС%' AND PERIOD_YYYYMM = '2025-10' ORDER BY IMEI, CONTRACT_ID",
+    "context": "Полные доходы по клиенту за период по каждому IMEI со всеми статьями (SBD трафик и абонентка, приостановление, мониторинг, блокировка мониторинга, сообщения)",
+    "business_entity": "revenue",
+    "complexity": 3,
+    "category": "Доходы"
+  },
+  {
+    "question": "Покажи доходы по клиенту за октябрь по каждому IMEI со всеми статьями",
+    "sql": "SELECT PERIOD_YYYYMM AS \"Период\", CONTRACT_ID, IMEI, CUSTOMER_NAME, CODE_1C, REVENUE_SBD_TRAFFIC AS \"SBD Трафик\", REVENUE_SBD_ABON AS \"SBD Абонентка\", REVENUE_SBD_TOTAL AS \"SBD Всего\", REVENUE_SUSPEND_ABON AS \"Приостановление\", REVENUE_MONITORING_ABON AS \"Мониторинг\", REVENUE_MONITORING_BLOCK_ABON AS \"Блокировка мониторинга\", REVENUE_MSG_ABON AS \"Сообщения\", REVENUE_TOTAL AS \"Итого доходов\" FROM V_REVENUE_FROM_INVOICES WHERE PERIOD_YYYYMM = '2025-10' ORDER BY CUSTOMER_NAME, IMEI, CONTRACT_ID",
+    "context": "Полные доходы по клиентам за период по каждому IMEI со всеми статьями (SBD, приостановление, мониторинг, блокировка, сообщения)",
+    "business_entity": "revenue",
+    "complexity": 3,
+    "category": "Доходы"
+  },
+  {
+    "question": "Покажи все статьи доходов по клиенту за октябрь",
+    "sql": "SELECT CUSTOMER_NAME, CODE_1C, COUNT(DISTINCT IMEI) AS IMEI_COUNT, COUNT(DISTINCT CONTRACT_ID) AS CONTRACT_COUNT, SUM(REVENUE_SBD_TRAFFIC) AS TOTAL_SBD_TRAFFIC, SUM(REVENUE_SBD_ABON) AS TOTAL_SBD_ABON, SUM(REVENUE_SBD_TOTAL) AS TOTAL_SBD, SUM(REVENUE_SUSPEND_ABON) AS TOTAL_SUSPEND, SUM(REVENUE_MONITORING_ABON) AS TOTAL_MONITORING, SUM(REVENUE_MONITORING_BLOCK_ABON) AS TOTAL_MONITORING_BLOCK, SUM(REVENUE_MSG_ABON) AS TOTAL_MSG, SUM(REVENUE_TOTAL) AS TOTAL_REVENUE FROM V_REVENUE_FROM_INVOICES WHERE PERIOD_YYYYMM = '2025-10' GROUP BY CUSTOMER_NAME, CODE_1C ORDER BY TOTAL_REVENUE DESC",
+    "context": "Все статьи доходов по клиентам за период (SBD трафик и абонентка, приостановление, мониторинг, блокировка мониторинга, сообщения)",
+    "business_entity": "revenue",
+    "complexity": 3,
+    "category": "Доходы"
+  },
+  {
+    "question": "Покажи доходы по клиенту по каждому IMEI со всеми компонентами",
+    "sql": "SELECT PERIOD_YYYYMM, CONTRACT_ID, IMEI, CUSTOMER_NAME, CODE_1C, REVENUE_SBD_TRAFFIC, REVENUE_SBD_ABON, REVENUE_SBD_TOTAL, REVENUE_SUSPEND_ABON, REVENUE_MONITORING_ABON, REVENUE_MONITORING_BLOCK_ABON, REVENUE_MSG_ABON, REVENUE_TOTAL FROM V_REVENUE_FROM_INVOICES WHERE CUSTOMER_NAME LIKE '%Обь-Иртышское%' ORDER BY PERIOD_YYYYMM DESC, IMEI, CONTRACT_ID",
+    "context": "Доходы по клиенту по каждому IMEI с детализацией всех компонентов (SBD трафик и абонентка, приостановление, мониторинг, блокировка мониторинга, сообщения)",
+    "business_entity": "revenue",
+    "complexity": 3,
+    "category": "Доходы"
+  },
+  {
+    "question": "Покажи доходы по клиенту за сентябрь по каждому IMEI со всеми статьями",
+    "sql": "SELECT PERIOD_YYYYMM AS \"Период\", CONTRACT_ID, IMEI, CUSTOMER_NAME, CODE_1C, REVENUE_SBD_TRAFFIC AS \"SBD Трафик\", REVENUE_SBD_ABON AS \"SBD Абонентка\", REVENUE_SBD_TOTAL AS \"SBD Всего\", REVENUE_SUSPEND_ABON AS \"Приостановление\", REVENUE_MONITORING_ABON AS \"Мониторинг\", REVENUE_MONITORING_BLOCK_ABON AS \"Блокировка мониторинга\", REVENUE_MSG_ABON AS \"Сообщения\", REVENUE_TOTAL AS \"Итого доходов\" FROM V_REVENUE_FROM_INVOICES WHERE PERIOD_YYYYMM = '2025-09' ORDER BY CUSTOMER_NAME, IMEI, CONTRACT_ID",
+    "context": "Полные доходы по клиентам за сентябрь по каждому IMEI со всеми статьями доходов",
+    "business_entity": "revenue",
+    "complexity": 3,
+    "category": "Доходы"
+  },
+  {
+    "question": "Покажи доходы включая мониторинг и приостановление по клиенту за октябрь",
+    "sql": "SELECT CUSTOMER_NAME, CODE_1C, IMEI, CONTRACT_ID, PERIOD_YYYYMM, REVENUE_SBD_TRAFFIC, REVENUE_SBD_ABON, REVENUE_SBD_TOTAL, REVENUE_SUSPEND_ABON AS SUSPEND_9008, REVENUE_MONITORING_ABON AS MONITORING_9005, REVENUE_MONITORING_BLOCK_ABON AS BLOCK_9013, REVENUE_MSG_ABON AS MSG_9014, REVENUE_TOTAL FROM V_REVENUE_FROM_INVOICES WHERE PERIOD_YYYYMM = '2025-10' ORDER BY CUSTOMER_NAME, IMEI",
+    "context": "Доходы по клиентам включая все типы услуг (SBD, приостановление 9008, мониторинг 9005, блокировка 9013, сообщения 9014)",
+    "business_entity": "revenue",
+    "complexity": 3,
+    "category": "Доходы"
+  },
+  {
+    "question": "Покажи доходы по клиенту суммарно за октябрь со всеми статьями",
+    "sql": "SELECT CUSTOMER_NAME, CODE_1C, COUNT(DISTINCT IMEI) AS IMEI_COUNT, SUM(REVENUE_SBD_TRAFFIC) AS SBD_TRAFFIC, SUM(REVENUE_SBD_ABON) AS SBD_ABON, SUM(REVENUE_SBD_TOTAL) AS SBD_TOTAL, SUM(REVENUE_SUSPEND_ABON) AS SUSPEND, SUM(REVENUE_MONITORING_ABON) AS MONITORING, SUM(REVENUE_MONITORING_BLOCK_ABON) AS MONITORING_BLOCK, SUM(REVENUE_MSG_ABON) AS MSG, SUM(REVENUE_TOTAL) AS TOTAL_REVENUE FROM V_REVENUE_FROM_INVOICES WHERE PERIOD_YYYYMM = '2025-10' GROUP BY CUSTOMER_NAME, CODE_1C ORDER BY TOTAL_REVENUE DESC",
+    "context": "Суммарные доходы по клиентам за период со всеми статьями (SBD, приостановление, мониторинг, блокировка, сообщения)",
+    "business_entity": "revenue",
+    "complexity": 3,
+    "category": "Доходы"
+  },
+  {
+    "question": "Покажи курс УЕ к рублю на последний день октября 2025",
+    "sql": "SELECT RATE AS \"Курс УЕ к рублю\", START_TIME AS \"Дата курса\" FROM BM_CURRENCY_RATE WHERE CURRENCY_ID = 4 AND START_TIME <= LAST_DAY(TO_DATE('2025-10', 'YYYY-MM')) ORDER BY START_TIME DESC FETCH FIRST 1 ROW ONLY",
+    "context": "Курс УЕ (долларов) к рублю на последний день месяца финансового периода. Используется для конверсии расходов в долларах в рубли. Примечание: для финансового анализа предпочтительно использовать курс из счетов-фактур (BM_INVOICE_ITEM.RATE), если он доступен.",
+    "business_entity": "currency",
+    "complexity": 1,
+    "category": "Валюты"
+  },
+  {
+    "question": "Покажи расходы и доходы по клиенту за октябрь с конверсией валют",
+    "sql": "SELECT PERIOD AS \"Отчетный Период\", CUSTOMER_NAME, CODE_1C, EXPENSES_USD AS \"Расходы (USD)\", EXPENSES_RUB AS \"Расходы (RUB)\", REVENUE_RUB AS \"Доходы (RUB)\", PROFIT_RUB AS \"Прибыль (RUB)\", MARGIN_PCT AS \"Маржа %\", COST_PCT AS \"Себестоимость %\", STATUS FROM V_PROFITABILITY_BY_PERIOD WHERE PERIOD = '2025-10' ORDER BY PROFIT_RUB ASC",
+    "context": "Сравнение расходов и доходов с конверсией валют и выявлением проблем. КРИТИЧЕСКИ ВАЖНО: Использует готовое представление V_PROFITABILITY_BY_PERIOD, которое уже содержит все расчеты с конверсией валют через курс из счетов-фактур (BM_INVOICE_ITEM.RATE). НЕ нужно создавать сложные CTE или JOIN с BM_CURRENCY_RATE - VIEW уже содержит все необходимое. Для выявления убыточных клиентов используй V_UNPROFITABLE_CUSTOMERS WHERE ALERT_TYPE = 'LOSS', для клиентов с низкой маржой - V_UNPROFITABLE_CUSTOMERS WHERE ALERT_TYPE = 'LOW_MARGIN'.",
+    "business_entity": "profit",
+    "complexity": 2,
+    "category": "Себестоимость"
+  },
+  {
+    "question": "Найди убыточных клиентов за октябрь",
+    "sql": "SELECT PERIOD AS \"Отчетный Период\", CUSTOMER_NAME, CODE_1C, EXPENSES_USD AS \"Расходы (USD)\", EXPENSES_RUB AS \"Расходы (RUB)\", REVENUE_RUB AS \"Доходы (RUB)\", PROFIT_RUB AS \"Прибыль (RUB)\", MARGIN_PCT AS \"Маржа %\", COST_PCT AS \"Себестоимость %\", STATUS, ALERT_TYPE FROM V_UNPROFITABLE_CUSTOMERS WHERE PERIOD = '2025-10' AND ALERT_TYPE = 'LOSS' ORDER BY PROFIT_RUB ASC",
+    "context": "Выявление убыточных клиентов (расходы превышают доходы). КРИТИЧЕСКИ ВАЖНО: Использует готовое представление V_UNPROFITABLE_CUSTOMERS, которое уже содержит все расчеты с конверсией валют. НЕ нужно создавать сложные CTE или JOIN с CUSTOMERS - VIEW уже содержит CUSTOMER_NAME. Финансовый анализ для выявления проблем с прибыльностью.",
+    "business_entity": "profit",
+    "complexity": 3,
+    "category": "Финансовые алерты"
+  },
+  {
+    "question": "Покажи динамику прибыльности клиентов по периодам",
+    "sql": "SELECT PERIOD AS \"Отчетный Период\", CUSTOMER_NAME, CODE_1C, EXPENSES_USD AS \"Расходы (USD)\", EXPENSES_RUB AS \"Расходы (RUB)\", REVENUE_RUB AS \"Доходы (RUB)\", PROFIT_RUB AS \"Прибыль (RUB)\", MARGIN_PCT AS \"Маржа %\", STATUS FROM V_PROFITABILITY_BY_PERIOD WHERE PERIOD >= TO_CHAR(ADD_MONTHS(TRUNC(SYSDATE, 'MM'), -6), 'YYYY-MM') ORDER BY CUSTOMER_NAME, PERIOD DESC",
+    "context": "Анализ динамики прибыльности клиентов по периодам для выявления тенденций к ухудшению прибыльности. Использует готовое представление V_PROFITABILITY_BY_PERIOD, которое уже содержит все расчеты с конверсией валют. Помогает отслеживать изменения маржинальности.",
+    "business_entity": "profit",
+    "complexity": 3,
+    "category": "Аналитика"
+  },
+  {
+    "question": "Найди клиентов с ухудшением прибыльности",
+    "sql": "SELECT PERIOD AS \"Текущий Период\", CUSTOMER_NAME, CODE_1C, PREV_PROFIT_RUB AS \"Прибыль в предыдущем периоде\", PROFIT_RUB AS \"Прибыль в текущем периоде\", PROFIT_CHANGE AS \"Изменение прибыли\", PROFIT_CHANGE_PCT AS \"% Изменения прибыли\", TREND AS ТЕНДЕНЦИЯ FROM V_PROFITABILITY_TREND WHERE TREND = 'DECREASE' ORDER BY PROFIT_CHANGE ASC",
+    "context": "Выявление клиентов с ухудшением прибыльности за последние периоды. Использует готовое представление V_PROFITABILITY_TREND, которое уже содержит сравнение с предыдущим периодом через LAG функцию. Финансовый анализ для выявления проблемных тенденций.",
+    "business_entity": "profit",
+    "complexity": 3,
+    "category": "Финансовые алерты"
+  },
+  {
+    "question": "Покажи расходы в долларах и рублях по клиенту за октябрь",
+    "sql": "WITH currency_rate AS (SELECT AVG(ii.RATE) AS RATE FROM BM_INVOICE_ITEM ii JOIN BM_PERIOD pm ON ii.PERIOD_ID = pm.PERIOD_ID WHERE TO_CHAR(pm.START_DATE, 'YYYY-MM') = '2025-10' AND (ii.CURRENCY_ID = 4 OR ii.ACC_CURRENCY_ID = 4) AND ii.RATE IS NOT NULL) SELECT FINANCIAL_PERIOD AS \"Отчетный Период\", CUSTOMER_NAME, CODE_1C, SUM(CALCULATED_OVERAGE + SPNET_TOTAL_AMOUNT + FEES_TOTAL) AS \"Расходы (USD)\", SUM((CALCULATED_OVERAGE + SPNET_TOTAL_AMOUNT + FEES_TOTAL) * (SELECT RATE FROM currency_rate)) AS \"Расходы (RUB)\", (SELECT RATE FROM currency_rate) AS \"Курс УЕ к рублю\" FROM V_CONSOLIDATED_REPORT_WITH_BILLING WHERE FINANCIAL_PERIOD = '2025-10' GROUP BY FINANCIAL_PERIOD, CUSTOMER_NAME, CODE_1C ORDER BY CUSTOMER_NAME",
+    "context": "Расходы по клиентам в долларах и рублях с использованием курса из счетов-фактур (BM_INVOICE_ITEM.RATE) для соответствующего периода. Это обеспечивает корректное сравнение с доходами из счетов-фактур.",
+    "business_entity": "expenses",
+    "complexity": 2,
+    "category": "Расходы"
+  },
+  {
+    "question": "Покажи динамику прибыльности по клиенту Обь-Иртышское УГМС за год",
+    "sql": "SELECT PERIOD AS \"Отчетный Период\", CUSTOMER_NAME, CODE_1C, EXPENSES_USD AS \"Расходы (USD)\", EXPENSES_RUB AS \"Расходы (RUB)\", REVENUE_RUB AS \"Доходы (RUB)\", PROFIT_RUB AS \"Прибыль (RUB)\", MARGIN_PCT AS \"Маржа %\", STATUS FROM V_PROFITABILITY_BY_PERIOD WHERE PERIOD >= TO_CHAR(ADD_MONTHS(TRUNC(SYSDATE, 'MM'), -12), 'YYYY-MM') AND UPPER(CUSTOMER_NAME) LIKE '%ОБЬ-ИРТЫШСКОЕ%УГМС%' ORDER BY PERIOD DESC",
+    "context": "Анализ динамики прибыльности конкретного клиента за год с фильтрацией по названию клиента. Использует готовое представление V_PROFITABILITY_BY_PERIOD.",
+    "business_entity": "profit",
+    "complexity": 2,
+    "category": "Аналитика"
+  },
+  {
+    "question": "Покажи прибыльность клиентов за первый квартал 2025",
+    "sql": "SELECT PERIOD AS \"Отчетный Период\", CUSTOMER_NAME, CODE_1C, EXPENSES_USD AS \"Расходы (USD)\", EXPENSES_RUB AS \"Расходы (RUB)\", REVENUE_RUB AS \"Доходы (RUB)\", PROFIT_RUB AS \"Прибыль (RUB)\", MARGIN_PCT AS \"Маржа %\", STATUS FROM V_PROFITABILITY_BY_PERIOD WHERE PERIOD IN ('2025-01', '2025-02', '2025-03') ORDER BY CUSTOMER_NAME, PERIOD",
+    "context": "Анализ прибыльности клиентов за квартал с фильтрацией по периоду. Использует готовое представление V_PROFITABILITY_BY_PERIOD.",
+    "business_entity": "profit",
+    "complexity": 2,
+    "category": "Аналитика"
+  },
+  {
+    "question": "Покажи клиентов с низкой маржой за октябрь",
+    "sql": "SELECT PERIOD AS \"Отчетный Период\", CUSTOMER_NAME, CODE_1C, EXPENSES_USD AS \"Расходы (USD)\", EXPENSES_RUB AS \"Расходы (RUB)\", REVENUE_RUB AS \"Доходы (RUB)\", PROFIT_RUB AS \"Прибыль (RUB)\", MARGIN_PCT AS \"Маржа %\", COST_PCT AS \"Себестоимость %\", STATUS, ALERT_TYPE FROM V_UNPROFITABLE_CUSTOMERS WHERE PERIOD = '2025-10' AND ALERT_TYPE = 'LOW_MARGIN' ORDER BY MARGIN_PCT ASC",
+    "context": "Выявление клиентов с низкой маржой (<10%). Использует готовое представление V_UNPROFITABLE_CUSTOMERS, которое уже содержит все расчеты. Финансовый анализ для выявления проблем с прибыльностью.",
+    "business_entity": "profit",
+    "complexity": 2,
+    "category": "Финансовые алерты"
+  },
+  {
+    "question": "Покажи структуру затрат и доходов по клиенту за октябрь",
+    "sql": "SELECT PERIOD AS \"Отчетный Период\", CUSTOMER_NAME, CODE_1C, EXPENSES_USD AS \"Расходы (USD)\", EXPENSES_RUB AS \"Расходы (RUB)\", REVENUE_RUB AS \"Доходы (RUB)\", PROFIT_RUB AS \"Прибыль (RUB)\", MARGIN_PCT AS \"Маржа %\", COST_PCT AS \"Себестоимость %\", STATUS FROM V_PROFITABILITY_BY_PERIOD WHERE PERIOD = '2025-10' ORDER BY CUSTOMER_NAME",
+    "context": "Анализ структуры затрат и доходов по клиенту за период. КРИТИЧЕСКИ ВАЖНО: Использует готовое представление V_PROFITABILITY_BY_PERIOD, которое содержит все необходимые финансовые показатели с конверсией валют. НЕ нужно создавать JOIN с CUSTOMERS или BM_CURRENCY_RATE - VIEW уже содержит CUSTOMER_NAME, CODE_1C и конверсию валют.",
+    "business_entity": "profit",
+    "complexity": 2,
+    "category": "Аналитика"
+  },
+  {
+    "question": "Анализ структуры затрат и доходов",
+    "sql": "SELECT PERIOD AS \"Отчетный Период\", CUSTOMER_NAME, CODE_1C, EXPENSES_USD AS \"Расходы (USD)\", EXPENSES_RUB AS \"Расходы (RUB)\", REVENUE_RUB AS \"Доходы (RUB)\", PROFIT_RUB AS \"Прибыль (RUB)\", MARGIN_PCT AS \"Маржа %\", COST_PCT AS \"Себестоимость %\", STATUS FROM V_PROFITABILITY_BY_PERIOD WHERE PERIOD = TO_CHAR(ADD_MONTHS(TRUNC(SYSDATE, 'MM'), -1), 'YYYY-MM') ORDER BY CUSTOMER_NAME",
+    "context": "Анализ структуры затрат и доходов. КРИТИЧЕСКИ ВАЖНО: Использует готовое представление V_PROFITABILITY_BY_PERIOD, которое содержит все необходимые финансовые показатели с конверсией валют. НЕ нужно создавать JOIN с CUSTOMERS, SERVICES или BM_CURRENCY_RATE - VIEW уже содержит CUSTOMER_NAME, CODE_1C и конверсию валют. Для детализации по IMEI/CONTRACT_ID используй V_CONSOLIDATED_REPORT_WITH_BILLING и V_REVENUE_FROM_INVOICES напрямую.",
+    "business_entity": "profit",
+    "complexity": 2,
+    "category": "Аналитика"
   }
 ]
 
