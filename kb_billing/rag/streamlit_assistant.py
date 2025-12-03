@@ -52,7 +52,6 @@ def show_assistant_tab():
     Ассистент поможет вам:
     - 📊 Генерировать SQL запросы для аналитических отчетов
     - 🔍 Искать информацию по SBD услугам
-    - 📋 Находить примеры запросов по схожим вопросам
     """)
     
     st.markdown("---")
@@ -65,319 +64,222 @@ def show_assistant_tab():
     # Инициализация session_state
     if "assistant_question" not in st.session_state:
         st.session_state.assistant_question = ""
-    if "assistant_category" not in st.session_state:
-        st.session_state.assistant_category = "Все категории"
     if "assistant_action" not in st.session_state:
-        st.session_state.assistant_action = None  # None, "search", "generate"
+        st.session_state.assistant_action = None  # None, "generate"
     if "last_generated_question" not in st.session_state:
         st.session_state.last_generated_question = ""  # Последний вопрос, для которого был сгенерирован SQL
     if "last_generated_sql" not in st.session_state:
         st.session_state.last_generated_sql = None  # Последний сгенерированный SQL
     
-    # Две колонки: вопрос и результаты
-    col1, col2 = st.columns([1, 1])
+    st.subheader("💬 Ваш вопрос")
     
-    with col1:
-        st.subheader("💬 Ваш вопрос")
+    # Используем форму для предотвращения rerun при вводе
+    with st.form("assistant_form", clear_on_submit=False):
+        # Поле ввода вопроса
+        question_input = st.text_area(
+            "Введите ваш вопрос на русском языке:",
+            height=150,
+            placeholder="Например: Покажи превышение трафика за октябрь 2025",
+            value=st.session_state.assistant_question,
+            key="assistant_question_input"
+        )
         
-        # Используем форму для предотвращения rerun при вводе
-        with st.form("assistant_form", clear_on_submit=False):
-            # Поле ввода вопроса
-            question_input = st.text_area(
-                "Введите ваш вопрос на русском языке:",
-                height=150,
-                placeholder="Например: Покажи превышение трафика за октябрь 2025",
-                value=st.session_state.assistant_question,
-                key="assistant_question_input"
-            )
-            
-            # Категория для фильтрации (опционально)
-            category = st.selectbox(
-                "Категория (опционально):",
-                ["Все категории", "Превышение трафика", "Сервисы", "Клиенты", 
-                 "Себестоимость", "Аналитика", "Отчеты", "Финансовые алерты"],
-                index=["Все категории", "Превышение трафика", "Сервисы", "Клиенты", 
-                       "Себестоимость", "Аналитика", "Отчеты", "Финансовые алерты"].index(st.session_state.assistant_category),
-                key="assistant_category_input"
-            )
-            
-            # Две кнопки в форме
-            col_btn1, col_btn2 = st.columns(2)
-            with col_btn1:
-                search_button = st.form_submit_button("🔍 Найти похожие примеры", type="primary", use_container_width=True)
-            with col_btn2:
-                generate_button = st.form_submit_button("📊 Сгенерировать SQL", type="secondary", use_container_width=True)
-            
-            # Обработка нажатия кнопок
-            if search_button:
-                st.session_state.assistant_action = "search"
-                st.session_state.assistant_question = question_input
-                st.session_state.assistant_category = category
-                # Очищаем предыдущие результаты при новом поиске
-                st.session_state.last_generated_question = ""
-                st.session_state.last_generated_sql = None
-            elif generate_button:
-                st.session_state.assistant_action = "generate"
-                st.session_state.assistant_question = question_input
-                st.session_state.assistant_category = category
-                # Очищаем предыдущие результаты при новой генерации
-                st.session_state.last_generated_question = ""
-                st.session_state.last_generated_sql = None
+        # Кнопка генерации SQL
+        generate_button = st.form_submit_button("📊 Сгенерировать SQL", type="primary", use_container_width=True)
         
-        # Используем сохраненное значение вопроса
-        question = st.session_state.assistant_question
-        category = st.session_state.assistant_category
+        # Обработка нажатия кнопки
+        if generate_button:
+            st.session_state.assistant_action = "generate"
+            st.session_state.assistant_question = question_input
+            # Очищаем предыдущие результаты при новой генерации
+            st.session_state.last_generated_question = ""
+            st.session_state.last_generated_sql = None
     
-    with col2:
-        st.subheader("📋 Результаты")
+    # Используем сохраненное значение вопроса
+    question = st.session_state.assistant_question
+    
+    st.markdown("---")
+    
+    # Генерация SQL
+    if st.session_state.assistant_action == "generate" and question:
+        # Проверяем, изменился ли вопрос - если да, генерируем новый SQL
+        question_changed = (st.session_state.last_generated_question != question)
         
-        # Используем action из session_state вместо прямых проверок кнопок
-        if st.session_state.assistant_action == "search" and question:
-            with st.spinner("Поиск похожих примеров..."):
-                # Фильтр по категории
-                filter_category = None if category == "Все категории" else category
-                
-                # Поиск похожих примеров
-                examples = assistant.search_similar_examples(
-                    question=question,
-                    category=filter_category,
-                    limit=5
-                )
-                
-                if examples:
-                    st.success(f"Найдено {len(examples)} похожих примеров")
-                    
-                    for i, example in enumerate(examples, 1):
-                        result_key = f"example_result_{i}"
-                        with st.expander(f"Пример {i} (similarity: {example['similarity']:.3f})", expanded=(i == 1)):
-                            st.markdown(f"**Вопрос:** {example['question']}")
-                            st.markdown(f"**Категория:** {example.get('category', 'N/A')}")
-                            st.markdown(f"**Сложность:** {example.get('complexity', 'N/A')}")
-                            
-                            # SQL запрос с возможностью копирования
-                            st.markdown("**SQL запрос:**")
-                            st.code(example['sql'], language="sql")
-                            
-                            # Кнопки для выполнения и анализа
-                            col_exec, col_plan = st.columns([2, 1])
-                            with col_exec:
-                                if st.button(f"▶️ Выполнить SQL {i}", key=f"execute_sql_{i}"):
-                                    execute_sql_query(example['sql'], result_key=result_key)
-                            with col_plan:
-                                if st.button(f"📊 План {i}", key=f"explain_plan_{i}"):
-                                    plan_text, plan_error = explain_plan(example['sql'])
-                                    if plan_text:
-                                        st.markdown("**План выполнения:**")
-                                        st.code(plan_text, language="text")
-                                    elif plan_error:
-                                        st.warning(f"⚠️ {plan_error}")
-                            
-                            # Отображение сохраненного результата, если есть
-                            if result_key in st.session_state:
-                                result = st.session_state[result_key]
-                                if "df" in result and result["df"] is not None:
-                                    st.markdown("---")
-                                    st.markdown(f"**Результаты выполнения (обновлено: {result['timestamp']}):**")
-                                    if result["df"].empty:
-                                        st.info("ℹ️ Запрос выполнен успешно, но результатов нет")
-                                    else:
-                                        st.success(f"✅ Найдено записей: {len(result['df'])}")
-                                        st.dataframe(result["df"], use_container_width=True, height=400)
-                                        
-                                        # Кнопка экспорта
-                                        csv = result["df"].to_csv(index=False).encode('utf-8')
-                                        st.download_button(
-                                            label="📥 Скачать CSV",
-                                            data=csv,
-                                            file_name=f"query_result_{result['timestamp'].strftime('%Y%m%d_%H%M%S')}.csv",
-                                            mime="text/csv",
-                                            key=f"download_{result_key}_saved"
-                                        )
-                                elif "error" in result:
-                                    st.markdown("---")
-                                    st.error(f"❌ Ошибка: {result['error']}")
-                                    with st.expander("🔍 Детали ошибки", expanded=False):
-                                        st.code(result.get("traceback", ""), language="python")
-                else:
-                    st.info("Похожие примеры не найдены. Попробуйте переформулировать вопрос.")
-        
-        elif st.session_state.assistant_action == "generate" and question:
-            # Проверяем, изменился ли вопрос - если да, генерируем новый SQL
-            question_changed = (st.session_state.last_generated_question != question)
-            
-            # Если вопрос не изменился и SQL уже был сгенерирован, показываем его
-            if not question_changed and st.session_state.last_generated_sql:
-                generated_sql = st.session_state.last_generated_sql
-            else:
-                # Генерируем новый SQL только если вопрос изменился
-                with st.spinner("Генерация SQL запроса..."):
-                    # Получение контекста
-                    context = assistant.get_context_for_sql_generation(question, max_examples=5)
-                    
-                    # Попытка генерации SQL через LLM
-                    api_key = os.getenv("OPENAI_API_KEY")
-                    # Поддержка обоих вариантов: OPENAI_BASE_URL (как в sql4A) и OPENAI_API_BASE
-                    api_base = os.getenv("OPENAI_BASE_URL") or os.getenv("OPENAI_API_BASE")
-                    
-                    generated_sql = None
-                    if api_key:
-                        try:
-                            generated_sql = assistant.generate_sql_with_llm(
-                                question=question,
-                                context=context,
-                                api_key=api_key,
-                                api_base=api_base
-                            )
-                            # Сохраняем сгенерированный SQL и вопрос
-                            if generated_sql:
-                                st.session_state.last_generated_sql = generated_sql
-                                st.session_state.last_generated_question = question
-                        except Exception as e:
-                            st.warning(f"Не удалось сгенерировать SQL через LLM: {e}")
-            
-            # Если SQL сгенерирован, показываем и выполняем
-            if generated_sql:
-                st.success("✅ SQL запрос сгенерирован!")
-                st.markdown("**Сгенерированный SQL:**")
-                st.code(generated_sql, language="sql")
-                
-                # Кнопки для анализа и выполнения
-                col_exec, col_stats = st.columns([2, 1])
-                with col_exec:
-                    execute_btn = st.button("▶️ Выполнить запрос", key="execute_generated", type="primary", use_container_width=True)
-                with col_stats:
-                    stats_btn = st.button("📈 Со статистикой", key="execute_with_stats_generated", use_container_width=True)
-                
-                # Обработка кнопок
-                if execute_btn:
-                    st.markdown("**Результаты выполнения:**")
-                    execute_sql_query(generated_sql)
-                elif stats_btn:
-                    st.markdown("**Результаты выполнения со статистикой:**")
-                    st.info("💡 **Примечание:** Эта функция показывает фактический план выполнения запроса. Она НЕ собирает статистику таблиц для оптимизатора Oracle. Для улучшения плана выполнения используйте кнопку '📊 Собрать статистику' после выполнения запроса.")
-                    
-                    with st.spinner("Выполнение запроса со сбором статистики выполнения..."):
-                        df, exec_time, stats_text = execute_sql_with_stats(generated_sql, result_key="generated_with_stats")
-                    
-                    if df is not None:
-                        if exec_time:
-                            st.metric("⏱️ Время выполнения", f"{exec_time:.2f} сек")
-                        if stats_text:
-                            st.markdown("**Фактический план выполнения (Actual Execution Plan):**")
-                            st.code(stats_text, language="text")
-                            st.info("💡 Этот план показывает, как запрос был выполнен. Для улучшения плана на будущее используйте кнопку '📊 Собрать статистику' ниже.")
-                            
-                            # Извлекаем таблицы из SQL для предложения сбора статистики
-                            tables = extract_tables_from_sql(generated_sql)
-                            if tables:
-                                st.markdown("**📊 Собрать статистику для улучшения плана:**")
-                                for table in tables[:5]:  # Показываем максимум 5 таблиц
-                                    if st.button(f"📊 Собрать статистику для {table}", key=f"gather_stats_{table}_{result_key}"):
-                                        with st.spinner(f"Сбор статистики для таблицы {table}... Это может занять несколько минут для больших таблиц."):
-                                            success, message = gather_table_stats(table)
-                                            if success:
-                                                st.success(message)
-                                            else:
-                                                st.error(message)
-                        
-                        if df.empty:
-                            st.info("ℹ️ Запрос выполнен успешно, но результатов нет")
-                        else:
-                            st.success(f"✅ Запрос выполнен успешно. Найдено записей: {len(df)}")
-                            st.dataframe(df, use_container_width=True, height=400)
-                            
-                            # Кнопка экспорта
-                            csv = df.to_csv(index=False).encode('utf-8')
-                            st.download_button(
-                                label="📥 Скачать CSV",
-                                data=csv,
-                                file_name=f"query_result_{pd.Timestamp.now().strftime('%Y%m%d_%H%M%S')}.csv",
-                                mime="text/csv",
-                                key=f"download_generated_with_stats"
-                            )
-                else:
-                    # Автоматическое выполнение SQL только если не нажата ни одна кнопка
-                    if 'last_generated_sql' not in st.session_state or st.session_state.last_generated_sql != generated_sql:
-                        st.markdown("**Результаты выполнения:**")
-                        execute_sql_query(generated_sql)
-                else:
-                    # Если LLM недоступен, показываем контекст и примеры
-                    api_key = os.getenv("OPENAI_API_KEY")
-                    if not api_key:
-                        st.info("""
-                        💡 **Автоматическая генерация SQL через LLM недоступна**
-                        
-                        Для включения автоматической генерации SQL установите в `config.env`:
-                        - `OPENAI_API_KEY=your-api-key`
-                        - `OPENAI_API_BASE=https://api.proxyapi.ru/openai/v1` (опционально, для прокси)
-                        
-                        **Сейчас доступно:** Вы можете использовать похожие примеры ниже и выполнить их кнопкой "▶️ Выполнить".
-                        """)
-                    
-                    # Форматирование контекста
-                    formatted_context = assistant.format_context_for_llm(context)
-                    
-                    # Показываем контекст
-                    st.markdown("**Контекст для генерации:**")
-                    with st.expander("Показать контекст", expanded=False):
-                        st.text(formatted_context)
-                    
-                    # Если есть похожие примеры, показываем их
-                    if context.get("examples"):
-                        st.markdown("**Рекомендуемые примеры:**")
-                        for i, example in enumerate(context["examples"][:3], 1):
-                            result_key_gen = f"gen_example_result_{i}"
-                            st.markdown(f"{i}. {example['question']}")
-                            st.code(example['sql'], language="sql")
-                            
-                            # Кнопка выполнения для каждого примера
-                            if st.button(f"▶️ Выполнить пример {i}", key=f"execute_gen_example_{i}"):
-                                execute_sql_query(example['sql'], result_key=result_key_gen)
-                            
-                            # Отображение сохраненного результата, если есть
-                            if result_key_gen in st.session_state:
-                                result = st.session_state[result_key_gen]
-                                if "df" in result and result["df"] is not None:
-                                    st.markdown("---")
-                                    st.markdown(f"**Результаты выполнения:**")
-                                    if result["df"].empty:
-                                        st.info("ℹ️ Запрос выполнен успешно, но результатов нет")
-                                    else:
-                                        st.success(f"✅ Найдено записей: {len(result['df'])}")
-                                        st.dataframe(result["df"], use_container_width=True, height=400)
-                                        
-                                        # Кнопка экспорта
-                                        csv = result["df"].to_csv(index=False).encode('utf-8')
-                                        st.download_button(
-                                            label="📥 Скачать CSV",
-                                            data=csv,
-                                            file_name=f"query_result_{result['timestamp'].strftime('%Y%m%d_%H%M%S')}.csv",
-                                            mime="text/csv",
-                                            key=f"download_{result_key_gen}_saved"
-                                        )
-                                elif "error" in result:
-                                    st.markdown("---")
-                                    st.error(f"❌ Ошибка: {result['error']}")
-                                    with st.expander("🔍 Детали ошибки", expanded=False):
-                                        st.code(result.get("traceback", ""), language="python")
-                    
-                    # Информация о таблицах
-                    if context.get("tables_info"):
-                        st.markdown("**Используемые таблицы:**")
-                        for table_name in context["tables_info"].keys():
-                            st.markdown(f"- {table_name}")
-                    
-                    st.info("""
-                    💡 **Для автоматической генерации SQL:** 
-                    
-                    Установите переменную окружения OPENAI_API_KEY в config.env.
-                    Для использования прокси (например, proxyapi.ru) установите OPENAI_API_BASE=https://api.proxyapi.ru/openai/v1
-                    
-                    Вы можете скопировать SQL из похожих примеров выше и выполнить его вручную.
-                    """)
-        
+        # Если вопрос не изменился и SQL уже был сгенерирован, показываем его
+        if not question_changed and st.session_state.last_generated_sql:
+            generated_sql = st.session_state.last_generated_sql
+            context = None  # Контекст не нужен, если SQL уже есть
         else:
-            st.info("💡 Введите вопрос и нажмите кнопку **🔍 Найти похожие примеры** или **📊 Сгенерировать SQL**")
+            # Генерируем новый SQL только если вопрос изменился
+            with st.spinner("Генерация SQL запроса..."):
+                # Получение контекста
+                context = assistant.get_context_for_sql_generation(question, max_examples=5)
+                
+                # Попытка генерации SQL через LLM
+                api_key = os.getenv("OPENAI_API_KEY")
+                # Поддержка обоих вариантов: OPENAI_BASE_URL (как в sql4A) и OPENAI_API_BASE
+                api_base = os.getenv("OPENAI_BASE_URL") or os.getenv("OPENAI_API_BASE")
+                
+                generated_sql = None
+                if api_key:
+                    try:
+                        generated_sql = assistant.generate_sql_with_llm(
+                            question=question,
+                            context=context,
+                            api_key=api_key,
+                            api_base=api_base
+                        )
+                        # Сохраняем сгенерированный SQL и вопрос
+                        if generated_sql:
+                            st.session_state.last_generated_sql = generated_sql
+                            st.session_state.last_generated_question = question
+                    except Exception as e:
+                        st.warning(f"Не удалось сгенерировать SQL через LLM: {e}")
+        
+        # Если SQL сгенерирован, показываем и выполняем
+        if generated_sql:
+            st.success("✅ SQL запрос сгенерирован!")
+            st.markdown("**Сгенерированный SQL:**")
+            st.code(generated_sql, language="sql")
+            
+            # Кнопки для анализа и выполнения
+            col_exec, col_stats = st.columns([2, 1])
+            with col_exec:
+                execute_btn = st.button("▶️ Выполнить запрос", key="execute_generated", type="primary", use_container_width=True)
+            with col_stats:
+                stats_btn = st.button("📈 Со статистикой", key="execute_with_stats_generated", use_container_width=True)
+            
+            # Обработка кнопок
+            if execute_btn:
+                execute_sql_query(generated_sql, result_key="sql_result")
+            elif stats_btn:
+                st.info("💡 **Примечание:** Эта функция показывает фактический план выполнения запроса. Она НЕ собирает статистику таблиц для оптимизатора Oracle. Для улучшения плана выполнения используйте кнопку '📊 Собрать статистику' после выполнения запроса.")
+                
+                with st.spinner("Выполнение запроса со сбором статистики выполнения..."):
+                    df, exec_time, stats_text = execute_sql_with_stats(generated_sql, result_key="generated_with_stats")
+                
+                if df is not None:
+                    if exec_time:
+                        st.metric("⏱️ Время выполнения", f"{exec_time:.2f} сек")
+                    if stats_text:
+                        st.markdown("**Фактический план выполнения (Actual Execution Plan):**")
+                        st.code(stats_text, language="text")
+                        st.info("💡 Этот план показывает, как запрос был выполнен. Для улучшения плана на будущее используйте кнопку '📊 Собрать статистику' ниже.")
+                        
+                        # Извлекаем таблицы из SQL для предложения сбора статистики
+                        tables = extract_tables_from_sql(generated_sql)
+                        if tables:
+                            st.markdown("**📊 Собрать статистику для улучшения плана:**")
+                            for table in tables[:5]:  # Показываем максимум 5 таблиц
+                                if st.button(f"📊 Собрать статистику для {table}", key=f"gather_stats_{table}_generated"):
+                                    with st.spinner(f"Сбор статистики для таблицы {table}... Это может занять несколько минут для больших таблиц."):
+                                        success, message = gather_table_stats(table)
+                                        if success:
+                                            st.success(message)
+                                        else:
+                                            st.error(message)
+                    
+                    # Сохраняем результат для отображения ниже
+                    st.session_state["sql_result"] = {
+                        "sql": generated_sql,
+                        "df": df,
+                        "timestamp": pd.Timestamp.now()
+                    }
+        else:
+            # Если LLM недоступен, показываем контекст и примеры
+            api_key = os.getenv("OPENAI_API_KEY")
+            if not api_key:
+                st.info("""
+                💡 **Автоматическая генерация SQL через LLM недоступна**
+                
+                Для включения автоматической генерации SQL установите в `config.env`:
+                - `OPENAI_API_KEY=your-api-key`
+                - `OPENAI_API_BASE=https://api.proxyapi.ru/openai/v1` (опционально, для прокси)
+                
+                **Сейчас доступно:** Вы можете использовать похожие примеры ниже и выполнить их кнопкой "▶️ Выполнить".
+                """)
+            
+            # Форматирование контекста
+            if context:
+                formatted_context = assistant.format_context_for_llm(context)
+                
+                # Показываем контекст
+                st.markdown("**Контекст для генерации:**")
+                with st.expander("Показать контекст", expanded=False):
+                    st.text(formatted_context)
+                
+                # Если есть похожие примеры, показываем их
+                if context.get("examples"):
+                    st.markdown("**Рекомендуемые примеры:**")
+                    for i, example in enumerate(context["examples"][:3], 1):
+                        result_key_gen = f"gen_example_result_{i}"
+                        st.markdown(f"{i}. {example['question']}")
+                        st.code(example['sql'], language="sql")
+                        
+                        # Кнопка выполнения для каждого примера
+                        if st.button(f"▶️ Выполнить пример {i}", key=f"execute_gen_example_{i}"):
+                            execute_sql_query(example['sql'], result_key=result_key_gen)
+                
+                # Информация о таблицах
+                if context.get("tables_info"):
+                    st.markdown("**Используемые таблицы:**")
+                    for table_name in context["tables_info"].keys():
+                        st.markdown(f"- {table_name}")
+            
+            st.info("""
+            💡 **Для автоматической генерации SQL:** 
+            
+            Установите переменную окружения OPENAI_API_KEY в config.env.
+            Для использования прокси (например, proxyapi.ru) установите OPENAI_API_BASE=https://api.proxyapi.ru/openai/v1
+            
+            Вы можете скопировать SQL из похожих примеров выше и выполнить его вручную.
+            """)
+    
+    else:
+        st.info("💡 Введите вопрос и нажмите кнопку **📊 Сгенерировать SQL**")
+    
+    # Единое место для отображения результатов снизу
+    st.markdown("---")
+    st.subheader("📋 Результаты выполнения")
+    
+    # Проверяем все возможные ключи результатов
+    result_keys_to_check = [
+        "sql_result",
+        "generated_with_stats",
+        "gen_example_result_1", "gen_example_result_2", "gen_example_result_3"
+    ]
+    
+    displayed_result = False
+    for result_key in result_keys_to_check:
+        if result_key in st.session_state:
+            result = st.session_state[result_key]
+            if "df" in result and result["df"] is not None:
+                displayed_result = True
+                if result["df"].empty:
+                    st.info("ℹ️ Запрос выполнен успешно, но результатов нет")
+                else:
+                    st.success(f"✅ Запрос выполнен успешно. Найдено записей: {len(result['df'])}")
+                    st.dataframe(result["df"], use_container_width=True, height=400)
+                    
+                    # Кнопка экспорта
+                    csv = result["df"].to_csv(index=False).encode('utf-8')
+                    st.download_button(
+                        label="📥 Скачать CSV",
+                        data=csv,
+                        file_name=f"query_result_{result['timestamp'].strftime('%Y%m%d_%H%M%S')}.csv",
+                        mime="text/csv",
+                        key=f"download_{result_key}_final"
+                    )
+                break  # Показываем только один результат
+            elif "error" in result:
+                displayed_result = True
+                st.error(f"❌ Ошибка: {result['error']}")
+                with st.expander("🔍 Детали ошибки", expanded=False):
+                    st.code(result.get("traceback", ""), language="python")
+                break
+    
+    if not displayed_result:
+        st.info("💡 Результаты выполнения запросов будут отображаться здесь")
 
 
 def show_financial_analysis_tab():
@@ -490,11 +392,8 @@ def show_financial_analysis_tab():
             
             # Обработка кнопок
             if execute_btn:
-                st.markdown("**Результаты выполнения:**")
                 execute_sql_query(generated_sql, result_key="financial_result")
             elif stats_btn:
-                st.markdown("**Результаты выполнения со статистикой:**")
-                
                 # Информация о фактическом плане выполнения
                 with st.expander("ℹ️ О фактическом плане выполнения", expanded=False):
                     st.markdown("""
@@ -563,63 +462,13 @@ def show_financial_analysis_tab():
                                                         st.warning(message)
                                 else:
                                     st.success("✅ Статистика для всех таблиц актуальна. Дополнительный сбор статистики не требуется.")
-                    if df.empty:
-                        st.info("ℹ️ Запрос выполнен успешно, но результатов нет")
-                    else:
-                        st.success(f"✅ Запрос выполнен успешно. Найдено записей: {len(df)}")
-                        st.dataframe(df, use_container_width=True, height=400)
-                        
-                        # Кнопка экспорта
-                        csv = df.to_csv(index=False).encode('utf-8')
-                        st.download_button(
-                            label="📥 Скачать CSV",
-                            data=csv,
-                            file_name=f"financial_result_{pd.Timestamp.now().strftime('%Y%m%d_%H%M%S')}.csv",
-                            mime="text/csv",
-                            key=f"download_financial_with_stats"
-                        )
-            
-            # Финансовый анализ результатов (если есть данные)
-            if "financial_result" in st.session_state:
-                    result = st.session_state["financial_result"]
-                    if "df" in result and result["df"] is not None and not result["df"].empty:
-                        df = result["df"]
-                        
-                        # Финансовый анализ результатов
-                        st.markdown("---")
-                        st.subheader("💡 Финансовый анализ результатов")
-                        
-                        # Проверяем наличие финансовых полей
-                        profit_cols = [col for col in df.columns if any(keyword in col.lower() for keyword in ['прибыль', 'profit', 'убыток', 'loss', 'маржа', 'margin'])]
-                        cost_cols = [col for col in df.columns if any(keyword in col.lower() for keyword in ['расход', 'expense', 'cost', 'затрат'])]
-                        revenue_cols = [col for col in df.columns if any(keyword in col.lower() for keyword in ['доход', 'revenue', 'выручк'])]
-                        
-                        if profit_cols or (cost_cols and revenue_cols):
-                            # Анализ убыточных позиций
-                            if profit_cols:
-                                profit_col = profit_cols[0]
-                                negative_profit = df[df[profit_col] < 0] if profit_col in df.columns else pd.DataFrame()
-                                if not negative_profit.empty:
-                                    st.warning(f"⚠️ **Обнаружено {len(negative_profit)} убыточных позиций:**")
-                                    st.dataframe(negative_profit, use_container_width=True, height=300)
-                            
-                            # Анализ низкой маржи
-                            margin_cols = [col for col in df.columns if 'маржа' in col.lower() or 'margin' in col.lower()]
-                            if margin_cols:
-                                margin_col = margin_cols[0]
-                                low_margin = df[df[margin_col] < 10] if margin_col in df.columns else pd.DataFrame()
-                                if not low_margin.empty:
-                                    st.info(f"ℹ️ **Обнаружено {len(low_margin)} позиций с низкой маржой (<10%):**")
-                                    st.dataframe(low_margin, use_container_width=True, height=300)
-                            
-                            # Статистика
-                            if profit_cols:
-                                profit_col = profit_cols[0]
-                                if profit_col in df.columns:
-                                    total_profit = df[profit_col].sum()
-                                    avg_profit = df[profit_col].mean()
-                                    st.metric("Общая прибыль", f"{total_profit:,.2f} RUB")
-                                    st.metric("Средняя прибыль", f"{avg_profit:,.2f} RUB")
+                    
+                    # Сохраняем результат для отображения ниже
+                    st.session_state["financial_result"] = {
+                        "sql": generated_sql,
+                        "df": df,
+                        "timestamp": pd.Timestamp.now()
+                    }
         else:
             # Если LLM недоступен, показываем контекст и примеры
             api_key = os.getenv("OPENAI_API_KEY")
@@ -653,19 +502,122 @@ def show_financial_analysis_tab():
                     
                     # Кнопка выполнения для каждого примера
                     if st.button(f"▶️ Выполнить пример {i}", key=f"execute_financial_example_{i}"):
-                        execute_sql_query(example['sql'], result_key=f"financial_example_{i}")
-                    
-                    # Отображение сохраненного результата, если есть
-                    if f"financial_example_{i}" in st.session_state:
-                        result = st.session_state[f"financial_example_{i}"]
-                        if "df" in result and result["df"] is not None:
-                            if result["df"].empty:
-                                st.info("ℹ️ Запрос выполнен успешно, но результатов нет")
-                            else:
-                                st.success(f"✅ Найдено записей: {len(result['df'])}")
-                                st.dataframe(result["df"], use_container_width=True, height=400)
+                        execute_sql_query(example['sql'], result_key="financial_result")
     else:
-            st.info("💡 Введите вопрос для финансового анализа и нажмите кнопку **📊 Сгенерировать SQL для анализа**")
+        st.info("💡 Введите вопрос для финансового анализа и нажмите кнопку **📊 Сгенерировать SQL для анализа**")
+    
+    # Единое место для отображения результатов снизу
+    st.markdown("---")
+    st.subheader("📋 Результаты выполнения")
+    
+    # Проверяем результат финансового анализа
+    if "financial_result" in st.session_state:
+        result = st.session_state["financial_result"]
+        if "df" in result and result["df"] is not None:
+            df = result["df"]
+            if df.empty:
+                st.info("ℹ️ Запрос выполнен успешно, но результатов нет")
+            else:
+                st.success(f"✅ Запрос выполнен успешно. Найдено записей: {len(df)}")
+                st.dataframe(df, use_container_width=True, height=400)
+                
+                # Кнопка экспорта
+                csv = df.to_csv(index=False).encode('utf-8')
+                st.download_button(
+                    label="📥 Скачать CSV",
+                    data=csv,
+                    file_name=f"financial_result_{result['timestamp'].strftime('%Y%m%d_%H%M%S')}.csv",
+                    mime="text/csv",
+                    key=f"download_financial_result_final"
+                )
+                
+                # Финансовый анализ результатов (только метрики, без дублирования таблиц)
+                st.markdown("---")
+                st.subheader("💡 Финансовый анализ результатов")
+                
+                # Проверяем наличие финансовых полей
+                profit_cols = [col for col in df.columns if any(keyword in col.lower() for keyword in ['прибыль', 'profit', 'убыток', 'loss', 'маржа', 'margin'])]
+                cost_cols = [col for col in df.columns if any(keyword in col.lower() for keyword in ['расход', 'expense', 'cost', 'затрат'])]
+                revenue_cols = [col for col in df.columns if any(keyword in col.lower() for keyword in ['доход', 'revenue', 'выручк'])]
+                
+                if profit_cols or (cost_cols and revenue_cols):
+                    # Показываем только метрики и статистику, без дублирования таблиц
+                    col1, col2 = st.columns(2)
+                    
+                    with col1:
+                        # Анализ убыточных позиций (только количество, без таблицы)
+                        if profit_cols:
+                            profit_col = profit_cols[0]
+                            negative_profit_count = len(df[df[profit_col] < 0]) if profit_col in df.columns else 0
+                            if negative_profit_count > 0:
+                                st.warning(f"⚠️ **Убыточных позиций: {negative_profit_count}**")
+                            else:
+                                st.success("✅ Убыточных позиций не обнаружено")
+                        
+                        # Анализ низкой маржи (только количество, без таблицы)
+                        margin_cols = [col for col in df.columns if 'маржа' in col.lower() or 'margin' in col.lower()]
+                        if margin_cols:
+                            margin_col = margin_cols[0]
+                            low_margin_count = len(df[df[margin_col] < 10]) if margin_col in df.columns else 0
+                            if low_margin_count > 0:
+                                st.info(f"ℹ️ **Позиций с низкой маржой (<10%): {low_margin_count}**")
+                            else:
+                                st.success("✅ Позиций с низкой маржой не обнаружено")
+                    
+                    with col2:
+                        # Статистика по прибыли
+                        if profit_cols:
+                            profit_col = profit_cols[0]
+                            if profit_col in df.columns:
+                                total_profit = df[profit_col].sum()
+                                avg_profit = df[profit_col].mean()
+                                st.metric("Общая прибыль", f"{total_profit:,.2f} RUB")
+                                st.metric("Средняя прибыль", f"{avg_profit:,.2f} RUB")
+                    
+                    # Пояснение результатов
+                    st.markdown("---")
+                    with st.expander("📖 Пояснение расчетов и показателей", expanded=True):
+                        st.markdown("""
+                        **Как считаются показатели:**
+                        
+                        1. **Прибыль (PROFIT_RUB)** = Доходы (REVENUE_RUB) - Расходы (EXPENSES_RUB)
+                           - Если значение **отрицательное** → это **убыток** (расходы превышают доходы)
+                           - Если значение **положительное** → это **прибыль**
+                        
+                        2. **Расходы (EXPENSES_RUB)** включают:
+                           - Превышение трафика (CALCULATED_OVERAGE)
+                           - Стоимость трафика из SPNet (SPNET_TOTAL_AMOUNT)
+                           - Все сборы и комиссии (FEES_TOTAL)
+                           - Конвертация из USD в RUB через курс из счетов-фактур
+                        
+                        3. **Доходы (REVENUE_RUB)** - сумма из счетов-фактур в рублях:
+                           - SBD трафик превышения
+                           - SBD абонплата
+                           - SUSPEND абонплата
+                           - Мониторинг и другие услуги
+                        
+                        4. **Маржа (MARGIN_PCT)** = (Прибыль / Доходы) × 100%
+                           - Показывает процент прибыли от дохода
+                           - Если прибыль отрицательная → маржа тоже отрицательная
+                           - Маржа < 10% считается низкой
+                        
+                        5. **Себестоимость (COST_PCT)** = (Расходы / Доходы) × 100%
+                           - Показывает процент расходов от дохода
+                           - Если себестоимость > 100% → убыток
+                        
+                        **Пример:**
+                        - Доходы: 100,000 RUB
+                        - Расходы: 120,000 RUB
+                        - **Прибыль: -20,000 RUB** (убыток 20,000 руб)
+                        - **Маржа: -20%** (убыток составляет 20% от дохода)
+                        - **Себестоимость: 120%** (расходы превышают доходы на 20%)
+                        """)
+        elif "error" in result:
+            st.error(f"❌ Ошибка: {result['error']}")
+            with st.expander("🔍 Детали ошибки", expanded=False):
+                st.code(result.get("traceback", ""), language="python")
+    else:
+        st.info("💡 Результаты выполнения запросов будут отображаться здесь")
 
 
 def get_connection():
@@ -1034,19 +986,28 @@ def execute_sql_with_stats(sql: str, result_key: str = "sql_result"):
         
     except Exception as e:
         error_msg = str(e)
-        st.error(f"❌ Ошибка при выполнении SQL: {error_msg}")
         import traceback
-        with st.expander("🔍 Детали ошибки", expanded=False):
-            st.code(traceback.format_exc(), language="python")
+        traceback_str = traceback.format_exc()
+        
+        # Сохранение ошибки в session_state (без отображения)
+        st.session_state[result_key] = {
+            "sql": sql_clean if 'sql_clean' in locals() else sql.strip().rstrip(';').strip(),
+            "error": error_msg,
+            "traceback": traceback_str
+        }
         return None, None, None
 
 
 def execute_sql_query(sql: str, result_key: str = "sql_result"):
-    """Выполнение SQL запроса в Oracle и сохранение результата в session_state"""
+    """Выполнение SQL запроса в Oracle и сохранение результата в session_state (без отображения)"""
     try:
         conn = get_connection()
         if not conn:
-            st.error("❌ Не удалось подключиться к базе данных. Проверьте настройки Oracle в config.env")
+            st.session_state[result_key] = {
+                "sql": sql.strip().rstrip(';').strip(),
+                "error": "❌ Не удалось подключиться к базе данных. Проверьте настройки Oracle в config.env",
+                "traceback": ""
+            }
             return
         
         # Очистка SQL запроса: удаляем точку с запятой в конце и лишние пробелы
@@ -1057,40 +1018,21 @@ def execute_sql_query(sql: str, result_key: str = "sql_result"):
             df = pd.read_sql(sql_clean, conn)
             conn.close()
         
-        # Сохранение результата в session_state
+        # Сохранение результата в session_state (без отображения)
         st.session_state[result_key] = {
             "sql": sql_clean,
             "df": df,
             "timestamp": pd.Timestamp.now()
         }
-        
-        # Отображение результата
-        if df.empty:
-            st.info("ℹ️ Запрос выполнен успешно, но результатов нет")
-        else:
-            st.success(f"✅ Запрос выполнен успешно. Найдено записей: {len(df)}")
-            st.dataframe(df, use_container_width=True, height=400)
-            
-            # Кнопка экспорта
-            csv = df.to_csv(index=False).encode('utf-8')
-            st.download_button(
-                label="📥 Скачать CSV",
-                data=csv,
-                file_name=f"query_result_{pd.Timestamp.now().strftime('%Y%m%d_%H%M%S')}.csv",
-                mime="text/csv",
-                key=f"download_{result_key}"
-            )
     except Exception as e:
         error_msg = str(e)
-        st.error(f"❌ Ошибка при выполнении SQL: {error_msg}")
         import traceback
-        with st.expander("🔍 Детали ошибки", expanded=False):
-            st.code(traceback.format_exc(), language="python")
+        traceback_str = traceback.format_exc()
         
-        # Сохранение ошибки в session_state
+        # Сохранение ошибки в session_state (без отображения)
         st.session_state[result_key] = {
-            "sql": sql_clean if 'sql_clean' in locals() else sql,
+            "sql": sql_clean if 'sql_clean' in locals() else sql.strip().rstrip(';').strip(),
             "error": error_msg,
-            "traceback": traceback.format_exc()
+            "traceback": traceback_str
         }
 

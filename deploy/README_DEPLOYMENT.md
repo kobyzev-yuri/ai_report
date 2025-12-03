@@ -151,3 +151,4 @@ pip install -r requirements.txt
 - Быстрый старт RAG: `kb_billing/rag/QUICK_START.md`
 
 
+

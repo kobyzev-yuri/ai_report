@@ -264,3 +264,4 @@ curl http://localhost:6333/collections/kb_billing | jq '.result.points_count'
 - Резюме: `DEPLOYMENT_SUMMARY.md`
 
 
+

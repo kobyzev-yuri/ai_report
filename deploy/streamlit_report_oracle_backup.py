@@ -761,8 +761,56 @@ def main():
         
         st.info("💡 Конфигурация загружается из config.env при запуске через run_streamlit.sh")
     
-    # Создаем вкладки для отчета, доходов и загрузки данных
-    tab_report, tab_revenue, tab_loader = st.tabs(["💰 Расходы Иридиум", "💰 Доходы", "📥 Data Loader"])
+    # Создаем вкладки для отчета, доходов, загрузки данных, ассистента и финансового анализа
+    tab_assistant, tab_financial, tab_report, tab_revenue, tab_loader = st.tabs([
+        "🤖 Ассистент",
+        "📊 Финансовый анализ",
+        "💰 Расходы Иридиум", 
+        "💰 Доходы", 
+        "📥 Data Loader"
+    ])
+    
+    # ========== ASSISTANT TAB ==========
+    with tab_assistant:
+        try:
+            # Убеждаемся, что переменная окружения установлена перед импортом
+            os.environ['PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION'] = 'python'
+            from kb_billing.rag.streamlit_assistant import show_assistant_tab
+            show_assistant_tab()
+        except ImportError as e:
+            st.error(f"❌ Ошибка импорта модуля ассистента: {e}")
+            st.info("""
+            Убедитесь, что:
+            1. Установлены зависимости: `pip install qdrant-client sentence-transformers`
+            2. Qdrant запущен: `docker run -d -p 6333:6333 qdrant/qdrant`
+            3. KB инициализирована: `python kb_billing/rag/init_kb.py`
+            """)
+        except Exception as e:
+            st.error(f"❌ Ошибка при загрузке ассистента: {e}")
+            import traceback
+            with st.expander("Детали ошибки"):
+                st.code(traceback.format_exc())
+    
+    # ========== FINANCIAL ANALYSIS TAB ==========
+    with tab_financial:
+        try:
+            # Убеждаемся, что переменная окружения установлена перед импортом
+            os.environ['PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION'] = 'python'
+            from kb_billing.rag.streamlit_assistant import show_financial_analysis_tab
+            show_financial_analysis_tab()
+        except ImportError as e:
+            st.error(f"❌ Ошибка импорта модуля финансового анализа: {e}")
+            st.info("""
+            Убедитесь, что:
+            1. Установлены зависимости: `pip install qdrant-client sentence-transformers`
+            2. Qdrant запущен: `docker run -d -p 6333:6333 qdrant/qdrant`
+            3. KB инициализирована: `python kb_billing/rag/init_kb.py`
+            """)
+        except Exception as e:
+            st.error(f"❌ Ошибка при загрузке финансового анализа: {e}")
+            import traceback
+            with st.expander("Детали ошибки"):
+                st.code(traceback.format_exc())
     
     # ========== REPORT TAB ==========
     with tab_report:

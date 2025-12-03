@@ -242,3 +242,4 @@ ssh root@82.114.2.2 "kill -9 <PID>"
 - Резюме: `DEPLOYMENT_SUMMARY.md`
 
 
+

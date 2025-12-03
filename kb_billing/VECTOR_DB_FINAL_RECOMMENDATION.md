@@ -353,3 +353,4 @@ embedding = model.encode(text, normalize_embeddings=True)
 - [Sentence Transformers](https://www.sbert.net/)
 
 
+

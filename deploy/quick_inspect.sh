@@ -49,3 +49,4 @@ echo ""
 SSH_CMD="$SSH_CMD" ./server_inspection.sh "$SERVER"
 
 
+

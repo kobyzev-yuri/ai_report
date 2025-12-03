@@ -235,3 +235,4 @@ loader = KBLoader(embedding_model="intfloat/multilingual-e5-large")
 Часть проекта Iridium M2M Reporting System.
 
 
+
