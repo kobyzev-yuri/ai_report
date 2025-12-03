@@ -195,6 +195,9 @@ LEFT JOIN steccom_fees sf
 -- Advance Charge за предыдущий месяц
 -- cor.BILL_MONTH в формате YYYYMM (строка, например '202510')
 -- Вычисляем предыдущий месяц используя ADD_MONTHS
+-- ВАЖНО: Аванс переходит по CONTRACT_ID, а не по IMEI
+-- Это позволяет корректно обрабатывать свопы IMEI (замены IMEI на SUB)
+-- IMEI для отображения берется из текущего периода (cor.IMEI)
 LEFT JOIN steccom_fees sf_prev
     ON sf_prev.bill_month = CASE 
            WHEN cor.BILL_MONTH IS NOT NULL AND LENGTH(TRIM(cor.BILL_MONTH)) >= 6 THEN
@@ -203,7 +206,9 @@ LEFT JOIN steccom_fees sf_prev
                NULL
        END
     AND RTRIM(cor.CONTRACT_ID) = RTRIM(sf_prev.CONTRACT_ID)
-    AND cor.IMEI = sf_prev.imei
+    -- УБРАНО: AND cor.IMEI = sf_prev.imei
+    -- Причина: при свопе IMEI аванс должен переходить по CONTRACT_ID,
+    -- а IMEI для отображения берется из текущего периода (cor.IMEI)
 UNION ALL
 -- Включаем строки для финансовых периодов, где есть аванс за предыдущий месяц,
 -- но нет данных о трафике/событиях за следующий месяц (IMEI был выключен)
@@ -299,16 +304,20 @@ LEFT JOIN (
     ) v1
     WHERE v1.rn = 1
 ) v ON RTRIM(sf_prev.CONTRACT_ID) = RTRIM(v.CONTRACT_ID)
+-- Аванс за следующий месяц (для UNION ALL части)
+-- ВАЖНО: Аванс переходит по CONTRACT_ID, а не по IMEI
 LEFT JOIN steccom_fees sf_next
     ON sf_next.bill_month = TO_CHAR(ADD_MONTHS(TO_DATE(sf_prev.bill_month, 'YYYYMM'), 1), 'YYYYMM')
     AND RTRIM(sf_prev.CONTRACT_ID) = RTRIM(sf_next.CONTRACT_ID)
-    AND sf_prev.imei = sf_next.imei
+    -- УБРАНО: AND sf_prev.imei = sf_next.imei
+    -- Причина: при свопе IMEI аванс должен переходить по CONTRACT_ID
 -- КРИТИЧЕСКИ ВАЖНО: Добавляем строку ТОЛЬКО если:
 -- 1. Есть аванс за предыдущий месяц
 -- 2. НЕТ данных в cor для BILL_MONTH = bill_month + 1 (месяц после аванса)
 -- 3. И НЕТ данных в основном SELECT (проверяем через NOT EXISTS с полным набором условий)
 WHERE sf_prev.fee_advance_charge > 0
   -- Проверяем, что нет данных в основном SELECT (cor) для этого периода
+  -- ВАЖНО: Проверяем по CONTRACT_ID, а не по IMEI, чтобы корректно обрабатывать свопы
   AND NOT EXISTS (
       SELECT 1
       FROM (
@@ -316,8 +325,9 @@ WHERE sf_prev.fee_advance_charge > 0
           FROM V_CONSOLIDATED_OVERAGE_REPORT
           GROUP BY IMEI, CONTRACT_ID, BILL_MONTH
       ) cor_check
-      WHERE cor_check.IMEI = sf_prev.imei
-        AND RTRIM(cor_check.CONTRACT_ID) = RTRIM(sf_prev.CONTRACT_ID)
+      WHERE RTRIM(cor_check.CONTRACT_ID) = RTRIM(sf_prev.CONTRACT_ID)
+        -- УБРАНО: cor_check.IMEI = sf_prev.imei
+        -- Причина: при свопе IMEI проверяем только CONTRACT_ID
         AND CASE 
                 WHEN cor_check.BILL_MONTH IS NOT NULL AND LENGTH(TRIM(cor_check.BILL_MONTH)) >= 6 THEN
                     SUBSTR(TRIM(cor_check.BILL_MONTH), 1, 6)
