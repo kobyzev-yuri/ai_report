@@ -1,0 +1,117 @@
+{
+  "table_name": "BM_SERVICE_STATUS",
+  "schema": "billing",
+  "description": "История изменения статуса услуги. Содержит полную хронологию всех изменений статуса услуг с датами начала и окончания действия каждого статуса. Используется вместе с BM_ACTION_LOG для корректного расчета начислений для управляемых пользователем групп услуг по IMEI. Критически важно для расчета абонплаты SBD (TYPE_ID=9002) и зависимых услуг (9005, 9008, 9013).",
+  "database": "Oracle (production)",
+  "ddl": "CREATE TABLE BM_SERVICE_STATUS (\n    SERVICE_STATUS_ID DOUBLE PRECISION,\n    SERVICE_ID DOUBLE PRECISION,\n    STATUS_ID DOUBLE PRECISION,\n    DATE_BEG DATE,\n    DATE_END DATE,\n    DESCRIPTION VARCHAR2(255)\n);",
+  "key_columns": {
+    "SERVICE_STATUS_ID": "Уникальный идентификатор записи статуса (PRIMARY KEY)",
+    "SERVICE_ID": "ID услуги из SERVICES.SERVICE_ID. Связь с SERVICES.SERVICE_ID",
+    "STATUS_ID": "ID статуса услуги. ВАЖНО: STATUS_ID = -10 означает выключен (приостановлен), STATUS_ID = +10 означает включен (активен)",
+    "DATE_BEG": "Дата начала действия статуса (DATE)",
+    "DATE_END": "Дата окончания действия статуса (DATE). ВАЖНО: DATE_END IS NULL для активного (текущего) статуса",
+    "DESCRIPTION": "Описание статуса (опционально)"
+  },
+  "business_rules": [
+    "BM_SERVICE_STATUS содержит полную историю всех изменений статуса услуги",
+    "STATUS_ID = -10: услуга выключена (приостановлена)",
+    "STATUS_ID = +10: услуга включена (активна)",
+    "Для активного статуса: DATE_END IS NULL",
+    "Для исторических статусов: DATE_END заполнена (дата окончания действия статуса)",
+    "DATE_BEG определяет начало действия статуса",
+    "Периоды статусов не должны пересекаться (каждый период имеет DATE_BEG и DATE_END)",
+    "ВАЖНО: BM_SERVICE_STATUS и BM_ACTION_LOG работают вместе для корректного расчета начислений",
+    "Для управляемых пользователем групп услуг по IMEI (TYPE_ID: 9002, 9005, 9008, 9013):",
+    "  - BM_SERVICE_STATUS ведет историю статусов для каждой услуги в группе",
+    "  - BM_ACTION_LOG фиксирует момент изменения статуса главной услуги (TYPE_ID=9002)",
+    "  - Вместе они позволяют правильно рассчитать периоды активности/приостановки",
+    "Для расчета абонплаты SBD (TYPE_ID=9002):",
+    "  - Нужно найти все периоды, когда STATUS_ID = +10 (активна)",
+    "  - Суммировать количество дней активности для расчета абонплаты",
+    "Для расчета абонплаты suspend (TYPE_ID=9008):",
+    "  - Нужно найти все периоды, когда STATUS_ID = -10 (приостановлена)",
+    "  - Суммировать количество дней приостановки для расчета абонплаты",
+    "Для услуг типа 30 (личный кабинет): BM_SERVICE_STATUS может использоваться для отслеживания статуса доступа"
+  ],
+  "relationships": [
+    {
+      "table": "SERVICES",
+      "type": "JOIN",
+      "on": "BM_SERVICE_STATUS.SERVICE_ID = SERVICES.SERVICE_ID",
+      "note": "Связь с основной таблицей услуг"
+    },
+    {
+      "table": "BM_ACTION_LOG",
+      "type": "LEFT JOIN",
+      "on": "BM_SERVICE_STATUS.SERVICE_ID = BM_ACTION_LOG.SERVICE_ID AND BM_SERVICE_STATUS.DATE_BEG = BM_ACTION_LOG.MOMENT",
+      "note": "Связь с журналом действий для получения информации о том, кто и когда изменил статус. BM_ACTION_LOG фиксирует момент изменения, BM_SERVICE_STATUS ведет историю периодов"
+    }
+  ],
+  "usage_notes": [
+    "Используется для восстановления полной истории статусов услуги",
+    "Для получения текущего статуса: WHERE SERVICE_ID = :service_id AND DATE_END IS NULL",
+    "Для получения всех статусов услуги: WHERE SERVICE_ID = :service_id ORDER BY DATE_BEG",
+    "Для расчета периодов активности: WHERE SERVICE_ID = :service_id AND STATUS_ID = +10",
+    "Для расчета периодов приостановки: WHERE SERVICE_ID = :service_id AND STATUS_ID = -10",
+    "ВАЖНО: BM_SERVICE_STATUS и BM_ACTION_LOG работают вместе:",
+    "  - BM_ACTION_LOG фиксирует момент изменения статуса (MOMENT, OLD_VALUE, NEW_VALUE)",
+    "  - BM_SERVICE_STATUS ведет историю периодов статусов (DATE_BEG, DATE_END, STATUS_ID)",
+    "  - Вместе они позволяют правильно рассчитать начисления для управляемых пользователем групп по IMEI",
+    "Для группы услуг на одном IMEI (TYPE_ID: 9002, 9005, 9008, 9013):",
+    "  - Отслеживать изменения статуса главной услуги (TYPE_ID=9002) через BM_ACTION_LOG",
+    "  - Восстанавливать периоды статусов через BM_SERVICE_STATUS",
+    "  - Рассчитывать абонплату на основе периодов активности/приостановки",
+    "Пример: найти все периоды активности SBD услуги:",
+    "  SELECT * FROM BM_SERVICE_STATUS WHERE SERVICE_ID = :service_id AND STATUS_ID = +10 ORDER BY DATE_BEG",
+    "Пример: найти все периоды приостановки suspend услуги:",
+    "  SELECT * FROM BM_SERVICE_STATUS WHERE SERVICE_ID = :service_id AND STATUS_ID = -10 ORDER BY DATE_BEG",
+    "Пример: рассчитать количество активных дней за период:",
+    "  SELECT SUM(TRUNC(COALESCE(DATE_END, SYSDATE) - DATE_BEG)) AS ACTIVE_DAYS",
+    "  FROM BM_SERVICE_STATUS",
+    "  WHERE SERVICE_ID = :service_id AND STATUS_ID = +10",
+    "    AND DATE_BEG <= :period_end",
+    "    AND (DATE_END IS NULL OR DATE_END >= :period_start)"
+  ],
+  "examples": {
+    "common_queries": [
+      {
+        "description": "Найти текущий статус услуги",
+        "sql": "SELECT * FROM BM_SERVICE_STATUS WHERE SERVICE_ID = :service_id AND DATE_END IS NULL"
+      },
+      {
+        "description": "Найти все периоды активности услуги",
+        "sql": "SELECT * FROM BM_SERVICE_STATUS WHERE SERVICE_ID = :service_id AND STATUS_ID = +10 ORDER BY DATE_BEG"
+      },
+      {
+        "description": "Найти все периоды приостановки услуги",
+        "sql": "SELECT * FROM BM_SERVICE_STATUS WHERE SERVICE_ID = :service_id AND STATUS_ID = -10 ORDER BY DATE_BEG"
+      },
+      {
+        "description": "Рассчитать количество активных дней за период",
+        "sql": "SELECT SUM(TRUNC(COALESCE(DATE_END, SYSDATE) - DATE_BEG)) AS ACTIVE_DAYS FROM BM_SERVICE_STATUS WHERE SERVICE_ID = :service_id AND STATUS_ID = +10 AND DATE_BEG <= :period_end AND (DATE_END IS NULL OR DATE_END >= :period_start)"
+      },
+      {
+        "description": "Найти историю статусов с информацией о действиях (BM_ACTION_LOG)",
+        "sql": "SELECT ss.*, al.STAFF_ID, al.MOMENT AS ACTION_MOMENT, al.OLD_VALUE, al.NEW_VALUE FROM BM_SERVICE_STATUS ss LEFT JOIN BM_ACTION_LOG al ON ss.SERVICE_ID = al.SERVICE_ID AND ss.DATE_BEG = al.MOMENT WHERE ss.SERVICE_ID = :service_id ORDER BY ss.DATE_BEG"
+      },
+      {
+        "description": "Найти все статусы для группы услуг на одном IMEI",
+        "sql": "SELECT ss.*, s.TYPE_ID, s.LOGIN, s.VSAT FROM BM_SERVICE_STATUS ss JOIN SERVICES s ON ss.SERVICE_ID = s.SERVICE_ID WHERE s.VSAT = (SELECT VSAT FROM SERVICES WHERE SERVICE_ID = :service_id) AND s.ACCOUNT_ID = (SELECT ACCOUNT_ID FROM SERVICES WHERE SERVICE_ID = :service_id) AND s.TYPE_ID IN (9002, 9005, 9008, 9013) ORDER BY s.TYPE_ID, ss.DATE_BEG"
+      }
+    ],
+    "billing_calculation": {
+      "description": "Расчет абонплаты для группы услуг на IMEI",
+      "steps": [
+        "1. Найти главную услугу (TYPE_ID=9002) по IMEI",
+        "2. Получить историю статусов главной услуги из BM_SERVICE_STATUS",
+        "3. Рассчитать периоды активности (STATUS_ID=+10) для абонплаты SBD",
+        "4. Рассчитать периоды приостановки (STATUS_ID=-10) для абонплаты suspend",
+        "5. Для мониторинга (TYPE_ID=9005): использовать те же периоды активности, что и для SBD (активны одновременно)",
+        "6. Для блокировки (TYPE_ID=9013): использовать периоды приостановки (активна в оставшееся время)"
+      ],
+      "note": "BM_SERVICE_STATUS и BM_ACTION_LOG работают вместе для корректного расчета начислений для управляемых пользователем групп по IMEI"
+    }
+  }
+}
+
+

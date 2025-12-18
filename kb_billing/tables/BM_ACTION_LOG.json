@@ -1,0 +1,247 @@
+{
+  "table_name": "BM_ACTION_LOG",
+  "schema": "billing",
+  "description": "Журнал действий операторов и скриптов. Содержит историю всех изменений, выполненных операторами через веб-интерфейс или автоматическими скриптами. Используется для аудита, отслеживания изменений и восстановления истории операций.",
+  "database": "Oracle (production)",
+  "ddl": "CREATE TABLE BM_ACTION_LOG (\n    ACTION_LOG_ID DOUBLE PRECISION,\n    ACTION_ID DOUBLE PRECISION,\n    SUB_ACTION_ID DOUBLE PRECISION,\n    STAFF_ID DOUBLE PRECISION,\n    SCRIPT_NAME VARCHAR2(255),\n    CUSTOMER_ID DOUBLE PRECISION,\n    ACCOUNT_ID DOUBLE PRECISION,\n    SERVICE_ID DOUBLE PRECISION,\n    GROUP_ID DOUBLE PRECISION,\n    DOMAIN_ID DOUBLE PRECISION,\n    TARGET_ID DOUBLE PRECISION,\n    OLD_VALUE VARCHAR2(255),\n    NEW_VALUE VARCHAR2(255),\n    REMOTE_ADDR VARCHAR2(255),\n    STAFF_COMMENT VARCHAR2(255),\n    MOMENT DATE\n);",
+  "key_columns": {
+    "ACTION_LOG_ID": "Уникальный идентификатор записи в журнале (PRIMARY KEY)",
+    "ACTION_ID": "ID типа действия (связь с BM_ACTION.ACTION_ID - справочник типов действий)",
+    "SUB_ACTION_ID": "ID подтипа действия (связь с BM_SUB_ACTION.SUB_ACTION_ID - детализация типа действия)",
+    "STAFF_ID": "ID сотрудника/оператора, выполнившего действие (связь со справочником сотрудников, если существует)",
+    "SCRIPT_NAME": "Название скрипта, если действие выполнено автоматически (NULL если выполнено вручную оператором)",
+    "CUSTOMER_ID": "ID клиента, к которому относится действие (связь с CUSTOMERS.CUSTOMER_ID)",
+    "ACCOUNT_ID": "ID договора, к которому относится действие (связь с ACCOUNTS.ACCOUNT_ID)",
+    "SERVICE_ID": "ID услуги, к которому относится действие (связь с SERVICES.SERVICE_ID)",
+    "GROUP_ID": "ID группы, к которой относится действие",
+    "DOMAIN_ID": "ID домена, к которому относится действие",
+    "TARGET_ID": "ID целевого объекта действия (универсальное поле для связи с другими сущностями)",
+    "OLD_VALUE": "Старое значение изменяемого поля/объекта (до изменения). ВАЖНО: Для услуг SBD (TYPE_ID=9002) и suspend (TYPE_ID=9008) отслеживание OLD_VALUE и NEW_VALUE критично для расчета абонплаты",
+    "NEW_VALUE": "Новое значение изменяемого поля/объекта (после изменения). ВАЖНО: Для услуг SBD (TYPE_ID=9002) и suspend (TYPE_ID=9008) отслеживание OLD_VALUE и NEW_VALUE критично для расчета абонплаты",
+    "REMOTE_ADDR": "IP-адрес или адрес удаленного клиента, с которого было выполнено действие",
+    "STAFF_COMMENT": "Комментарий оператора к действию (опционально)",
+    "MOMENT": "Дата и время выполнения действия (TIMESTAMP)"
+  },
+  "business_rules": [
+    "BM_ACTION_LOG содержит полную историю всех изменений в системе",
+    "Если SCRIPT_NAME заполнен - действие выполнено автоматически скриптом",
+    "Если SCRIPT_NAME NULL - действие выполнено вручную оператором (STAFF_ID)",
+    "OLD_VALUE и NEW_VALUE содержат значения до и после изменения",
+    "ВАЖНО: Для услуг SBD (TYPE_ID=9002) и suspend (TYPE_ID=9008) отслеживание OLD_VALUE и NEW_VALUE критично для расчета абонплаты:",
+    "  - Полное количество активных дней определяет часть снимаемой абонплаты для SBD (TYPE_ID=9002)",
+    "  - Дополнительная абонплата снимается за услугу приостановки SBD (TYPE_ID=9008)",
+    "  - При изменении статуса услуги (например, ACTIVE → SUSPENDED) нужно отслеживать MOMENT для расчета периодов активности/приостановки",
+    "  - Для корректного расчета абонплаты нужно восстановить историю изменений статуса через BM_ACTION_LOG",
+    "  - ВАЖНО: Логика расчета активных/неактивных дней:",
+    "    * Если OLD_VALUE='SUSPEND', NEW_VALUE='UNSUSPEND' (активация): весь день, где MOMENT, считается АКТИВНЫМ",
+    "    * Если OLD_VALUE='UNSUSPEND', NEW_VALUE='SUSPEND' (приостановка): день может быть неактивным, но следующий ПОЛНЫЙ день может быть неактивным, если в нем не было активации после MOMENT",
+    "    * У АКТИВНЫХ дней ПРИОРИТЕТ - если в день была активация, день считается активным",
+    "  - ВАЖНО: При расчете нужно учитывать границы действия договора:",
+    "    * open_date (OPEN_DATE в SERVICES): дата начала предоставления услуги по договору - не считаем дни до open_date",
+    "    * close_date (CLOSE_DATE в SERVICES): дата приостановки услуги (есть тонкости)",
+    "    * stop_date (STOP_DATE в SERVICES): дата завершения договора - не считаем дни после stop_date",
+    "    * Если приостановление услуги не предусмотрено, то играют роль OPEN_DATE и STOP_DATE (обычно STOP_DATE=CLOSE_DATE)",
+    "    * START_DATE - дата создания услуги в системе, не используется для расчета абонплаты",
+    "  - Пример расчета:",
+    "    * Услуга активирована (ACTIVE) 10 января, потом SUSPEND 12 января",
+    "    * 2 активных дня (10 и 11), 31 - 2 = 29 неактивных дней",
+    "    * Абонплата снимается в пропорции активных/неактивных дней",
+    "    * Включенный в абонплату трафик также рассчитывается пропорционально активным дням",
+    "    * Если open_date = 8 января: активных дней на 7 меньше (не считаем дни до 8 января)",
+    "    * Если stop_date = 25 января: неактивных дней уменьшится на 6 (не считаем дни после 25 января)",
+    "    * Если приостановление не предусмотрено: играют роль OPEN_DATE и STOP_DATE (обычно STOP_DATE=CLOSE_DATE)",
+    "  - ВАЖНО: SUB_ACTION_ID=3000 (suspend_sbd) ведется ТОЛЬКО для TYPE_ID=9002 (SBD - главная услуга)",
+    "  - Для остальных услуг (9005, 9008, 9013) это избыточно, так как расчет начислений ведется для группы услуг на одном и том же IMEI (2 или 4 услуги)",
+    "  - Когда меняется статус главной услуги 9002, автоматически меняются статусы зависимых услуг (9005, 9008, 9013)",
+    "  - BM_SERVICE_STATUS ведет историю изменения статуса услуги (DATE_BEG, DATE_END, STATUS_ID)",
+    "  - BM_ACTION_LOG и BM_SERVICE_STATUS работают вместе для корректного расчета начислений для управляемых пользователем групп по IMEI",
+    "  - BM_ACTION_LOG фиксирует момент изменения (MOMENT, OLD_VALUE, NEW_VALUE)",
+    "  - BM_SERVICE_STATUS ведет историю периодов статусов (STATUS_ID = +10 активен, -10 приостановлен)",
+    "MOMENT используется для сортировки и фильтрации по времени, а также для расчета периодов активности/приостановки",
+    "REMOTE_ADDR позволяет отследить источник действия (IP-адрес оператора или сервера скрипта)",
+    "STAFF_COMMENT может содержать пояснения оператора к действию",
+    "CUSTOMER_ID, ACCOUNT_ID, SERVICE_ID позволяют фильтровать действия по конкретным сущностям",
+    "TARGET_ID - универсальное поле для связи с другими объектами системы"
+  ],
+  "relationships": [
+    {
+      "table": "BM_ACTION",
+      "type": "LEFT JOIN",
+      "on": "BM_ACTION_LOG.ACTION_ID = BM_ACTION.ACTION_ID",
+      "note": "Расшифровка типа действия (ACTION_NAME, ACTION_DESC, IS_SYSTEM)"
+    },
+    {
+      "table": "BM_SUB_ACTION",
+      "type": "LEFT JOIN",
+      "on": "BM_ACTION_LOG.SUB_ACTION_ID = BM_SUB_ACTION.SUB_ACTION_ID",
+      "note": "Расшифровка подтипа действия (MNEMONIC, DESCRIPTION)"
+    },
+    {
+      "table": "CUSTOMERS",
+      "type": "LEFT JOIN",
+      "on": "BM_ACTION_LOG.CUSTOMER_ID = CUSTOMERS.CUSTOMER_ID",
+      "note": "Действия, связанные с клиентами"
+    },
+    {
+      "table": "ACCOUNTS",
+      "type": "LEFT JOIN",
+      "on": "BM_ACTION_LOG.ACCOUNT_ID = ACCOUNTS.ACCOUNT_ID",
+      "note": "Действия, связанные с договорами"
+    },
+    {
+      "table": "SERVICES",
+      "type": "LEFT JOIN",
+      "on": "BM_ACTION_LOG.SERVICE_ID = SERVICES.SERVICE_ID",
+      "note": "Действия, связанные с услугами"
+    },
+    {
+      "table": "BM_SERVICE_STATUS",
+      "type": "LEFT JOIN",
+      "on": "BM_ACTION_LOG.SERVICE_ID = BM_SERVICE_STATUS.SERVICE_ID AND BM_ACTION_LOG.MOMENT = BM_SERVICE_STATUS.DATE_BEG",
+      "note": "Связь с историей статусов. BM_ACTION_LOG фиксирует момент изменения статуса, BM_SERVICE_STATUS ведет историю периодов. Вместе они позволяют правильно рассчитать начисления для управляемых пользователем групп по IMEI"
+    }
+  ],
+  "usage_notes": [
+    "Используется для аудита и отслеживания изменений в системе",
+    "Позволяет восстановить историю операций над клиентами, договорами, услугами",
+    "Можно отследить, кто и когда изменил данные (STAFF_ID, MOMENT)",
+    "Можно найти все действия конкретного оператора: WHERE STAFF_ID = :staff_id",
+    "Можно найти все действия по клиенту: WHERE CUSTOMER_ID = :customer_id",
+    "Можно найти все действия по услуге: WHERE SERVICE_ID = :service_id",
+    "Можно найти все автоматические действия: WHERE SCRIPT_NAME IS NOT NULL",
+    "Можно найти все ручные действия: WHERE SCRIPT_NAME IS NULL",
+    "Можно отследить изменения конкретного поля через OLD_VALUE и NEW_VALUE",
+    "REMOTE_ADDR помогает в расследовании инцидентов безопасности",
+    "STAFF_COMMENT может содержать важные пояснения к действиям",
+    "Для поиска действий за период: WHERE MOMENT BETWEEN :date_from AND :date_to",
+    "Пример: найти все изменения тарифов для клиента: WHERE CUSTOMER_ID = :customer_id AND (OLD_VALUE LIKE '%TARIFF%' OR NEW_VALUE LIKE '%TARIFF%')",
+    "ВАЖНО: Для расчета абонплаты SBD нужно отслеживать изменения статуса:",
+    "  - Найти все изменения статуса услуги SBD: WHERE SERVICE_ID = :service_id AND SUB_ACTION_ID IN (3000, 3001, 30208) ORDER BY MOMENT",
+    "  - Восстановить периоды активности/приостановки на основе OLD_VALUE и NEW_VALUE",
+    "  - Рассчитать количество активных дней для расчета абонплаты SBD (TYPE_ID=9002)",
+    "  - Рассчитать количество дней приостановки для расчета абонплаты suspend (TYPE_ID=9008)",
+    "  - ЛОГИКА РАСЧЕТА АКТИВНЫХ/НЕАКТИВНЫХ ДНЕЙ:",
+    "    * OLD_VALUE='SUSPEND', NEW_VALUE='UNSUSPEND' (активация) → день MOMENT = АКТИВНЫЙ",
+    "    * OLD_VALUE='UNSUSPEND', NEW_VALUE='SUSPEND' (приостановка) → день может быть неактивным, следующий ПОЛНЫЙ день неактивен, если нет активации",
+    "    * У АКТИВНЫХ дней ПРИОРИТЕТ",
+    "  - УЧЕТ ГРАНИЦ ДОГОВОРА:",
+    "    * open_date (START_DATE): не считаем дни до начала договора",
+    "    * stop_date (STOP_DATE): не считаем дни после окончания договора",
+    "  - ПРИМЕР: активация 10 января, SUSPEND 12 января → 2 активных дня (10, 11), 29 неактивных",
+    "    * Если open_date = 8 января → активных дней на 7 меньше",
+    "    * Если stop_date = 25 января → неактивных дней на 6 меньше"
+  ],
+  "examples": {
+    "common_queries": [
+      {
+        "description": "Найти все действия оператора за период",
+        "sql": "SELECT * FROM BM_ACTION_LOG WHERE STAFF_ID = :staff_id AND MOMENT BETWEEN :date_from AND :date_to ORDER BY MOMENT DESC"
+      },
+      {
+        "description": "Найти все изменения по клиенту",
+        "sql": "SELECT * FROM BM_ACTION_LOG WHERE CUSTOMER_ID = :customer_id ORDER BY MOMENT DESC"
+      },
+      {
+        "description": "Найти все автоматические действия скриптов",
+        "sql": "SELECT * FROM BM_ACTION_LOG WHERE SCRIPT_NAME IS NOT NULL AND MOMENT >= SYSDATE - 7 ORDER BY MOMENT DESC"
+      },
+      {
+        "description": "Найти все действия по услуге",
+        "sql": "SELECT * FROM BM_ACTION_LOG WHERE SERVICE_ID = :service_id ORDER BY MOMENT DESC"
+      },
+      {
+        "description": "Найти изменения конкретного поля (например, тарифа)",
+        "sql": "SELECT * FROM BM_ACTION_LOG WHERE (OLD_VALUE LIKE '%TARIFF%' OR NEW_VALUE LIKE '%TARIFF%') AND MOMENT >= SYSDATE - 30 ORDER BY MOMENT DESC"
+      },
+      {
+        "description": "Найти все приостановления SBD услуг с расшифровкой",
+        "sql": "SELECT al.*, a.ACTION_NAME, a.ACTION_DESC, sa.MNEMONIC, sa.DESCRIPTION FROM BM_ACTION_LOG al LEFT JOIN BM_ACTION a ON al.ACTION_ID = a.ACTION_ID LEFT JOIN BM_SUB_ACTION sa ON al.SUB_ACTION_ID = sa.SUB_ACTION_ID WHERE al.SUB_ACTION_ID = 3000 ORDER BY al.MOMENT DESC"
+      },
+      {
+        "description": "Найти все смены тарифов с расшифровкой",
+        "sql": "SELECT al.*, a.ACTION_NAME, sa.MNEMONIC, sa.DESCRIPTION FROM BM_ACTION_LOG al LEFT JOIN BM_ACTION a ON al.ACTION_ID = a.ACTION_ID LEFT JOIN BM_SUB_ACTION sa ON al.SUB_ACTION_ID = sa.SUB_ACTION_ID WHERE al.SUB_ACTION_ID = 30205 ORDER BY al.MOMENT DESC"
+      },
+      {
+        "description": "Найти все действия по услуге с расшифровкой",
+        "sql": "SELECT al.*, a.ACTION_NAME, a.ACTION_DESC, sa.MNEMONIC, sa.DESCRIPTION FROM BM_ACTION_LOG al LEFT JOIN BM_ACTION a ON al.ACTION_ID = a.ACTION_ID LEFT JOIN BM_SUB_ACTION sa ON al.SUB_ACTION_ID = sa.SUB_ACTION_ID WHERE al.SERVICE_ID = :service_id ORDER BY al.MOMENT DESC"
+      },
+      {
+        "description": "Найти все изменения статуса SBD услуги для расчета абонплаты (только для TYPE_ID=9002)",
+        "sql": "SELECT al.*, a.ACTION_NAME, sa.MNEMONIC, s.TYPE_ID, s.LOGIN FROM BM_ACTION_LOG al LEFT JOIN BM_ACTION a ON al.ACTION_ID = a.ACTION_ID LEFT JOIN BM_SUB_ACTION sa ON al.SUB_ACTION_ID = sa.SUB_ACTION_ID LEFT JOIN SERVICES s ON al.SERVICE_ID = s.SERVICE_ID WHERE al.SERVICE_ID = :service_id AND s.TYPE_ID = 9002 AND (al.SUB_ACTION_ID IN (3000, 3001, 30208) OR (al.OLD_VALUE IN ('ACTIVE', 'SUSPENDED') AND al.NEW_VALUE IN ('ACTIVE', 'SUSPENDED'))) ORDER BY al.MOMENT"
+      },
+      {
+        "description": "Восстановить периоды активности/приостановки SBD услуги (только для TYPE_ID=9002)",
+        "sql": "SELECT al.MOMENT AS CHANGE_DATE, al.OLD_VALUE AS STATUS_FROM, al.NEW_VALUE AS STATUS_TO, s.TYPE_ID, s.LOGIN FROM BM_ACTION_LOG al JOIN SERVICES s ON al.SERVICE_ID = s.SERVICE_ID WHERE al.SERVICE_ID = :service_id AND s.TYPE_ID = 9002 AND (al.SUB_ACTION_ID IN (3000, 3001, 30208) OR (al.OLD_VALUE IN ('ACTIVE', 'SUSPENDED') AND al.NEW_VALUE IN ('ACTIVE', 'SUSPENDED'))) ORDER BY al.MOMENT"
+      },
+      {
+        "description": "Найти все услуги на одном IMEI для расчета абонплаты группы (2 или 4 услуги)",
+        "sql": "SELECT s.SERVICE_ID, s.TYPE_ID, s.LOGIN, s.VSAT, s.ACCOUNT_ID FROM SERVICES s WHERE s.VSAT = (SELECT VSAT FROM SERVICES WHERE SERVICE_ID = :service_id) AND s.ACCOUNT_ID = (SELECT ACCOUNT_ID FROM SERVICES WHERE SERVICE_ID = :service_id) AND s.TYPE_ID IN (9002, 9005, 9008, 9013) ORDER BY s.TYPE_ID"
+      },
+      {
+        "description": "Найти историю статусов с действиями для расчета абонплаты",
+        "sql": "SELECT ss.*, al.STAFF_ID, al.MOMENT AS ACTION_MOMENT, al.OLD_VALUE, al.NEW_VALUE, s.TYPE_ID FROM BM_SERVICE_STATUS ss LEFT JOIN BM_ACTION_LOG al ON ss.SERVICE_ID = al.SERVICE_ID AND ss.DATE_BEG = al.MOMENT LEFT JOIN SERVICES s ON ss.SERVICE_ID = s.SERVICE_ID WHERE ss.SERVICE_ID = :service_id ORDER BY ss.DATE_BEG"
+      },
+      {
+        "description": "Рассчитать периоды активности/приостановки для группы услуг на IMEI",
+        "sql": "SELECT ss.*, s.TYPE_ID, s.LOGIN FROM BM_SERVICE_STATUS ss JOIN SERVICES s ON ss.SERVICE_ID = s.SERVICE_ID WHERE s.VSAT = (SELECT VSAT FROM SERVICES WHERE SERVICE_ID = :service_id) AND s.ACCOUNT_ID = (SELECT ACCOUNT_ID FROM SERVICES WHERE SERVICE_ID = :service_id) AND s.TYPE_ID IN (9002, 9005, 9008, 9013) ORDER BY s.TYPE_ID, ss.DATE_BEG"
+      }
+    ]
+  },
+  "reference_data_needed": [
+    "✅ ACTION_ID - справочник BM_ACTION добавлен в KB",
+    "✅ SUB_ACTION_ID - справочник BM_SUB_ACTION добавлен в KB",
+    "STAFF_ID - нужен справочник сотрудников/операторов (если существует)",
+    "Примеры реальных значений SCRIPT_NAME для понимания автоматических скриптов"
+  ],
+  "real_examples": [
+    {
+      "description": "Приостановление SBD услуги",
+      "ACTION_LOG_ID": 992943,
+      "ACTION_ID": 302,
+      "SUB_ACTION_ID": 3000,
+      "ACTION_NAME": "edit_service",
+      "SUB_ACTION_MNEMONIC": "suspend_sbd",
+      "OLD_VALUE": "ACTIVE",
+      "NEW_VALUE": "SUSPENDED",
+      "STAFF_COMMENT": "service SUSPENDED by swap koroleva",
+      "note": "ACTION_ID=302 (edit_service) с SUB_ACTION_ID=3000 (suspend_sbd) означает приостановление SBD услуги"
+    },
+    {
+      "description": "Смена тарифа услуги",
+      "ACTION_LOG_ID": 992460,
+      "ACTION_ID": 302,
+      "SUB_ACTION_ID": 30205,
+      "ACTION_NAME": "edit_service",
+      "SUB_ACTION_MNEMONIC": "change_tariff",
+      "OLD_VALUE": "114361",
+      "NEW_VALUE": "137892",
+      "STAFF_COMMENT": "operator edit change service's tariff_id immideately",
+      "note": "OLD_VALUE и NEW_VALUE содержат TARIFF_ID (старый и новый тариф)"
+    },
+    {
+      "description": "Изменение даты остановки услуги",
+      "ACTION_LOG_ID": 992937,
+      "ACTION_ID": 302,
+      "SUB_ACTION_ID": 30204,
+      "ACTION_NAME": "edit_service",
+      "SUB_ACTION_MNEMONIC": "change_param",
+      "OLD_VALUE": "NULL",
+      "NEW_VALUE": "2025-12-18",
+      "STAFF_COMMENT": "operator edit service's stop date:",
+      "note": "Изменение даты остановки услуги (STOP_DATE)"
+    },
+    {
+      "description": "Изменение логина услуги",
+      "ACTION_LOG_ID": 992940,
+      "ACTION_ID": 302,
+      "SUB_ACTION_ID": 30204,
+      "ACTION_NAME": "edit_service",
+      "SUB_ACTION_MNEMONIC": "change_param",
+      "OLD_VALUE": "SUB-63274664638",
+      "NEW_VALUE": "dSUB-63274664638",
+      "STAFF_COMMENT": "login changed by operator:",
+      "note": "Для Iridium SBD LOGIN = CONTRACT_ID (SUB-XXXXX)"
+    }
+  ]
+}
+

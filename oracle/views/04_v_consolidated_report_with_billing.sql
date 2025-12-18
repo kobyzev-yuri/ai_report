@@ -10,36 +10,30 @@ SET DEFINE OFF
 CREATE OR REPLACE VIEW V_CONSOLIDATED_REPORT_WITH_BILLING AS
 WITH -- Удаляем дубликаты из STECCOM_EXPENSES перед агрегацией fees
 -- Берем только уникальные записи по ключевым полям (исключаем полные дубликаты)
--- ВАЖНО: для Advance Charge не включаем TRANSACTION_DATE в PARTITION BY, чтобы все записи суммировались
--- Для других типов fees включаем TRANSACTION_DATE, чтобы разные транзакции не считались дубликатами
+-- ВАЖНО: для Advance Charge учитываем TRANSACTION_DATE в PARTITION BY,
+-- чтобы разные авансы по разным датам (как в инвойсе Iridium) не схлопывались
 unique_steccom_expenses AS (
     SELECT 
         se.*,
+        -- Для всех типов fees используем ROW_NUMBER() для дедупликации
+        -- Для Advance Charge: дедуплицируем по INVOICE_DATE, CONTRACT_ID, IMEI, TRANSACTION_DATE, AMOUNT
+        -- Это убирает только полные дубликаты (включая TRANSACTION_DATE),
+        -- но сохраняет разные авансы с разными TRANSACTION_DATE или AMOUNT
+        ROW_NUMBER() OVER (
+            PARTITION BY 
+                TO_CHAR(se.INVOICE_DATE, 'YYYYMM'),
+                se.CONTRACT_ID,
+                se.ICC_ID_IMEI,
+                UPPER(TRIM(se.DESCRIPTION)),
+                se.AMOUNT,
+                se.TRANSACTION_DATE
+            ORDER BY se.ID
+        ) AS rn,
+        -- Флаг для Advance Charge
         CASE 
-            WHEN UPPER(TRIM(se.DESCRIPTION)) LIKE '%ADVANCE CHARGE%' OR UPPER(TRIM(se.DESCRIPTION)) = 'ADVANCE CHARGE' THEN
-                -- Для Advance Charge: не учитываем TRANSACTION_DATE, чтобы все записи суммировались
-                ROW_NUMBER() OVER (
-                    PARTITION BY 
-                        TO_CHAR(se.INVOICE_DATE, 'YYYYMM'),
-                        se.CONTRACT_ID,
-                        se.ICC_ID_IMEI,
-                        UPPER(TRIM(se.DESCRIPTION)),
-                        se.AMOUNT
-                    ORDER BY se.ID
-                )
-            ELSE
-                -- Для других типов fees: учитываем TRANSACTION_DATE
-                ROW_NUMBER() OVER (
-                    PARTITION BY 
-                        TO_CHAR(se.INVOICE_DATE, 'YYYYMM'),
-                        se.CONTRACT_ID,
-                        se.ICC_ID_IMEI,
-                        UPPER(TRIM(se.DESCRIPTION)),
-                        se.AMOUNT,
-                        se.TRANSACTION_DATE
-                    ORDER BY se.ID
-                )
-        END AS rn
+            WHEN UPPER(TRIM(se.DESCRIPTION)) LIKE '%ADVANCE CHARGE%' OR UPPER(TRIM(se.DESCRIPTION)) = 'ADVANCE CHARGE' THEN 1
+            ELSE 0
+        END AS is_advance_charge
     FROM STECCOM_EXPENSES se
     WHERE se.CONTRACT_ID IS NOT NULL
       AND se.ICC_ID_IMEI IS NOT NULL
@@ -49,10 +43,9 @@ unique_steccom_expenses AS (
 -- Агрегируем fees из уникальных записей STECCOM_EXPENSES по типам для каждого периода
 -- ВАЖНО: Используем ту же логику определения периода, что и в V_CONSOLIDATED_OVERAGE_REPORT
 -- BILL_MONTH - это месяц из INVOICE_DATE (без вычитания)
+-- Для Advance Charge: агрегируем все записи по bill_month (месяц инвойса), но сохраняем transaction_month для правильного распределения
 steccom_fees AS (
     SELECT 
-        -- Определяем bill_month по той же логике, что и в V_CONSOLIDATED_OVERAGE_REPORT
-        -- Возвращаем как строку VARCHAR2 для совместимости с cor.BILL_MONTH
         TO_CHAR(se.INVOICE_DATE, 'YYYYMM') AS bill_month,
         se.CONTRACT_ID,
         se.ICC_ID_IMEI AS imei,
@@ -63,12 +56,71 @@ steccom_fees AS (
         SUM(CASE WHEN UPPER(TRIM(se.DESCRIPTION)) LIKE '%PRORATED%' OR UPPER(TRIM(se.DESCRIPTION)) = 'PRORATED' THEN se.AMOUNT ELSE 0 END) AS fee_prorated,
         SUM(se.AMOUNT) AS fees_total
     FROM unique_steccom_expenses se
-    WHERE se.rn = 1  -- Берем только первую запись из каждой группы дубликатов
+    WHERE se.rn = 1  -- Берем только первую запись из каждой группы дубликатов (для всех типов fees, включая Advance Charge)
     GROUP BY 
-        -- Группируем по вычисленному bill_month (используем то же выражение, что и в SELECT)
         TO_CHAR(se.INVOICE_DATE, 'YYYYMM'),
         se.CONTRACT_ID, 
         se.ICC_ID_IMEI
+),
+-- Отдельная таблица для Advance Charge с transaction_month для правильного распределения по периодам
+-- ИНВОЙС-ЦЕНТРИЧНАЯ ЛОГИКА:
+--   - Период X (например, октябрь 2025, 202510) определяется как "месяц на 1 меньше, чем месяц INVOICE_DATE"
+--   - Т.е. файлы с INVOICE_DATE в ноябре 2025 (202511) дают авансы за октябрь 202510
+--   - TRANSACTION_DATE для Advance Charge не используется для определения периода, чтобы совпасть с логикой Iridium Invoice
+steccom_advance_charge_by_period_raw AS (
+    SELECT 
+        se.CONTRACT_ID,
+        se.ICC_ID_IMEI AS imei,
+        -- transaction_month = месяц на 1 меньше, чем месяц INVOICE_DATE (в формате YYYYMM)
+        CASE 
+            WHEN EXTRACT(MONTH FROM se.INVOICE_DATE) = 1 THEN
+                TO_CHAR(EXTRACT(YEAR FROM se.INVOICE_DATE) - 1) || '12'
+            ELSE
+                TO_CHAR(EXTRACT(YEAR FROM se.INVOICE_DATE)) ||
+                LPAD(TO_CHAR(EXTRACT(MONTH FROM se.INVOICE_DATE) - 1), 2, '0')
+        END AS transaction_month,
+        SUM(se.AMOUNT) AS fee_advance_charge
+    FROM unique_steccom_expenses se
+    WHERE se.is_advance_charge = 1
+      AND se.rn = 1
+    GROUP BY 
+        se.CONTRACT_ID,
+        se.ICC_ID_IMEI,
+        CASE 
+            WHEN EXTRACT(MONTH FROM se.INVOICE_DATE) = 1 THEN
+                TO_CHAR(EXTRACT(YEAR FROM se.INVOICE_DATE) - 1) || '12'
+            ELSE
+                TO_CHAR(EXTRACT(YEAR FROM se.INVOICE_DATE)) ||
+                LPAD(TO_CHAR(EXTRACT(MONTH FROM se.INVOICE_DATE) - 1), 2, '0')
+        END
+),
+-- Финальная агрегация: для одного CONTRACT_ID, imei, transaction_month должна быть только одна запись
+-- Это предотвращает дубликаты при JOIN для sf_advance (который использует imei)
+steccom_advance_charge_by_period AS (
+    SELECT 
+        CONTRACT_ID,
+        imei,
+        transaction_month,
+        SUM(fee_advance_charge) AS fee_advance_charge
+    FROM steccom_advance_charge_by_period_raw
+    GROUP BY 
+        CONTRACT_ID,
+        imei,
+        transaction_month
+),
+-- Дополнительная агрегация для sf_prev: группируем по CONTRACT_ID и transaction_month
+-- Это предотвращает дубликаты при JOIN для sf_prev (который НЕ использует imei)
+-- ВАЖНО: При свопе IMEI для одного CONTRACT_ID может быть несколько разных imei с авансами
+-- за один transaction_month, поэтому суммируем все авансы по CONTRACT_ID
+steccom_advance_charge_by_period_for_prev AS (
+    SELECT 
+        CONTRACT_ID,
+        transaction_month,
+        SUM(fee_advance_charge) AS fee_advance_charge
+    FROM steccom_advance_charge_by_period_raw
+    GROUP BY 
+        CONTRACT_ID,
+        transaction_month
 )
 SELECT 
     -- Bill Month в формате YYYY-MM для отображения
@@ -117,7 +169,12 @@ SELECT
     v.CODE_1C,
     v.ORGANIZATION_NAME,
     v.CUSTOMER_NAME,
-    v.AGREEMENT_NUMBER,
+    -- AGREEMENT_NUMBER: сначала из v (по CONTRACT_ID), потом по IMEI через SERVICES_EXT и SERVICES.VSAT
+    COALESCE(
+        v.AGREEMENT_NUMBER,
+        imei_service_ext_info.AGREEMENT_NUMBER,
+        imei_service_info.AGREEMENT_NUMBER
+    ) AS AGREEMENT_NUMBER,
     v.ORDER_NUMBER,
     v.STATUS AS SERVICE_STATUS,
     v.STOP_DATE AS SERVICE_STOP_DATE,
@@ -134,8 +191,36 @@ SELECT
     END AS SERVICE_ID_VSAT_MATCH,
     -- Fees из STECCOM_EXPENSES
     NVL(sf.fee_activation_fee, 0) AS FEE_ACTIVATION_FEE,
-    NVL(sf.fee_advance_charge, 0) AS FEE_ADVANCE_CHARGE,
-    NVL(sf_prev.fee_advance_charge, 0) AS FEE_ADVANCE_CHARGE_PREVIOUS_MONTH,
+    -- Для Advance Charge используем данные из steccom_advance_charge_by_period (правильное распределение по периодам)
+    -- ВАЖНО: Используем DISTINCT или агрегацию, чтобы избежать дубликатов при JOIN
+    -- Если для одного IMEI есть несколько строк в cor с разными BILL_MONTH, но одинаковым transaction_month,
+    -- то все они JOIN'ятся с одной и той же записью из sf_advance, что может привести к дублированию суммы
+    -- Но так как FINANCIAL_PERIOD = BILL_MONTH - 1, для разных BILL_MONTH будут разные FINANCIAL_PERIOD,
+    -- поэтому каждая строка будет JOIN'иться с правильной записью из sf_advance
+    NVL(sf_advance.fee_advance_charge, 0) AS FEE_ADVANCE_CHARGE,
+    -- ВАЖНО: Для Advance Charge Previous Month используем оконную функцию,
+    -- чтобы для одного CONTRACT_ID и FINANCIAL_PERIOD брать сумму только один раз
+    -- Это предотвращает дублирование суммы при swap IMEI (когда для одного CONTRACT_ID
+    -- есть несколько разных IMEI в cor, и каждая строка JOIN'ится с одной и той же записью из sf_prev)
+    CASE 
+        WHEN sf_prev.fee_advance_charge IS NOT NULL THEN
+            -- Берем сумму только для первой строки с данным CONTRACT_ID и FINANCIAL_PERIOD
+            -- Остальные строки получат 0
+            CASE 
+                WHEN ROW_NUMBER() OVER (
+                    PARTITION BY 
+                        RTRIM(cor.CONTRACT_ID),
+                        CASE 
+                            WHEN cor.BILL_MONTH IS NOT NULL AND LENGTH(TRIM(cor.BILL_MONTH)) >= 6 THEN
+                                TO_CHAR(ADD_MONTHS(TO_DATE(SUBSTR(TRIM(cor.BILL_MONTH), 1, 6), 'YYYYMM'), -1), 'YYYY-MM')
+                            ELSE NULL
+                        END
+                    ORDER BY cor.IMEI
+                ) = 1 THEN sf_prev.fee_advance_charge
+                ELSE 0
+            END
+        ELSE 0
+    END AS FEE_ADVANCE_CHARGE_PREVIOUS_MONTH,
     NVL(sf.fee_credit, 0) AS FEE_CREDIT,
     NVL(sf.fee_credited, 0) AS FEE_CREDITED,
     NVL(sf.fee_prorated, 0) AS FEE_PRORATED,
@@ -143,6 +228,8 @@ SELECT
 FROM (
     -- Агрегируем данные для одного периода (IMEI + CONTRACT_ID + BILL_MONTH), чтобы избежать дубликатов fees
     -- Суммируем трафик и события, берем максимальные/первые значения для остальных полей
+    -- ВАЖНО: Группируем по IMEI, CONTRACT_ID, BILL_MONTH, чтобы для одного IMEI и CONTRACT_ID
+    -- с разными BILL_MONTH были отдельные строки (это правильно, так как это разные периоды)
     SELECT 
         IMEI,
         CONTRACT_ID,
@@ -192,23 +279,74 @@ LEFT JOIN steccom_fees sf
        END = sf.bill_month
     AND RTRIM(cor.CONTRACT_ID) = RTRIM(sf.CONTRACT_ID)
     AND cor.IMEI = sf.imei
+-- JOIN для Advance Charge по периодам (используем transaction_month для правильного распределения)
+-- FINANCIAL_PERIOD = BILL_MONTH - 1 месяц, поэтому transaction_month должен соответствовать FINANCIAL_PERIOD
+-- ВАЖНО: Авансы могут быть в любом инвойсе (bill_month), но transaction_month должен соответствовать FINANCIAL_PERIOD
+-- Это позволяет правильно показывать авансы за октябрь, даже если они в октябрьском инвойсе, а отчет за ноябрь
+LEFT JOIN steccom_advance_charge_by_period sf_advance
+    ON RTRIM(cor.CONTRACT_ID) = RTRIM(sf_advance.CONTRACT_ID)
+    AND cor.IMEI = sf_advance.imei
+    -- transaction_month должен соответствовать FINANCIAL_PERIOD (BILL_MONTH - 1)
+    AND sf_advance.transaction_month = CASE 
+           WHEN cor.BILL_MONTH IS NOT NULL AND LENGTH(TRIM(cor.BILL_MONTH)) >= 6 THEN
+               TO_CHAR(ADD_MONTHS(TO_DATE(SUBSTR(TRIM(cor.BILL_MONTH), 1, 6), 'YYYYMM'), -1), 'YYYYMM')
+           ELSE NULL
+       END
 -- Advance Charge за предыдущий месяц
 -- cor.BILL_MONTH в формате YYYYMM (строка, например '202510')
--- Вычисляем предыдущий месяц используя ADD_MONTHS
+-- FINANCIAL_PERIOD = BILL_MONTH - 1, поэтому предыдущий месяц = FINANCIAL_PERIOD - 1 = BILL_MONTH - 2
 -- ВАЖНО: Аванс переходит по CONTRACT_ID, а не по IMEI
 -- Это позволяет корректно обрабатывать свопы IMEI (замены IMEI на SUB)
 -- IMEI для отображения берется из текущего периода (cor.IMEI)
-LEFT JOIN steccom_fees sf_prev
-    ON sf_prev.bill_month = CASE 
+-- Используем steccom_advance_charge_by_period_for_prev для правильного распределения по периодам
+-- (агрегировано по CONTRACT_ID и transaction_month, чтобы избежать дубликатов при JOIN)
+LEFT JOIN steccom_advance_charge_by_period_for_prev sf_prev
+    ON RTRIM(cor.CONTRACT_ID) = RTRIM(sf_prev.CONTRACT_ID)
+    -- transaction_month должен соответствовать предыдущему месяцу относительно FINANCIAL_PERIOD (BILL_MONTH - 2)
+    AND sf_prev.transaction_month = CASE 
            WHEN cor.BILL_MONTH IS NOT NULL AND LENGTH(TRIM(cor.BILL_MONTH)) >= 6 THEN
-               TO_CHAR(ADD_MONTHS(TO_DATE(SUBSTR(TRIM(cor.BILL_MONTH), 1, 6), 'YYYYMM'), -1), 'YYYYMM')
+               TO_CHAR(ADD_MONTHS(TO_DATE(SUBSTR(TRIM(cor.BILL_MONTH), 1, 6), 'YYYYMM'), -2), 'YYYYMM')
            ELSE
                NULL
        END
-    AND RTRIM(cor.CONTRACT_ID) = RTRIM(sf_prev.CONTRACT_ID)
-    -- УБРАНО: AND cor.IMEI = sf_prev.imei
-    -- Причина: при свопе IMEI аванс должен переходить по CONTRACT_ID,
-    -- а IMEI для отображения берется из текущего периода (cor.IMEI)
+-- Дополнительные JOIN'ы для получения AGREEMENT_NUMBER по IMEI (для случаев swap IMEI)
+-- JOIN по IMEI через SERVICES_EXT (когда IMEI хранится в SERVICES_EXT.VALUE)
+-- ВАЖНО: Если для одного IMEI есть несколько SERVICE_ID, берем активный (DATE_END IS NULL)
+LEFT JOIN (
+    SELECT 
+        se_ranked.VALUE AS IMEI,
+        se_ranked.AGREEMENT_NUMBER
+    FROM (
+        SELECT 
+            se.VALUE,
+            a.DESCRIPTION AS AGREEMENT_NUMBER,
+            ROW_NUMBER() OVER (
+                PARTITION BY se.VALUE 
+                ORDER BY 
+                    CASE WHEN se.DATE_END IS NULL THEN 0 ELSE 1 END,  -- Приоритет активным
+                    se.DATE_BEG DESC NULLS LAST,  -- Затем по дате начала (новее)
+                    se.SERVICE_ID DESC  -- Затем по SERVICE_ID (больший = новее)
+            ) AS rn
+        FROM SERVICES_EXT se
+        JOIN SERVICES s ON se.SERVICE_ID = s.SERVICE_ID
+        JOIN ACCOUNTS a ON s.ACCOUNT_ID = a.ACCOUNT_ID
+        WHERE se.VALUE IS NOT NULL
+    ) se_ranked
+    WHERE se_ranked.rn = 1  -- Берем только первый (самый приоритетный)
+) imei_service_ext_info ON TRIM(imei_service_ext_info.IMEI) = TRIM(cor.IMEI)
+    AND v.SERVICE_ID IS NULL  -- JOIN только если SERVICE_ID из v отсутствует (триггерная ситуация)
+-- JOIN по IMEI через SERVICES.VSAT (когда IMEI хранится в SERVICES.VSAT)
+LEFT JOIN (
+    SELECT 
+        s.VSAT AS IMEI,
+        MAX(a.DESCRIPTION) AS AGREEMENT_NUMBER
+    FROM SERVICES s
+    JOIN ACCOUNTS a ON s.ACCOUNT_ID = a.ACCOUNT_ID
+    WHERE s.VSAT IS NOT NULL
+    GROUP BY s.VSAT
+) imei_service_info ON TRIM(imei_service_info.IMEI) = TRIM(cor.IMEI)
+    AND v.SERVICE_ID IS NULL  -- JOIN только если SERVICE_ID из v отсутствует (триггерная ситуация)
+    AND imei_service_ext_info.AGREEMENT_NUMBER IS NULL  -- И если imei_service_ext_info тоже не дал результат
 UNION ALL
 -- Включаем строки для финансовых периодов, где есть аванс за предыдущий месяц,
 -- но нет данных о трафике/событиях за следующий месяц (IMEI был выключен)
@@ -275,7 +413,12 @@ SELECT
     v.CODE_1C,
     v.ORGANIZATION_NAME,
     v.CUSTOMER_NAME,
-    v.AGREEMENT_NUMBER,
+    -- AGREEMENT_NUMBER: сначала из v (по CONTRACT_ID), потом по IMEI через SERVICES_EXT и SERVICES.VSAT
+    COALESCE(
+        v.AGREEMENT_NUMBER,
+        imei_service_ext_info.AGREEMENT_NUMBER,
+        imei_service_info.AGREEMENT_NUMBER
+    ) AS AGREEMENT_NUMBER,
     v.ORDER_NUMBER,
     v.STATUS AS SERVICE_STATUS,
     v.STOP_DATE AS SERVICE_STOP_DATE,
@@ -304,6 +447,42 @@ LEFT JOIN (
     ) v1
     WHERE v1.rn = 1
 ) v ON RTRIM(sf_prev.CONTRACT_ID) = RTRIM(v.CONTRACT_ID)
+-- Дополнительные JOIN'ы для получения AGREEMENT_NUMBER по IMEI (для случаев swap IMEI) - для второго SELECT
+-- ВАЖНО: Если для одного IMEI есть несколько SERVICE_ID, берем активный (DATE_END IS NULL)
+LEFT JOIN (
+    SELECT 
+        se_ranked.VALUE AS IMEI,
+        se_ranked.AGREEMENT_NUMBER
+    FROM (
+        SELECT 
+            se.VALUE,
+            a.DESCRIPTION AS AGREEMENT_NUMBER,
+            ROW_NUMBER() OVER (
+                PARTITION BY se.VALUE 
+                ORDER BY 
+                    CASE WHEN se.DATE_END IS NULL THEN 0 ELSE 1 END,  -- Приоритет активным
+                    se.DATE_BEG DESC NULLS LAST,  -- Затем по дате начала (новее)
+                    se.SERVICE_ID DESC  -- Затем по SERVICE_ID (больший = новее)
+            ) AS rn
+        FROM SERVICES_EXT se
+        JOIN SERVICES s ON se.SERVICE_ID = s.SERVICE_ID
+        JOIN ACCOUNTS a ON s.ACCOUNT_ID = a.ACCOUNT_ID
+        WHERE se.VALUE IS NOT NULL
+    ) se_ranked
+    WHERE se_ranked.rn = 1  -- Берем только первый (самый приоритетный)
+) imei_service_ext_info ON TRIM(imei_service_ext_info.IMEI) = TRIM(sf_prev.imei)
+    AND v.SERVICE_ID IS NULL  -- JOIN только если SERVICE_ID из v отсутствует (триггерная ситуация)
+LEFT JOIN (
+    SELECT 
+        s.VSAT AS IMEI,
+        MAX(a.DESCRIPTION) AS AGREEMENT_NUMBER
+    FROM SERVICES s
+    JOIN ACCOUNTS a ON s.ACCOUNT_ID = a.ACCOUNT_ID
+    WHERE s.VSAT IS NOT NULL
+    GROUP BY s.VSAT
+) imei_service_info ON TRIM(imei_service_info.IMEI) = TRIM(sf_prev.imei)
+    AND v.SERVICE_ID IS NULL  -- JOIN только если SERVICE_ID из v отсутствует (триггерная ситуация)
+    AND imei_service_ext_info.AGREEMENT_NUMBER IS NULL  -- И если imei_service_ext_info тоже не дал результат
 -- Аванс за следующий месяц (для UNION ALL части)
 -- ВАЖНО: Аванс переходит по CONTRACT_ID, а не по IMEI
 LEFT JOIN steccom_fees sf_next

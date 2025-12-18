@@ -57,3 +57,11 @@
 2. Строка 305: убрать `AND sf_prev.imei = sf_next.imei`
 3. Строка 319: убрать `cor_check.IMEI = sf_prev.imei` из NOT EXISTS
 
+
+
+
+
+
+
+
+

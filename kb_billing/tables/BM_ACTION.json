@@ -1,0 +1,204 @@
+{
+  "table_name": "BM_ACTION",
+  "schema": "billing",
+  "description": "Справочник типов действий операторов и скриптов. Определяет категории действий, которые могут выполняться в системе биллинга. Используется в BM_ACTION_LOG.ACTION_ID для классификации действий. IS_SYSTEM определяет уровень доступа: 0 = обычные бизнес-операции, 1 = системные действия, 2 = аудит.",
+  "database": "Oracle (production)",
+  "ddl": "CREATE TABLE BM_ACTION (\n    ACTION_ID NUMBER,\n    IS_SYSTEM NUMBER,\n    ACTION_NAME VARCHAR2(255),\n    ACTION_DESC VARCHAR2(4000)\n);",
+  "key_columns": {
+    "ACTION_ID": "Уникальный идентификатор типа действия (PRIMARY KEY). Используется в BM_ACTION_LOG.ACTION_ID и BM_SUB_ACTION.ACTION_ID",
+    "IS_SYSTEM": "Уровень доступа: 0 = обычные бизнес-операции (операторы), 1 = системные действия (администраторы), 2 = аудит",
+    "ACTION_NAME": "Мнемоника действия (например, 'add_customer', 'edit_service', 'make_invoice')",
+    "ACTION_DESC": "Описание действия на русском языке"
+  },
+  "business_rules": [
+    "ACTION_ID определяет категорию действия в системе",
+    "IS_SYSTEM = 0: обычные бизнес-операции (добавление/редактирование клиентов, счетов, услуг, выписка счетов)",
+    "IS_SYSTEM = 1: системные действия (управление тарифами, зонами, расписаниями, точками доступа, закрытие периодов)",
+    "IS_SYSTEM = 2: аудит персонала (system_audit)",
+    "ACTION_ID 100-199: операции с клиентами (add_customer=101, edit_customer=102, drop_customer=103, move_customer=104)",
+    "ACTION_ID 200-299: операции со счетами/договорами (add_account=201, edit_account=202, drop_account=203, create_agreement=401)",
+    "ACTION_ID 300-399: операции с услугами (add_service=301, edit_service=302, drop_service=303, rebill_service=305, service_change_status=307, send_sbdmodem=308)",
+    "ACTION_ID 500-599: операции со счетами и платежами (make_bill=501, view_bill=502, edit_bill=503, add_payment=510, make_invoice=520, view_invoice=521, invoice_correction=516)",
+    "ACTION_ID 10000+: системные действия (edit_groups=10010, set_rate=10020, edit_tariffs=10030, edit_zones=10040, edit_schedule=10050, edit_counter=10120, edit_resource=10140, inv=20000, close_period=30000)",
+    "ACTION_ID 60000: аудит персонала (system_audit)",
+    "ACTION_ID 40300: системные события (subscribe_system_events)"
+  ],
+  "relationships": [
+    {
+      "table": "BM_ACTION_LOG",
+      "type": "JOIN",
+      "on": "BM_ACTION.ACTION_ID = BM_ACTION_LOG.ACTION_ID",
+      "note": "Связь с журналом действий для расшифровки типа действия"
+    },
+    {
+      "table": "BM_SUB_ACTION",
+      "type": "JOIN",
+      "on": "BM_ACTION.ACTION_ID = BM_SUB_ACTION.ACTION_ID",
+      "note": "Связь с подтипами действий для детализации"
+    }
+  ],
+  "usage_notes": [
+    "Используется для расшифровки ACTION_ID в BM_ACTION_LOG",
+    "ACTION_NAME используется для программной идентификации типа действия",
+    "ACTION_DESC используется для отображения пользователю",
+    "IS_SYSTEM помогает фильтровать действия по уровню доступа",
+    "Для поиска всех действий по клиенту: JOIN BM_ACTION_LOG WHERE CUSTOMER_ID = :customer_id",
+    "Для поиска всех системных действий: WHERE IS_SYSTEM = 1",
+    "Для поиска всех действий операторов: WHERE IS_SYSTEM = 0"
+  ],
+  "reference_data": {
+    "description": "Справочные данные типов действий для понимания бизнеса",
+    "key_actions": [
+      {
+        "ACTION_ID": 101,
+        "IS_SYSTEM": 0,
+        "ACTION_NAME": "add_customer",
+        "ACTION_DESC": "Добавление клиента",
+        "category": "Клиенты"
+      },
+      {
+        "ACTION_ID": 102,
+        "IS_SYSTEM": 0,
+        "ACTION_NAME": "edit_customer",
+        "ACTION_DESC": "Редактирование данных о клиенте",
+        "category": "Клиенты"
+      },
+      {
+        "ACTION_ID": 201,
+        "IS_SYSTEM": 0,
+        "ACTION_NAME": "add_account",
+        "ACTION_DESC": "Добавление счёта",
+        "category": "Договоры"
+      },
+      {
+        "ACTION_ID": 202,
+        "IS_SYSTEM": 0,
+        "ACTION_NAME": "edit_account",
+        "ACTION_DESC": "Редактирование данных о счёте",
+        "category": "Договоры"
+      },
+      {
+        "ACTION_ID": 301,
+        "IS_SYSTEM": 0,
+        "ACTION_NAME": "add_service",
+        "ACTION_DESC": "Добавление новой услуги",
+        "category": "Услуги"
+      },
+      {
+        "ACTION_ID": 302,
+        "IS_SYSTEM": 0,
+        "ACTION_NAME": "edit_service",
+        "ACTION_DESC": "Редактирование данных об услуге",
+        "category": "Услуги",
+        "note": "Используется для изменения тарифа, статуса, логина, даты остановки и других параметров услуги"
+      },
+      {
+        "ACTION_ID": 303,
+        "IS_SYSTEM": 0,
+        "ACTION_NAME": "drop_service",
+        "ACTION_DESC": "Удаление услуги",
+        "category": "Услуги"
+      },
+      {
+        "ACTION_ID": 307,
+        "IS_SYSTEM": 0,
+        "ACTION_NAME": "service_change_status",
+        "ACTION_DESC": "Изменение статуса услуги",
+        "category": "Услуги"
+      },
+      {
+        "ACTION_ID": 308,
+        "IS_SYSTEM": 0,
+        "ACTION_NAME": "send_sbdmodem",
+        "ACTION_DESC": "Посылка сообщения на SBD-модем",
+        "category": "Услуги Iridium"
+      },
+      {
+        "ACTION_ID": 520,
+        "IS_SYSTEM": 0,
+        "ACTION_NAME": "make_invoice",
+        "ACTION_DESC": "Выписка счёта-фактуры клиенту",
+        "category": "Счета-фактуры"
+      },
+      {
+        "ACTION_ID": 521,
+        "IS_SYSTEM": 0,
+        "ACTION_NAME": "view_invoice",
+        "ACTION_DESC": "Поиск и просмотр счетов-фактур",
+        "category": "Счета-фактуры"
+      },
+      {
+        "ACTION_ID": 10030,
+        "IS_SYSTEM": 1,
+        "ACTION_NAME": "edit_tariffs",
+        "ACTION_DESC": "Управление тарифными планами",
+        "category": "Системные действия"
+      },
+      {
+        "ACTION_ID": 10040,
+        "IS_SYSTEM": 1,
+        "ACTION_NAME": "edit_zones",
+        "ACTION_DESC": "Управление зонами",
+        "category": "Системные действия"
+      },
+      {
+        "ACTION_ID": 30000,
+        "IS_SYSTEM": 1,
+        "ACTION_NAME": "close_period",
+        "ACTION_DESC": "Закрытие финансового периода",
+        "category": "Системные действия"
+      },
+      {
+        "ACTION_ID": 60000,
+        "IS_SYSTEM": 2,
+        "ACTION_NAME": "system_audit",
+        "ACTION_DESC": "Аудит персонала системы",
+        "category": "Аудит"
+      }
+    ],
+    "examples_from_log": [
+      {
+        "description": "Приостановление услуги SBD",
+        "ACTION_ID": 302,
+        "SUB_ACTION_ID": 3000,
+        "ACTION_NAME": "edit_service",
+        "SUB_ACTION_MNEMONIC": "suspend_sbd",
+        "OLD_VALUE": "ACTIVE",
+        "NEW_VALUE": "SUSPENDED",
+        "note": "ACTION_ID=302 (edit_service) с SUB_ACTION_ID=3000 (suspend_sbd) означает приостановление SBD услуги"
+      },
+      {
+        "description": "Изменение тарифа услуги",
+        "ACTION_ID": 302,
+        "SUB_ACTION_ID": 30205,
+        "ACTION_NAME": "edit_service",
+        "SUB_ACTION_MNEMONIC": "change_tariff",
+        "OLD_VALUE": "114361",
+        "NEW_VALUE": "137892",
+        "note": "ACTION_ID=302 (edit_service) с SUB_ACTION_ID=30205 (change_tariff) означает смену тарифа, OLD_VALUE и NEW_VALUE содержат TARIFF_ID"
+      },
+      {
+        "description": "Изменение даты остановки услуги",
+        "ACTION_ID": 302,
+        "SUB_ACTION_ID": 30204,
+        "ACTION_NAME": "edit_service",
+        "SUB_ACTION_MNEMONIC": "change_param",
+        "OLD_VALUE": "NULL",
+        "NEW_VALUE": "2025-12-18",
+        "note": "ACTION_ID=302 (edit_service) с SUB_ACTION_ID=30204 (change_param) означает изменение основных свойств услуги, в данном случае даты остановки"
+      },
+      {
+        "description": "Изменение логина услуги",
+        "ACTION_ID": 302,
+        "SUB_ACTION_ID": 30204,
+        "ACTION_NAME": "edit_service",
+        "SUB_ACTION_MNEMONIC": "change_param",
+        "OLD_VALUE": "SUB-63274664638",
+        "NEW_VALUE": "dSUB-63274664638",
+        "note": "Изменение LOGIN услуги (для Iridium SBD это CONTRACT_ID)"
+      }
+    ]
+  }
+}
+
+

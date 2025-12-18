@@ -1,0 +1,75 @@
+{
+  "table_name": "BM_COUNTER",
+  "schema": "billing",
+  "description": "Счетчики для ступенчатой тарификации. Счетчики отслеживают объем потребления (трафик, время и т.д.) и при достижении определенных порогов активируют коэффициенты скидки к основной цене за зону. Счетчики связаны с сервисами через BM_SRV_CNT_LINK.",
+  "database": "Oracle (production)",
+  "key_columns": {
+    "COUNTER_ID": "Уникальный идентификатор счетчика (PRIMARY KEY)",
+    "COUNTER_CLASS_ID": "ID класса счетчика из BM_COUNTER_CLASS. Определяет тип счетчика и его параметры",
+    "COUNTER_TYPE_ID": "ID типа счетчика из BM_COUNTER_TYPE",
+    "SERVICE_ID": "ID услуги из SERVICES (может быть NULL, если счетчик связан через BM_SRV_CNT_LINK)",
+    "VALUE": "Текущее значение счетчика (накопленный объем)",
+    "THRESHOLD": "Порог счетчика (при достижении активируется коэффициент скидки)",
+    "DATE_BEG": "Дата начала действия счетчика",
+    "DATE_END": "Дата окончания действия счетчика (NULL если действует сейчас)",
+    "PERIOD_ID": "ID периода счетчика из BM_CNT_PERIOD",
+    "STATUS": "Статус счетчика"
+  },
+  "business_rules": [
+    "Счетчики отслеживают объем потребления (трафик, время, количество и т.д.)",
+    "Логика применения коэффициента скидки зависит от FLAG_VALUE в BM_TARIFFEL:",
+    "  - FLAG_VALUE = 0: коэффициент применяется при превышении порога (VALUE >= THRESHOLD)",
+    "    Используется для SBD, TYPE_ID=10, 14 (Inet, SSG) - чем больше потребление, тем больше скидка",
+    "    Пример: VALUE=150, THRESHOLD=100 → скидка активирована (150 >= 100)",
+    "  - FLAG_VALUE = 1: коэффициент применяется до наступления порога (VALUE < THRESHOLD)",
+    "    Используется для IP телефонии и телефонии - скидка действует пока не достигнут порог",
+    "    Пример: VALUE=50, THRESHOLD=100 → скидка активирована (50 < 100)",
+    "Счетчики связаны с сервисами через BM_SRV_CNT_LINK",
+    "COUNTER_CLASS_ID определяет класс счетчика и его параметры (используется в BM_TARIFFEL.COUNTER_CLASS_ID)",
+    "CNT_PERIOD_ID определяет период действия счетчика (используется в BM_TARIFFEL.CNT_PERIOD_ID)",
+    "Когда счетчик достигает порога (в зависимости от FLAG_VALUE), система применяет коэффициент скидки к основной цене за зону",
+    "Коэффициент скидки определяется в BM_TARIFFEL с MNEMONIC = 'counter_cf' и связан с COUNTER_CLASS_ID"
+  ],
+  "relationships": [
+    {
+      "table": "BM_SRV_CNT_LINK",
+      "type": "JOIN",
+      "on": "BM_COUNTER.COUNTER_ID = BM_SRV_CNT_LINK.COUNTER_ID",
+      "note": "Связь счетчика с сервисом"
+    },
+    {
+      "table": "BM_COUNTER_CLASS",
+      "type": "LEFT JOIN",
+      "on": "BM_COUNTER.COUNTER_CLASS_ID = BM_COUNTER_CLASS.COUNTER_CLASS_ID"
+    },
+    {
+      "table": "BM_COUNTER_TYPE",
+      "type": "LEFT JOIN",
+      "on": "BM_COUNTER.COUNTER_TYPE_ID = BM_COUNTER_TYPE.COUNTER_TYPE_ID"
+    },
+    {
+      "table": "BM_CNT_PERIOD",
+      "type": "LEFT JOIN",
+      "on": "BM_COUNTER.PERIOD_ID = BM_CNT_PERIOD.PERIOD_ID"
+    },
+    {
+      "table": "BM_TARIFFEL",
+      "type": "LEFT JOIN",
+      "on": "BM_COUNTER.COUNTER_CLASS_ID = BM_TARIFFEL.COUNTER_CLASS_ID",
+      "note": "Связь с тарифными элементами для получения коэффициента скидки"
+    }
+  ],
+  "usage_notes": [
+    "Счетчики используются для реализации ступенчатой тарификации с коэффициентами скидки",
+    "Логика применения коэффициента зависит от FLAG_VALUE в BM_TARIFFEL:",
+    "  - FLAG_VALUE = 0 (SBD, TYPE_ID=10, 14): VALUE >= THRESHOLD → скидка активирована",
+    "  - FLAG_VALUE = 1 (IP телефония, телефония): VALUE < THRESHOLD → скидка активирована",
+    "Коэффициент скидки применяется к основной цене за зону (BM_TARIFFEL.MONEY с ZONE_ID)",
+    "Для получения информации о счетчике сервиса используйте JOIN через BM_SRV_CNT_LINK",
+    "COUNTER_CLASS_ID в BM_TARIFFEL связывает тарифный элемент с классом счетчика",
+    "При проверке активации скидки учитывайте FLAG_VALUE:",
+    "  - Если FLAG_VALUE = 0: проверяйте VALUE >= THRESHOLD",
+    "  - Если FLAG_VALUE = 1: проверяйте VALUE < THRESHOLD"
+  ]
+}
+

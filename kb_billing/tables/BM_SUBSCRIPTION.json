@@ -1,0 +1,57 @@
+{
+  "table_name": "BM_SUBSCRIPTION",
+  "schema": "billing",
+  "description": "Подписки для групповых сервисов (SSG, TYPE_ID=14). SSG сервис (SERVICE_ID) является групповым сервисом, в котором есть подписки (SUBSCRIPTION_ID) для разных технических услуг по скорости. Подписки активируются в зависимости от условий (порогов) в тарифном плане. TYPE_ID=14 - это самый сложный тип тарификации.",
+  "database": "Oracle (production)",
+  "key_columns": {
+    "SUBSCRIPTION_ID": "Уникальный идентификатор подписки (PRIMARY KEY). Связь с BM_SRV_CNT_LINK.SUBSCRIPTION_ID",
+    "SUBSCRIBER_ID": "ID подписчика из BM_SUBSCRIBER",
+    "EVENT_TYPE_ID": "ID типа события",
+    "CUSTOMER_GROUP_ID": "ID группы клиентов",
+    "ENABLED": "Флаг активности подписки (1 = активна, 0 = неактивна)"
+  },
+  "business_rules": [
+    "Для SSG сервисов (TYPE_ID=14): SERVICE_ID - это групповой сервис",
+    "В групповом сервисе есть подписки (SUBSCRIPTION_ID) для разных технических услуг по скорости",
+    "Подписки активируются в зависимости от условий (порогов) в тарифном плане",
+    "Связь подписки с сервисом через BM_SRV_CNT_LINK (SUBSCRIPTION_ID + SERVICE_ID)",
+    "Подписки могут быть связаны со счетчиками через BM_SRV_CNT_LINK (COUNTER_ID)",
+    "Активация подписки зависит от порогов счетчиков и условий в тарифном плане",
+    "TYPE_ID=14 (SSG) - самый сложный тип тарификации с динамической активацией подписок"
+  ],
+  "relationships": [
+    {
+      "table": "BM_SRV_CNT_LINK",
+      "type": "JOIN",
+      "on": "BM_SUBSCRIPTION.SUBSCRIPTION_ID = BM_SRV_CNT_LINK.SUBSCRIPTION_ID",
+      "note": "Связь подписки с сервисом и счетчиками"
+    },
+    {
+      "table": "BM_SUBSCRIBER",
+      "type": "LEFT JOIN",
+      "on": "BM_SUBSCRIPTION.SUBSCRIBER_ID = BM_SUBSCRIBER.SUBSCRIBER_ID"
+    },
+    {
+      "table": "SERVICES",
+      "type": "JOIN",
+      "on": "BM_SRV_CNT_LINK.SERVICE_ID = SERVICES.SERVICE_ID",
+      "note": "Связь через BM_SRV_CNT_LINK для получения группового сервиса SSG"
+    }
+  ],
+  "usage_notes": [
+    "Используется для SSG сервисов (TYPE_ID=14) - групповых сервисов с подписками",
+    "Для получения подписок SSG сервиса: JOIN BM_SRV_CNT_LINK → BM_SUBSCRIPTION",
+    "Подписки активируются динамически в зависимости от порогов счетчиков",
+    "Каждая подписка может иметь свою скорость и технические параметры",
+    "Для понимания активации подписки нужно проверять условия в тарифном плане и пороги счетчиков",
+    "Пример: SSG сервис может иметь подписки на скорости 512/256, 1024/512 и т.д., которые активируются при достижении определенных порогов потребления"
+  ]
+}
+
+
+
+
+
+
+
+

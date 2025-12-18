@@ -3,6 +3,7 @@
   "schema": "billing",
   "description": "Таблица аналитики - основа для формирования счетов-фактур. Формируется на основе BM_SERVICE_MONEY (сессии услуг с объемами трафика и начислениями). BM_SERVICE_MONEY зависит от BM_CDR_ACCT (таблица трафика из файлов) для SBD услуг. ОБНОВЛЯЕТСЯ КАЖДЫЙ ДЕНЬ НЕСКОЛЬКО РАЗ на основе сессий. Содержит все начисления по услугам, включая тесты и предпродажные эксперименты. НЕ ВСЕ записи попадают в счета-фактуры (BM_INVOICE_ITEM). Связь определяется через INVOICE_ITEM_ID - если заполнен, значит запись попала в счет-фактуру. 1 ЧИСЛА данные по договорам переносятся в счета-фактуры (BM_INVOICE, BM_INVOICE_ITEM), что закрывает финансовый период.",
   "database": "Oracle (production)",
+  "ddl": "CREATE TABLE ANALYTICS (AID DOUBLE PRECISION PRIMARY KEY, PERIOD_ID DOUBLE PRECISION, DOMAIN_ID DOUBLE PRECISION, GROUP_ID DOUBLE PRECISION, CUSTOMER_ID DOUBLE PRECISION, ACCOUNT_ID DOUBLE PRECISION, TYPE_ID DOUBLE PRECISION, SERVICE_ID DOUBLE PRECISION, ZONE_ID DOUBLE PRECISION, PRICE DOUBLE PRECISION, TRAF DOUBLE PRECISION, MONEY DOUBLE PRECISION, VSAT VARCHAR2(255), BLANK VARCHAR2(255), COUNTER_CF DOUBLE PRECISION, TARIFF_ID DOUBLE PRECISION, TARIFFEL_ID DOUBLE PRECISION, THRESHOLD DOUBLE PRECISION, CLASS_ID DOUBLE PRECISION, CLASS_NAME VARCHAR2(255), CBYTE DOUBLE PRECISION, FLAG DOUBLE PRECISION, COUNTER_ID DOUBLE PRECISION, RESOURCE_TYPE_ID DOUBLE PRECISION, SUB_TYPE_ID DOUBLE PRECISION, SUB_PERIOD_ID DOUBLE PRECISION, INVOICE_ITEM_ID DOUBLE PRECISION, CARD_ID DOUBLE PRECISION, SERIAL_ID DOUBLE PRECISION, SUBSCRIPTION_ID DOUBLE PRECISION, TOTAL_TRAF DOUBLE PRECISION, PMONEY DOUBLE PRECISION, IRIFILENUM DOUBLE PRECISION, PARTNER_PERCENT DOUBLE PRECISION);",
   "key_columns": {
     "AID": "Уникальный идентификатор записи аналитики (PRIMARY KEY)",
     "PERIOD_ID": "ID финансового периода из BM_PERIODS. Определяет период начисления",
@@ -32,7 +33,12 @@
     "SUB_PERIOD_ID": "ID подпериода",
     "PMONEY": "Предварительная сумма",
     "PARTNER_PERCENT": "Процент партнера",
-    "SERVICE_MONEY_ID": "ID сессии услуги из BM_SERVICE_MONEY. Связь с BM_SERVICE_MONEY.SERVICE_MONEY_ID. ANALYTICS формируется на основе BM_SERVICE_MONEY"
+    "IRIFILENUM": "Номер файла Iridium",
+    "DOMAIN_ID": "ID домена",
+    "GROUP_ID": "ID группы",
+    "CARD_ID": "ID карты",
+    "SERIAL_ID": "ID серийного номера",
+    "SUBSCRIPTION_ID": "ID подписки"
   },
   "business_rules": [
     "ANALYTICS формируется на основе BM_SERVICE_MONEY (сессии услуг с объемами трафика и начислениями)",
@@ -92,12 +98,6 @@
       "note": "Расшифровка типа услуги для бухгалтерии (MNEMONIC имеет хороший мнемонический смысл)"
     },
     {
-      "table": "BM_SERVICE_MONEY",
-      "type": "LEFT JOIN",
-      "on": "ANALYTICS.SERVICE_MONEY_ID = BM_SERVICE_MONEY.SERVICE_MONEY_ID",
-      "note": "ANALYTICS формируется на основе BM_SERVICE_MONEY"
-    },
-    {
       "table": "BM_CDR_ACCT",
       "type": "LEFT JOIN",
       "on": "BM_SERVICE_MONEY.CDR_ACCT_ID = BM_CDR_ACCT.CDR_ACCT_ID",
@@ -111,7 +111,8 @@
     "1 ЧИСЛА данные переносятся в счета-фактуры, что закрывает финансовый период",
     "Для расчета себестоимости нужно связать доходы (ANALYTICS.MONEY) с затратами (STECCOM_EXPENSES)",
     "PERIOD_ID определяет период начисления (для Иридиум: с 2 числа по 1 число следующего месяца)",
-    "VSAT (IMEI) используется для связи с затратами Иридиум"
+    "VSAT (IMEI) используется для связи с затратами Иридиум",
+    "ВАЖНО: Для поиска дубликатов в ANALYTICS нужно группировать по ВСЕМ полям кроме AID (первичного ключа). Дубликаты - это записи, где все поля совпадают, кроме AID. НЕ группируй только по нескольким полям (PERIOD_ID, SERVICE_ID, CUSTOMER_ID и т.д.) - это неправильно! Нужно группировать по ВСЕМ полям: PERIOD_ID, SERVICE_ID, CUSTOMER_ID, ACCOUNT_ID, TYPE_ID, TARIFF_ID, TARIFFEL_ID, VSAT, MONEY, PRICE, TRAF, TOTAL_TRAF, CBYTE, INVOICE_ITEM_ID, FLAG, RESOURCE_TYPE_ID, CLASS_ID, CLASS_NAME, BLANK, COUNTER_ID, COUNTER_CF, ZONE_ID, THRESHOLD, SUB_TYPE_ID, SUB_PERIOD_ID, PMONEY, PARTNER_PERCENT. Используй HAVING COUNT(*) > 1 для поиска групп дубликатов."
   ]
 }
 

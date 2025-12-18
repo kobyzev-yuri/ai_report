@@ -552,6 +552,14 @@
     "category": "Доходы"
   },
   {
+    "question": "Найди клиентов у которых в ноябрьских счетах фактуры были SBD сервисы (хотя бы 1)",
+    "sql": "SELECT DISTINCT CUSTOMER_NAME, CODE_1C FROM V_REVENUE_FROM_INVOICES WHERE PERIOD_YYYYMM = '2025-11' AND (REVENUE_SBD_TOTAL > 0 OR REVENUE_SBD_TRAFFIC > 0 OR REVENUE_SBD_ABON > 0)",
+    "context": "Поиск клиентов с SBD сервисами в счетах-фактурах за период. ВАЖНО: V_REVENUE_FROM_INVOICES уже содержит только записи для SBD услуг (SERVICE_ID в VIEW - это SERVICE_ID главной услуги SBD с TYPE_ID = 9002). Для фильтрации SBD сервисов проверяй REVENUE_SBD_TOTAL > 0 или REVENUE_SBD_TRAFFIC > 0 или REVENUE_SBD_ABON > 0. НЕ используй SERVICE_ID = 9002 - это неправильно, так как SERVICE_ID - это уникальный идентификатор услуги, а не тип услуги. TYPE_ID = 9002 - это тип услуги SBD.",
+    "business_entity": "revenue",
+    "complexity": 2,
+    "category": "Доходы"
+  },
+  {
     "question": "Покажи доходы суммарно по договорам за октябрь",
     "sql": "SELECT CONTRACT_ID, AGREEMENT_NUMBER, CUSTOMER_NAME, CODE_1C, COUNT(DISTINCT IMEI) AS IMEI_COUNT, SUM(REVENUE_SBD_TRAFFIC) AS REVENUE_TRAFFIC, SUM(REVENUE_SBD_ABON) AS REVENUE_ABON, SUM(REVENUE_SBD_TOTAL) AS REVENUE_SBD, SUM(REVENUE_TOTAL) AS REVENUE_TOTAL FROM V_REVENUE_FROM_INVOICES WHERE PERIOD_YYYYMM = '2025-10' GROUP BY CONTRACT_ID, AGREEMENT_NUMBER, CUSTOMER_NAME, CODE_1C ORDER BY REVENUE_TOTAL DESC",
     "context": "Доходы суммарно по договорам из счетов-фактур",
@@ -886,6 +894,70 @@
     "business_entity": "profit",
     "complexity": 2,
     "category": "Аналитика"
+  },
+  {
+    "question": "Найди email клиента по коду 1С 1C00123",
+    "sql": "SELECT Web FROM [Account] WHERE Code1C = '1C00123' AND Web LIKE '%@%'",
+    "context": "Получение email клиента из CRM по коду 1С. ВАЖНО: Поле Web может содержать как email адреса, так и веб-сайты. Нужно фильтровать по Web LIKE '%@%' для поиска email. После получения значения нужно валидировать формат email (должен соответствовать стандарту RFC 5322). Подключение к CRM через ODBC: DSN=crmdb, User=bpm, Password=bpm. В поле Web могут быть ошибки (невалидные email), поэтому требуется валидация перед использованием.",
+    "business_entity": "crm",
+    "complexity": 2,
+    "category": "CRM"
+  },
+  {
+    "question": "Для данного клиента найди его email",
+    "sql": "SELECT a.Web FROM [Account] a WHERE a.Code1C = (SELECT oi.EXT_ID FROM OUTER_IDS oi WHERE oi.ID = :customer_id AND UPPER(TRIM(oi.TBL)) = 'CUSTOMERS' AND ROWNUM = 1) AND a.Web LIKE '%@%'",
+    "context": "Получение email клиента из CRM по customer_id из Oracle биллинга. Сначала находим код 1С клиента в OUTER_IDS, затем ищем email в CRM по Code1C. ВАЖНО: Поле Web может содержать как email, так и URL. Нужно фильтровать по Web LIKE '%@%' и валидировать формат email. Подключение к CRM через ODBC: DSN=crmdb, User=bpm, Password=bpm.",
+    "business_entity": "crm",
+    "complexity": 3,
+    "category": "CRM"
+  },
+  {
+    "question": "Найди email клиента Обь-Иртышское УГМС ФГБУ",
+    "sql": "SELECT a.Web FROM [Account] a WHERE a.Code1C = (SELECT oi.EXT_ID FROM OUTER_IDS oi JOIN CUSTOMERS c ON oi.ID = c.CUSTOMER_ID JOIN BM_CUSTOMER_CONTACT cc ON c.CUSTOMER_ID = cc.CUSTOMER_ID JOIN BM_CONTACT_DICT cd ON cc.CONTACT_DICT_ID = cd.CONTACT_DICT_ID WHERE UPPER(cc.VALUE) LIKE '%ОБЬ-ИРТЫШСКОЕ%УГМС%' AND cd.MNEMONIC = 'description' AND cc.CONTACT_DICT_ID = 23 AND UPPER(TRIM(oi.TBL)) = 'CUSTOMERS' AND ROWNUM = 1) AND a.Web LIKE '%@%'",
+    "context": "Получение email клиента из CRM по имени клиента. Сначала находим customer_id по имени в BM_CUSTOMER_CONTACT, затем код 1С в OUTER_IDS, затем email в CRM. ВАЖНО: Поле Web требует валидации формата email. Подключение к CRM через ODBC: DSN=crmdb, User=bpm, Password=bpm.",
+    "business_entity": "crm",
+    "complexity": 4,
+    "category": "CRM"
+  },
+  {
+    "question": "Перечисли всех клиентов - название и юридический адрес которым выставляли счета фактуры с начала года (хотя бы раз)",
+    "sql": "SELECT cc.CUSTOMER_ID, COALESCE(MAX(CASE WHEN cd.MNEMONIC = 'description' AND cc.CONTACT_DICT_ID = 23 THEN cc.VALUE END), TRIM(NVL(MAX(CASE WHEN cd.MNEMONIC = 'last_name' AND cc.CONTACT_DICT_ID = 11 THEN cc.VALUE END), '') || ' ' || NVL(MAX(CASE WHEN cd.MNEMONIC = 'first_name' AND cc.CONTACT_DICT_ID = 11 THEN cc.VALUE END), '') || ' ' || NVL(MAX(CASE WHEN cd.MNEMONIC = 'middle_name' AND cc.CONTACT_DICT_ID = 11 THEN cc.VALUE END), ''))) AS CUSTOMER_NAME, COALESCE(MAX(CASE WHEN cd.MNEMONIC = 'b_paddress' AND cc.CONTACT_DICT_ID = 140 THEN cc.VALUE END), MAX(CASE WHEN cd.MNEMONIC = 'paddress' AND cc.CONTACT_DICT_ID = 10 THEN cc.VALUE END), MAX(CASE WHEN cd.MNEMONIC = 'address' AND cc.CONTACT_DICT_ID = 9 THEN cc.VALUE END)) AS LEGAL_ADDRESS FROM BM_CUSTOMER_CONTACT cc JOIN BM_CONTACT_DICT cd ON cc.CONTACT_DICT_ID = cd.CONTACT_DICT_ID WHERE cc.CONTACT_DICT_ID IN (9, 10, 11, 23, 140) AND EXISTS (SELECT 1 FROM BM_INVOICE inv JOIN BM_PERIOD p ON inv.PERIOD_ID = p.PERIOD_ID WHERE inv.CUSTOMER_ID = cc.CUSTOMER_ID AND TO_CHAR(p.START_DATE, 'YYYY') = TO_CHAR(SYSDATE, 'YYYY') AND ROWNUM = 1) GROUP BY cc.CUSTOMER_ID ORDER BY CUSTOMER_NAME",
+    "context": "Получение списка клиентов с названием и адресом, которым выставляли счета-фактуры с начала года. КРИТИЧЕСКИ ВАЖНО: Для адреса НЕ используй CONTACT_DICT_ID = 8 - там только email! НЕ используй мнемоники 'juridic_address_id', 'post_address_id', 'home_address_id' с CONTACT_DICT_ID = 8 - они не содержат адреса! Правильные мнемоники для адресов: b_paddress (CONTACT_DICT_ID = 140), paddress (CONTACT_DICT_ID = 10), address (CONTACT_DICT_ID = 9). Используй COALESCE с приоритетом: сначала b_paddress (CONTACT_DICT_ID = 140), затем paddress (CONTACT_DICT_ID = 10), затем address (CONTACT_DICT_ID = 9). Для получения списка клиентов с счетами-фактурами НЕ используй VIEW V_REVENUE_FROM_INVOICES - это неэффективно! Вместо этого используй таблицу BM_INVOICE напрямую, так как там есть CUSTOMER_ID и PERIOD_ID. Это намного эффективнее, так как BM_INVOICE - это таблица с индексами, а V_REVENUE_FROM_INVOICES - это сложный VIEW с множеством JOIN. Для фильтрации по году используй JOIN с BM_PERIOD (НЕ BM_PERIODS!): TO_CHAR(p.START_DATE, 'YYYY') = TO_CHAR(SYSDATE, 'YYYY'). ВАЖНО: В BM_PERIOD поле называется START_DATE, а не DATE_BEG! Используем EXISTS с ROWNUM = 1 для оптимизации - Oracle остановится после первого совпадения. Фильтруем BM_CUSTOMER_CONTACT по CONTACT_DICT_ID IN (9, 10, 11, 23, 140) для уменьшения количества строк перед JOIN.",
+    "business_entity": "revenue",
+    "complexity": 3,
+    "category": "Доходы"
+  },
+  {
+    "question": "Найди все мнемоники связанные с адресами в BM_CONTACT_DICT",
+    "sql": "SELECT DISTINCT cd.MNEMONIC, cd.CONTACT_DICT_ID, cd.NAME FROM BM_CONTACT_DICT cd WHERE UPPER(cd.MNEMONIC) LIKE '%ADDRESS%' OR UPPER(cd.MNEMONIC) LIKE '%ADDR%' OR UPPER(cd.NAME) LIKE '%ДРЕС%' OR UPPER(cd.NAME) LIKE '%АДРЕС%' ORDER BY cd.CONTACT_DICT_ID, cd.MNEMONIC",
+    "context": "Поиск мнемоник для адресов в справочнике BM_CONTACT_DICT. Используется для определения правильной мнемоники юридического адреса (может быть 'post_address', 'postal_address', 'juridical_address', 'legal_address' или другие варианты).",
+    "business_entity": "customers",
+    "complexity": 1,
+    "category": "Справочники"
+  },
+  {
+    "question": "Список коммерческих клиентов с адресами и кодом 1C",
+    "sql": "SELECT DISTINCT COALESCE(MAX(CASE WHEN cd.MNEMONIC = 'description' AND cc.CONTACT_DICT_ID = 23 THEN cc.VALUE END), TRIM(NVL(MAX(CASE WHEN cd.MNEMONIC = 'last_name' AND cc.CONTACT_DICT_ID = 11 THEN cc.VALUE END), '') || ' ' || NVL(MAX(CASE WHEN cd.MNEMONIC = 'first_name' AND cc.CONTACT_DICT_ID = 11 THEN cc.VALUE END), '') || ' ' || NVL(MAX(CASE WHEN cd.MNEMONIC = 'middle_name' AND cc.CONTACT_DICT_ID = 11 THEN cc.VALUE END), ''))) AS CUSTOMER_NAME, COALESCE(MAX(CASE WHEN cd.MNEMONIC = 'b_paddress' AND cc.CONTACT_DICT_ID = 140 THEN cc.VALUE END), MAX(CASE WHEN cd.MNEMONIC = 'paddress' AND cc.CONTACT_DICT_ID = 10 THEN cc.VALUE END), MAX(CASE WHEN cd.MNEMONIC = 'address' AND cc.CONTACT_DICT_ID = 9 THEN cc.VALUE END)) AS LEGAL_ADDRESS, (SELECT oi.EXT_ID FROM OUTER_IDS oi WHERE oi.ID = cc.CUSTOMER_ID AND UPPER(TRIM(oi.TBL)) = 'CUSTOMERS' AND ROWNUM = 1) AS CODE_1C FROM BM_CUSTOMER_CONTACT cc JOIN BM_CONTACT_DICT cd ON cc.CONTACT_DICT_ID = cd.CONTACT_DICT_ID WHERE cc.CONTACT_DICT_ID IN (9, 10, 11, 23, 140) AND EXISTS (SELECT 1 FROM BM_INVOICE inv JOIN BM_PERIOD p ON inv.PERIOD_ID = p.PERIOD_ID WHERE inv.CUSTOMER_ID = cc.CUSTOMER_ID AND TO_CHAR(p.START_DATE, 'YYYY') = TO_CHAR(SYSDATE, 'YYYY') AND ROWNUM = 1) GROUP BY cc.CUSTOMER_ID ORDER BY CUSTOMER_NAME",
+    "context": "Получение списка коммерческих клиентов с названием, адресом и кодом 1C, которым выставляли счета-фактуры с начала года. КРИТИЧЕСКИ ВАЖНО: Для адреса НЕ используй CONTACT_DICT_ID = 8 - там только email! Используй правильные мнемоники и CONTACT_DICT_ID: COALESCE с приоритетом b_paddress (CONTACT_DICT_ID = 140) → paddress (CONTACT_DICT_ID = 10) → address (CONTACT_DICT_ID = 9). Код 1C получай из OUTER_IDS по CUSTOMER_ID, где TBL = 'CUSTOMERS'. Для получения списка клиентов с счетами-фактурами используй BM_INVOICE напрямую через EXISTS, а не VIEW V_REVENUE_FROM_INVOICES - это намного эффективнее. В BM_PERIOD поле называется START_DATE, а не DATE_BEG!",
+    "business_entity": "customers",
+    "complexity": 3,
+    "category": "Клиенты"
+  },
+  {
+    "question": "Список коммерческих клиентов с адресами банковскими реквизитами и кодом 1C из счетов фактуры за год",
+    "sql": "SELECT cc.CUSTOMER_ID, COALESCE(MAX(CASE WHEN cd.MNEMONIC = 'description' AND cc.CONTACT_DICT_ID = 23 THEN cc.VALUE END), TRIM(NVL(MAX(CASE WHEN cd.MNEMONIC = 'last_name' AND cc.CONTACT_DICT_ID = 11 THEN cc.VALUE END), '') || ' ' || NVL(MAX(CASE WHEN cd.MNEMONIC = 'first_name' AND cc.CONTACT_DICT_ID = 11 THEN cc.VALUE END), '') || ' ' || NVL(MAX(CASE WHEN cd.MNEMONIC = 'middle_name' AND cc.CONTACT_DICT_ID = 11 THEN cc.VALUE END), ''))) AS CUSTOMER_NAME, COALESCE(MAX(CASE WHEN cd.MNEMONIC = 'b_paddress' AND cc.CONTACT_DICT_ID = 140 THEN cc.VALUE END), MAX(CASE WHEN cd.MNEMONIC = 'paddress' AND cc.CONTACT_DICT_ID = 10 THEN cc.VALUE END), MAX(CASE WHEN cd.MNEMONIC = 'address' AND cc.CONTACT_DICT_ID = 9 THEN cc.VALUE END)) AS LEGAL_ADDRESS, (SELECT LISTAGG(bank_info, '; ') WITHIN GROUP (ORDER BY bank_info) FROM (SELECT DISTINCT cd2.MNEMONIC || ': ' || cc2.VALUE AS bank_info FROM BM_CUSTOMER_CONTACT cc2 JOIN BM_CONTACT_DICT cd2 ON cc2.CONTACT_DICT_ID = cd2.CONTACT_DICT_ID WHERE cc2.CUSTOMER_ID = cc.CUSTOMER_ID AND (cd2.MNEMONIC LIKE '%bank%' OR cd2.MNEMONIC LIKE '%account%' OR cd2.MNEMONIC IN ('rs', 'r_s', 'ks', 'k_s', 'bik', 'bank_bik', 'inn', 'kpp') OR cd2.NAME LIKE '%БАНК%' OR cd2.NAME LIKE '%СЧЕТ%' OR cd2.NAME LIKE '%РЕКВИЗИТ%'))) AS BANK_DETAILS, (SELECT oi.EXT_ID FROM OUTER_IDS oi WHERE oi.ID = cc.CUSTOMER_ID AND UPPER(TRIM(oi.TBL)) = 'CUSTOMERS' AND ROWNUM = 1) AS CODE_1C FROM BM_CUSTOMER_CONTACT cc JOIN BM_CONTACT_DICT cd ON cc.CONTACT_DICT_ID = cd.CONTACT_DICT_ID WHERE (cc.CONTACT_DICT_ID IN (9, 10, 11, 23, 140) OR cd.MNEMONIC LIKE '%bank%' OR cd.MNEMONIC LIKE '%account%' OR cd.MNEMONIC IN ('rs', 'r_s', 'ks', 'k_s', 'bik', 'bank_bik', 'inn', 'kpp') OR cd.NAME LIKE '%БАНК%' OR cd.NAME LIKE '%СЧЕТ%' OR cd.NAME LIKE '%РЕКВИЗИТ%') AND EXISTS (SELECT 1 FROM BM_INVOICE inv JOIN BM_PERIOD p ON inv.PERIOD_ID = p.PERIOD_ID WHERE inv.CUSTOMER_ID = cc.CUSTOMER_ID AND TO_CHAR(p.START_DATE, 'YYYY') = TO_CHAR(SYSDATE, 'YYYY') AND ROWNUM = 1) GROUP BY cc.CUSTOMER_ID ORDER BY CUSTOMER_NAME",
+    "context": "Получение списка коммерческих клиентов с названием, адресом, банковскими реквизитами и кодом 1C из счетов-фактур за год. КРИТИЧЕСКИ ВАЖНО: Банковские реквизиты могут храниться в разных полях с различными мнемониками. Перед использованием запроса проверь фактические мнемоники в BM_CONTACT_DICT: SELECT DISTINCT cd.CONTACT_DICT_ID, cd.MNEMONIC, cd.NAME FROM BM_CONTACT_DICT cd WHERE UPPER(cd.MNEMONIC) LIKE '%BANK%' OR UPPER(cd.MNEMONIC) LIKE '%ACCOUNT%' OR UPPER(cd.MNEMONIC) LIKE '%RS%' OR UPPER(cd.MNEMONIC) LIKE '%KS%' OR UPPER(cd.MNEMONIC) LIKE '%BIK%' OR UPPER(cd.NAME) LIKE '%БАНК%' OR UPPER(cd.NAME) LIKE '%СЧЕТ%' OR UPPER(cd.NAME) LIKE '%РЕКВИЗИТ%'. Возможные варианты мнемоник: bank_name/bank (название банка), bank_account/rs/r_s/account (расчетный счет), correspondent_account/ks/k_s/corr_account (корреспондентский счет), bik/bank_bik (БИК), inn (ИНН), kpp (КПП), bank_details/bank_info/banking_details (полные реквизиты в одном поле). Для получения банковских реквизитов используй LISTAGG для сбора всех записей, связанных с банковскими реквизитами, в одно поле BANK_DETAILS. Для адреса используй COALESCE с приоритетом: b_paddress (CONTACT_DICT_ID = 140) → paddress (CONTACT_DICT_ID = 10) → address (CONTACT_DICT_ID = 9). НЕ используй CONTACT_DICT_ID = 8 для адресов!",
+    "business_entity": "customers",
+    "complexity": 4,
+    "category": "Клиенты"
+  },
+  {
+    "question": "отчет о дубликатах в analytics за период (period_id)",
+    "sql": "WITH duplicate_groups AS (SELECT PERIOD_ID, SERVICE_ID, CUSTOMER_ID, ACCOUNT_ID, TYPE_ID, TARIFF_ID, TARIFFEL_ID, VSAT, MONEY, PRICE, TRAF, TOTAL_TRAF, CBYTE, INVOICE_ITEM_ID, FLAG, RESOURCE_TYPE_ID, CLASS_ID, CLASS_NAME, BLANK, COUNTER_ID, COUNTER_CF, ZONE_ID, THRESHOLD, SUB_TYPE_ID, SUB_PERIOD_ID, PMONEY, PARTNER_PERCENT, COUNT(*) AS DUPLICATE_COUNT, LISTAGG(AID, ', ') WITHIN GROUP (ORDER BY AID) AS AID_LIST FROM ANALYTICS WHERE PERIOD_ID = :period_id GROUP BY PERIOD_ID, SERVICE_ID, CUSTOMER_ID, ACCOUNT_ID, TYPE_ID, TARIFF_ID, TARIFFEL_ID, VSAT, MONEY, PRICE, TRAF, TOTAL_TRAF, CBYTE, INVOICE_ITEM_ID, FLAG, RESOURCE_TYPE_ID, CLASS_ID, CLASS_NAME, BLANK, COUNTER_ID, COUNTER_CF, ZONE_ID, THRESHOLD, SUB_TYPE_ID, SUB_PERIOD_ID, PMONEY, PARTNER_PERCENT HAVING COUNT(*) > 1) SELECT dg.PERIOD_ID, dg.SERVICE_ID AS SERVICE_ID_ANALYTICS, dg.CUSTOMER_ID AS CUSTOMER_ID_ANALYTICS, dg.ACCOUNT_ID, dg.TYPE_ID, dg.TARIFF_ID, dg.TARIFFEL_ID, dg.VSAT, dg.MONEY, dg.PRICE, dg.TRAF, dg.TOTAL_TRAF, dg.CBYTE, dg.INVOICE_ITEM_ID, dg.FLAG, dg.RESOURCE_TYPE_ID, dg.CLASS_ID, dg.CLASS_NAME, dg.BLANK, dg.COUNTER_ID, dg.COUNTER_CF, dg.ZONE_ID, dg.THRESHOLD, dg.SUB_TYPE_ID, dg.SUB_PERIOD_ID, dg.PMONEY, dg.PARTNER_PERCENT, dg.DUPLICATE_COUNT, dg.AID_LIST, c.CUSTOMER_ID, oi.EXT_ID AS CODE_1C, MAX(CASE WHEN cd.MNEMONIC = 'description' AND cc.CONTACT_DICT_ID = 23 THEN cc.VALUE END) AS CUSTOMER_NAME, s.LOGIN AS CONTRACT_ID, s.SERVICE_ID, rt.MNEMONIC AS RESOURCE_MNEMONIC, rt.NAME AS RESOURCE_NAME, t.NAME AS TARIFF_NAME, z.DESCRIPTION AS ZONE_NAME FROM duplicate_groups dg LEFT JOIN SERVICES s ON dg.SERVICE_ID = s.SERVICE_ID LEFT JOIN CUSTOMERS c ON dg.CUSTOMER_ID = c.CUSTOMER_ID LEFT JOIN OUTER_IDS oi ON oi.ID = c.CUSTOMER_ID AND UPPER(TRIM(oi.TBL)) = 'CUSTOMERS' LEFT JOIN BM_CUSTOMER_CONTACT cc ON cc.CUSTOMER_ID = c.CUSTOMER_ID LEFT JOIN BM_CONTACT_DICT cd ON cd.CONTACT_DICT_ID = cc.CONTACT_DICT_ID LEFT JOIN BM_RESOURCE_TYPE rt ON dg.RESOURCE_TYPE_ID = rt.RESOURCE_TYPE_ID LEFT JOIN BM_TARIFF t ON dg.TARIFF_ID = t.TARIFF_ID LEFT JOIN BM_ZONE z ON dg.ZONE_ID = z.ZONE_ID GROUP BY dg.PERIOD_ID, dg.SERVICE_ID, dg.CUSTOMER_ID, dg.ACCOUNT_ID, dg.TYPE_ID, dg.TARIFF_ID, dg.TARIFFEL_ID, dg.VSAT, dg.MONEY, dg.PRICE, dg.TRAF, dg.TOTAL_TRAF, dg.CBYTE, dg.INVOICE_ITEM_ID, dg.FLAG, dg.RESOURCE_TYPE_ID, dg.CLASS_ID, dg.CLASS_NAME, dg.BLANK, dg.COUNTER_ID, dg.COUNTER_CF, dg.ZONE_ID, dg.THRESHOLD, dg.SUB_TYPE_ID, dg.SUB_PERIOD_ID, dg.PMONEY, dg.PARTNER_PERCENT, dg.DUPLICATE_COUNT, dg.AID_LIST, c.CUSTOMER_ID, oi.EXT_ID, s.LOGIN, s.SERVICE_ID, rt.MNEMONIC, rt.NAME, t.NAME, z.DESCRIPTION ORDER BY dg.DUPLICATE_COUNT DESC, dg.MONEY DESC",
+    "context": "Поиск дубликатов в таблице ANALYTICS для конкретного PERIOD_ID. КРИТИЧЕСКИ ВАЖНО: Дубликаты - это записи, где ВСЕ поля совпадают, кроме AID (первичного ключа). НЕ группируй только по нескольким полям (PERIOD_ID, SERVICE_ID, CUSTOMER_ID, ACCOUNT_ID, VSAT) - это неправильно! Нужно группировать по ВСЕМ полям таблицы ANALYTICS кроме AID: PERIOD_ID, SERVICE_ID, CUSTOMER_ID, ACCOUNT_ID, TYPE_ID, TARIFF_ID, TARIFFEL_ID, VSAT, MONEY, PRICE, TRAF, TOTAL_TRAF, CBYTE, INVOICE_ITEM_ID, FLAG, RESOURCE_TYPE_ID, CLASS_ID, CLASS_NAME, BLANK, COUNTER_ID, COUNTER_CF, ZONE_ID, THRESHOLD, SUB_TYPE_ID, SUB_PERIOD_ID, PMONEY, PARTNER_PERCENT. ВАЖНО: В таблице ANALYTICS НЕТ колонки SERVICE_MONEY_ID - не используй её! Используй HAVING COUNT(*) > 1 для поиска групп дубликатов. Используй LISTAGG(AID, ', ') для получения списка AID дубликатов. Для получения информации о клиентах используй JOIN с CUSTOMERS, OUTER_IDS (для CODE_1C), BM_CUSTOMER_CONTACT и BM_CONTACT_DICT (для CUSTOMER_NAME).",
+    "business_entity": "analytics",
+    "complexity": 4,
+    "category": "Дубликаты"
   }
 ]
 

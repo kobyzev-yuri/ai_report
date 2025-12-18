@@ -387,3 +387,12 @@ embedding = model.encode(text, normalize_embeddings=True)
 
 
 
+
+
+
+
+
+
+
+
+

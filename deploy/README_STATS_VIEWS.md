@@ -59,3 +59,12 @@ VIEW типа `V_PROFITABILITY_BY_PERIOD` уже оптимизированы:
 
 
 
+
+
+
+
+
+
+
+
+

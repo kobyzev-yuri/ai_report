@@ -63,16 +63,16 @@ revenues_invoices AS (
       AND s.LOGIN LIKE 'SUB-%'
     GROUP BY s.LOGIN, ii.PERIOD_ID
 ),
--- Маппинг PERIOD_ID на BILL_MONTH через BM_PERIODS
+-- Маппинг PERIOD_ID на BILL_MONTH через BM_PERIOD
 periods_mapping AS (
     SELECT 
         PERIOD_ID,
-        TO_NUMBER(TO_CHAR(DATE_START, 'YYYYMM')) AS BILL_MONTH_START,
-        TO_NUMBER(TO_CHAR(DATE_END, 'YYYYMM')) AS BILL_MONTH_END,
-        NAME AS PERIOD_NAME,
-        DATE_START,
-        DATE_END
-    FROM BM_PERIODS
+        TO_NUMBER(TO_CHAR(START_DATE, 'YYYYMM')) AS BILL_MONTH_START,
+        TO_NUMBER(TO_CHAR(STOP_DATE, 'YYYYMM')) AS BILL_MONTH_END,
+        MONTH AS PERIOD_NAME,
+        START_DATE,
+        STOP_DATE
+    FROM BM_PERIOD
 )
 -- Основной запрос: используем V_CONSOLIDATED_REPORT_WITH_BILLING как основу для затрат
 SELECT 
@@ -198,5 +198,17 @@ COMMENT ON COLUMN V_COST_OF_GOODS_SOLD.TEST_ITEMS_COUNT IS 'Количество
 COMMENT ON COLUMN V_COST_OF_GOODS_SOLD.ISSUE_FLAG IS 'Флаг проблемных случаев: REVENUE_NO_COST, COST_NO_REVENUE, HAS_TEST_ITEMS, TEST_CLONE, OK';
 COMMENT ON COLUMN V_COST_OF_GOODS_SOLD.COST_PERCENTAGE IS 'Себестоимость в процентах: (Затраты / Доходы) * 100';
 COMMENT ON COLUMN V_COST_OF_GOODS_SOLD.MARGIN_PERCENTAGE IS 'Маржинальность в процентах: ((Доходы - Затраты) / Доходы) * 100';
+
+
+
+
+
+
+
+
+
+
+
+
 
 

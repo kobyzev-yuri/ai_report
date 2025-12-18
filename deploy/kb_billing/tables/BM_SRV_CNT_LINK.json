@@ -1,0 +1,57 @@
+{
+  "table_name": "BM_SRV_CNT_LINK",
+  "schema": "billing",
+  "description": "Связь счетчиков с сервисами. Определяет, какие счетчики отслеживают потребление для конкретного сервиса. Когда счетчик достигает порога, активируется коэффициент скидки к основной цене за зону в тарифном плане.",
+  "database": "Oracle (production)",
+  "key_columns": {
+    "SRV_CNT_LINK_ID": "Уникальный идентификатор связи (PRIMARY KEY)",
+    "SERVICE_ID": "ID услуги из SERVICES. Связь с SERVICES.SERVICE_ID",
+    "COUNTER_ID": "ID счетчика из BM_COUNTER. Связь с BM_COUNTER.COUNTER_ID",
+    "SERVICE_TARIFF_ID": "ID тарифа услуги из BM_SERVICE_TARIFF (связь услуги с тарифом по периодам)",
+    "SUBSCRIPTION_ID": "ID подписки из BM_SUBSCRIPTION. Для SSG сервисов (TYPE_ID=14): подписки для разных технических услуг по скорости, которые активируются в зависимости от условий (порогов) в тарифном плане",
+    "MAIN_SERVICE_ID": "ID основного сервиса (для связанных сервисов)"
+  },
+  "business_rules": [
+    "Связывает счетчик (BM_COUNTER) с сервисом (SERVICES)",
+    "Логика активации коэффициента скидки зависит от FLAG_VALUE в BM_TARIFFEL:",
+    "  - FLAG_VALUE = 0: активация при VALUE >= THRESHOLD (для SBD, TYPE_ID=10, 14 - Inet, SSG)",
+    "  - FLAG_VALUE = 1: активация при VALUE < THRESHOLD (для IP телефонии и телефонии)",
+    "Коэффициент скидки определяется в BM_TARIFFEL с MNEMONIC = 'counter_cf' и связан с COUNTER_CLASS_ID",
+    "Скидка применяется к основной цене за зону (BM_TARIFFEL.MONEY с ZONE_ID)",
+    "SERVICE_TARIFF_ID связывает счетчик с тарифом услуги по периоду (BM_SERVICE_TARIFF)",
+    "MAIN_SERVICE_ID используется для связанных сервисов (например, suspend связан с основной услугой SBD)",
+    "Для SSG сервисов (TYPE_ID=14): SERVICE_ID - это групповой сервис, SUBSCRIPTION_ID - подписки для разных технических услуг по скорости",
+    "Подписки SSG активируются динамически в зависимости от порогов счетчиков (COUNTER_ID) и условий в тарифном плане",
+    "TYPE_ID=14 (SSG) - самый сложный тип тарификации с динамической активацией подписок на основе порогов"
+  ],
+  "relationships": [
+    {
+      "table": "SERVICES",
+      "type": "JOIN",
+      "on": "BM_SRV_CNT_LINK.SERVICE_ID = SERVICES.SERVICE_ID"
+    },
+    {
+      "table": "BM_COUNTER",
+      "type": "JOIN",
+      "on": "BM_SRV_CNT_LINK.COUNTER_ID = BM_COUNTER.COUNTER_ID"
+    },
+    {
+      "table": "BM_SERVICE_TARIFF",
+      "type": "LEFT JOIN",
+      "on": "BM_SRV_CNT_LINK.SERVICE_TARIFF_ID = BM_SERVICE_TARIFF.SERVICE_TARIFF_ID"
+    }
+  ],
+  "usage_notes": [
+    "Используется для определения, какие счетчики отслеживают потребление для сервиса",
+    "Для получения информации о счетчиках сервиса: JOIN BM_SRV_CNT_LINK → BM_COUNTER",
+    "Для получения коэффициента скидки: JOIN BM_COUNTER → BM_TARIFFEL (где COUNTER_CLASS_ID совпадает и MNEMONIC = 'counter_cf')",
+    "При проверке активации скидки учитывайте FLAG_VALUE в BM_TARIFFEL:",
+    "  - FLAG_VALUE = 0 (SBD, TYPE_ID=10, 14): VALUE >= THRESHOLD → скидка активирована",
+    "  - FLAG_VALUE = 1 (IP телефония, телефония): VALUE < THRESHOLD → скидка активирована",
+    "Когда счетчик достигает порога (в зависимости от FLAG_VALUE), система применяет коэффициент скидки к цене за зону",
+    "Важно для понимания ступенчатой тарификации с коэффициентами скидки",
+    "Для SSG сервисов (TYPE_ID=14): подписки активируются динамически в зависимости от порогов счетчиков",
+    "Пример: SSG сервис может иметь подписки на скорости 512/256, 1024/512 и т.д., которые активируются при достижении определенных порогов потребления"
+  ]
+}
+

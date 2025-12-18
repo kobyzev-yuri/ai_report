@@ -89,7 +89,8 @@
     "Для расчета себестоимости нужно связать доходы (BM_INVOICE_ITEM.MONEY) с затратами (STECCOM_EXPENSES.AMOUNT)",
     "PERIOD_ID используется для группировки доходов по периодам",
     "Для Иридиум: PERIOD_ID соответствует периоду с 2 числа по 1 число следующего месяца (например, с 2 октября по 1 ноября = период за октябрь)",
-    "NOT_EXPORT = 1 означает, что счет не экспортируется в 1С"
+    "NOT_EXPORT = 1 означает, что счет не экспортируется в 1С",
+    "ВАЖНО: Для получения списка клиентов с счетами-фактурами используй BM_INVOICE напрямую, а не VIEW V_REVENUE_FROM_INVOICES. BM_INVOICE содержит CUSTOMER_ID и PERIOD_ID, что позволяет эффективно фильтровать клиентов. Пример: WHERE EXISTS (SELECT 1 FROM BM_INVOICE inv JOIN BM_PERIODS p ON inv.PERIOD_ID = p.PERIOD_ID WHERE inv.CUSTOMER_ID = cc.CUSTOMER_ID AND TO_CHAR(p.DATE_BEG, 'YYYY') = '2025' AND ROWNUM = 1). Это намного эффективнее, чем использование VIEW V_REVENUE_FROM_INVOICES для простого списка клиентов."
   ]
 }
 

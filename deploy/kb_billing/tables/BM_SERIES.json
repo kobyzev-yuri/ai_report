@@ -1,0 +1,60 @@
+{
+  "table_name": "BM_SERIES",
+  "schema": "billing",
+  "description": "Серии карт для дилеров. Карты из пакетов (BATCHES) нарезаются кусками для дилеров. SERVICE_ID связывается с аккаунтом дилера (ACCOUNT_ID). Иногда карты продаются без дилерской продажи (SERIAL_ID может быть NULL в CARDS).",
+  "database": "Oracle (production)",
+  "key_columns": {
+    "SERIAL_ID": "Уникальный идентификатор серии (PRIMARY KEY). Связь с CARDS.SERIAL_ID",
+    "SERVICE_ID": "ID сервиса дилера из SERVICES. Связка с аккаунтом дилера (ACCOUNT_ID)",
+    "BATCH_ID": "ID пакета карт из BATCHES. Связь с BATCHES.BATCH_ID",
+    "MOMENT": "Момент создания серии",
+    "DESCRIPTION": "Описание серии",
+    "REIS_START": "Дата начала рейса (период действия серии)",
+    "REIS_STOP": "Дата окончания рейса",
+    "REIS_CLOSED": "Дата закрытия рейса",
+    "REIS_OPENED": "Дата открытия рейса"
+  },
+  "business_rules": [
+    "Карты из пакетов (BATCHES) нарезаются кусками для дилеров через BM_SERIES",
+    "SERVICE_ID связывается с аккаунтом дилера (ACCOUNT_ID) через SERVICES",
+    "Одна серия (SERIAL_ID) может содержать множество карт из одного или нескольких пакетов",
+    "BATCH_ID определяет пакет карт, из которого нарезается серия",
+    "Иногда карты продаются без дилерской продажи - в этом случае SERIAL_ID в CARDS может быть NULL",
+    "REIS_START, REIS_STOP определяют период действия серии (рейс)",
+    "REIS_OPENED, REIS_CLOSED определяют статус рейса"
+  ],
+  "relationships": [
+    {
+      "table": "CARDS",
+      "type": "JOIN",
+      "on": "BM_SERIES.SERIAL_ID = CARDS.SERIAL_ID",
+      "note": "Карты в серии"
+    },
+    {
+      "table": "BATCHES",
+      "type": "JOIN",
+      "on": "BM_SERIES.BATCH_ID = BATCHES.BATCH_ID",
+      "note": "Пакет карт, из которого нарезается серия"
+    },
+    {
+      "table": "SERVICES",
+      "type": "JOIN",
+      "on": "BM_SERIES.SERVICE_ID = SERVICES.SERVICE_ID",
+      "note": "Сервис дилера (связка с аккаунтом дилера через ACCOUNT_ID)"
+    },
+    {
+      "table": "ACCOUNTS",
+      "type": "LEFT JOIN",
+      "on": "SERVICES.ACCOUNT_ID = ACCOUNTS.ACCOUNT_ID",
+      "note": "Аккаунт дилера"
+    }
+  ],
+  "usage_notes": [
+    "Используется для нарезки карт кусками для дилеров",
+    "SERVICE_ID определяет дилера через связь с ACCOUNT_ID",
+    "Для получения всех карт серии: SELECT * FROM CARDS WHERE SERIAL_ID = :serial_id",
+    "Для получения дилера серии: SELECT s.*, a.* FROM BM_SERIES s JOIN SERVICES serv ON s.SERVICE_ID = serv.SERVICE_ID JOIN ACCOUNTS a ON serv.ACCOUNT_ID = a.ACCOUNT_ID WHERE s.SERIAL_ID = :serial_id",
+    "Карты могут продаваться без дилерской продажи (SERIAL_ID = NULL в CARDS)"
+  ]
+}
+

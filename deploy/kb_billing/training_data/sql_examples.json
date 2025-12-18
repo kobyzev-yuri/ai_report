@@ -552,6 +552,14 @@
     "category": "Доходы"
   },
   {
+    "question": "Найди клиентов у которых в ноябрьских счетах фактуры были SBD сервисы (хотя бы 1)",
+    "sql": "SELECT DISTINCT CUSTOMER_NAME, CODE_1C FROM V_REVENUE_FROM_INVOICES WHERE PERIOD_YYYYMM = '2025-11' AND (REVENUE_SBD_TOTAL > 0 OR REVENUE_SBD_TRAFFIC > 0 OR REVENUE_SBD_ABON > 0)",
+    "context": "Поиск клиентов с SBD сервисами в счетах-фактурах за период. ВАЖНО: V_REVENUE_FROM_INVOICES уже содержит только записи для SBD услуг (SERVICE_ID в VIEW - это SERVICE_ID главной услуги SBD с TYPE_ID = 9002). Для фильтрации SBD сервисов проверяй REVENUE_SBD_TOTAL > 0 или REVENUE_SBD_TRAFFIC > 0 или REVENUE_SBD_ABON > 0. НЕ используй SERVICE_ID = 9002 - это неправильно, так как SERVICE_ID - это уникальный идентификатор услуги, а не тип услуги. TYPE_ID = 9002 - это тип услуги SBD.",
+    "business_entity": "revenue",
+    "complexity": 2,
+    "category": "Доходы"
+  },
+  {
     "question": "Покажи доходы суммарно по договорам за октябрь",
     "sql": "SELECT CONTRACT_ID, AGREEMENT_NUMBER, CUSTOMER_NAME, CODE_1C, COUNT(DISTINCT IMEI) AS IMEI_COUNT, SUM(REVENUE_SBD_TRAFFIC) AS REVENUE_TRAFFIC, SUM(REVENUE_SBD_ABON) AS REVENUE_ABON, SUM(REVENUE_SBD_TOTAL) AS REVENUE_SBD, SUM(REVENUE_TOTAL) AS REVENUE_TOTAL FROM V_REVENUE_FROM_INVOICES WHERE PERIOD_YYYYMM = '2025-10' GROUP BY CONTRACT_ID, AGREEMENT_NUMBER, CUSTOMER_NAME, CODE_1C ORDER BY REVENUE_TOTAL DESC",
     "context": "Доходы суммарно по договорам из счетов-фактур",
@@ -886,6 +894,46 @@
     "business_entity": "profit",
     "complexity": 2,
     "category": "Аналитика"
+  },
+  {
+    "question": "Найди email клиента по коду 1С 1C00123",
+    "sql": "SELECT Web FROM [Account] WHERE Code1C = '1C00123' AND Web LIKE '%@%'",
+    "context": "Получение email клиента из CRM по коду 1С. ВАЖНО: Поле Web может содержать как email адреса, так и веб-сайты. Нужно фильтровать по Web LIKE '%@%' для поиска email. После получения значения нужно валидировать формат email (должен соответствовать стандарту RFC 5322). Подключение к CRM через ODBC: DSN=crmdb, User=bpm, Password=bpm. В поле Web могут быть ошибки (невалидные email), поэтому требуется валидация перед использованием.",
+    "business_entity": "crm",
+    "complexity": 2,
+    "category": "CRM"
+  },
+  {
+    "question": "Для данного клиента найди его email",
+    "sql": "SELECT a.Web FROM [Account] a WHERE a.Code1C = (SELECT oi.EXT_ID FROM OUTER_IDS oi WHERE oi.ID = :customer_id AND UPPER(TRIM(oi.TBL)) = 'CUSTOMERS' AND ROWNUM = 1) AND a.Web LIKE '%@%'",
+    "context": "Получение email клиента из CRM по customer_id из Oracle биллинга. Сначала находим код 1С клиента в OUTER_IDS, затем ищем email в CRM по Code1C. ВАЖНО: Поле Web может содержать как email, так и URL. Нужно фильтровать по Web LIKE '%@%' и валидировать формат email. Подключение к CRM через ODBC: DSN=crmdb, User=bpm, Password=bpm.",
+    "business_entity": "crm",
+    "complexity": 3,
+    "category": "CRM"
+  },
+  {
+    "question": "Найди email клиента Обь-Иртышское УГМС ФГБУ",
+    "sql": "SELECT a.Web FROM [Account] a WHERE a.Code1C = (SELECT oi.EXT_ID FROM OUTER_IDS oi JOIN CUSTOMERS c ON oi.ID = c.CUSTOMER_ID JOIN BM_CUSTOMER_CONTACT cc ON c.CUSTOMER_ID = cc.CUSTOMER_ID JOIN BM_CONTACT_DICT cd ON cc.CONTACT_DICT_ID = cd.CONTACT_DICT_ID WHERE UPPER(cc.VALUE) LIKE '%ОБЬ-ИРТЫШСКОЕ%УГМС%' AND cd.MNEMONIC = 'description' AND cc.CONTACT_DICT_ID = 23 AND UPPER(TRIM(oi.TBL)) = 'CUSTOMERS' AND ROWNUM = 1) AND a.Web LIKE '%@%'",
+    "context": "Получение email клиента из CRM по имени клиента. Сначала находим customer_id по имени в BM_CUSTOMER_CONTACT, затем код 1С в OUTER_IDS, затем email в CRM. ВАЖНО: Поле Web требует валидации формата email. Подключение к CRM через ODBC: DSN=crmdb, User=bpm, Password=bpm.",
+    "business_entity": "crm",
+    "complexity": 4,
+    "category": "CRM"
+  },
+  {
+    "question": "Перечисли всех клиентов - название и юридический адрес которым выставляли счета фактуры с начала года (хотя бы раз)",
+    "sql": "SELECT cc.CUSTOMER_ID, COALESCE(MAX(CASE WHEN cd.MNEMONIC = 'description' AND cc.CONTACT_DICT_ID = 23 THEN cc.VALUE END), TRIM(NVL(MAX(CASE WHEN cd.MNEMONIC = 'last_name' AND cc.CONTACT_DICT_ID = 11 THEN cc.VALUE END), '') || ' ' || NVL(MAX(CASE WHEN cd.MNEMONIC = 'first_name' AND cc.CONTACT_DICT_ID = 11 THEN cc.VALUE END), '') || ' ' || NVL(MAX(CASE WHEN cd.MNEMONIC = 'middle_name' AND cc.CONTACT_DICT_ID = 11 THEN cc.VALUE END), ''))) AS CUSTOMER_NAME, COALESCE(MAX(CASE WHEN cd.MNEMONIC = 'b_paddress' AND cc.CONTACT_DICT_ID = 140 THEN cc.VALUE END), MAX(CASE WHEN cd.MNEMONIC = 'paddress' AND cc.CONTACT_DICT_ID = 10 THEN cc.VALUE END), MAX(CASE WHEN cd.MNEMONIC = 'address' AND cc.CONTACT_DICT_ID = 9 THEN cc.VALUE END)) AS LEGAL_ADDRESS FROM BM_CUSTOMER_CONTACT cc JOIN BM_CONTACT_DICT cd ON cc.CONTACT_DICT_ID = cd.CONTACT_DICT_ID WHERE cc.CONTACT_DICT_ID IN (9, 10, 11, 23, 140) AND EXISTS (SELECT 1 FROM BM_INVOICE inv JOIN BM_PERIOD p ON inv.PERIOD_ID = p.PERIOD_ID WHERE inv.CUSTOMER_ID = cc.CUSTOMER_ID AND TO_CHAR(p.START_DATE, 'YYYY') = TO_CHAR(SYSDATE, 'YYYY') AND ROWNUM = 1) GROUP BY cc.CUSTOMER_ID ORDER BY CUSTOMER_NAME",
+    "context": "Получение списка клиентов с названием и адресом, которым выставляли счета-фактуры с начала года. ВАЖНО: Для получения списка клиентов с счетами-фактурами НЕ используй VIEW V_REVENUE_FROM_INVOICES - это неэффективно! Вместо этого используй таблицу BM_INVOICE напрямую, так как там есть CUSTOMER_ID и PERIOD_ID. Это намного эффективнее, так как BM_INVOICE - это таблица с индексами, а V_REVENUE_FROM_INVOICES - это сложный VIEW с множеством JOIN. Для фильтрации по году используй JOIN с BM_PERIOD (НЕ BM_PERIODS!): TO_CHAR(p.START_DATE, 'YYYY') = TO_CHAR(SYSDATE, 'YYYY'). ВАЖНО: В BM_PERIOD поле называется START_DATE, а не DATE_BEG! Используем EXISTS с ROWNUM = 1 для оптимизации - Oracle остановится после первого совпадения. Фильтруем BM_CUSTOMER_CONTACT по CONTACT_DICT_ID IN (9, 10, 11, 23, 140) для уменьшения количества строк перед JOIN. ВАЖНО: Для адреса используй COALESCE с приоритетом: сначала b_paddress (CONTACT_DICT_ID = 140), затем paddress (CONTACT_DICT_ID = 10), затем address (CONTACT_DICT_ID = 9). НЕ используй CONTACT_DICT_ID = 8 - там только email!",
+    "business_entity": "revenue",
+    "complexity": 3,
+    "category": "Доходы"
+  },
+  {
+    "question": "Найди все мнемоники связанные с адресами в BM_CONTACT_DICT",
+    "sql": "SELECT DISTINCT cd.MNEMONIC, cd.CONTACT_DICT_ID, cd.NAME FROM BM_CONTACT_DICT cd WHERE UPPER(cd.MNEMONIC) LIKE '%ADDRESS%' OR UPPER(cd.MNEMONIC) LIKE '%ADDR%' OR UPPER(cd.NAME) LIKE '%ДРЕС%' OR UPPER(cd.NAME) LIKE '%АДРЕС%' ORDER BY cd.CONTACT_DICT_ID, cd.MNEMONIC",
+    "context": "Поиск мнемоник для адресов в справочнике BM_CONTACT_DICT. Используется для определения правильной мнемоники юридического адреса (может быть 'post_address', 'postal_address', 'juridical_address', 'legal_address' или другие варианты).",
+    "business_entity": "customers",
+    "complexity": 1,
+    "category": "Справочники"
   }
 ]
 

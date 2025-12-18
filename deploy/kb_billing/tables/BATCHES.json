@@ -1,0 +1,52 @@
+{
+  "table_name": "BATCHES",
+  "schema": "billing",
+  "description": "Пакеты (партии) предоплаченных карт. Карты генерируются в пакетах для SSG и VOIP сервисов. Тарифы сервисов связаны с batches. Для дилеров карты нарезаются кусками через BM_SERIES.",
+  "database": "Oracle (production)",
+  "key_columns": {
+    "BATCH_ID": "Уникальный идентификатор пакета карт (PRIMARY KEY). Связь с CARDS.BATCH_ID",
+    "BATCH_NUMBER": "Номер пакета",
+    "TARIFF_ID": "ID тарифа из BM_TARIFF. Тарифы сервисов связаны с batches",
+    "TYPE_ID": "Тип карт в пакете (SSG, VOIP)",
+    "CARD_COUNT": "Количество карт в пакете",
+    "DATE_CREATED": "Дата создания пакета",
+    "DATE_GENERATED": "Дата генерации карт в пакете",
+    "STATUS": "Статус пакета",
+    "DESCRIPTION": "Описание пакета"
+  },
+  "business_rules": [
+    "Карты генерируются в пакетах (BATCHES) - партиями",
+    "Тарифы сервисов связаны с batches через TARIFF_ID",
+    "При активации карты из пакета создается группа сервисов с тарифами из этого пакета",
+    "Для дилеров карты нарезаются кусками через BM_SERIES (BATCH_ID → SERIAL_ID → SERVICE_ID дилера)",
+    "Один пакет может содержать множество карт (CARDS)",
+    "Все карты в пакете имеют одинаковый тарифный план"
+  ],
+  "relationships": [
+    {
+      "table": "CARDS",
+      "type": "JOIN",
+      "on": "BATCHES.BATCH_ID = CARDS.BATCH_ID",
+      "note": "Карты в пакете"
+    },
+    {
+      "table": "BM_TARIFF",
+      "type": "LEFT JOIN",
+      "on": "BATCHES.TARIFF_ID = BM_TARIFF.TARIFF_ID",
+      "note": "Тарифный план для сервисов карт в пакете"
+    },
+    {
+      "table": "BM_SERIES",
+      "type": "LEFT JOIN",
+      "on": "BATCHES.BATCH_ID = BM_SERIES.BATCH_ID",
+      "note": "Серии для дилеров (нарезка карт кусками)"
+    }
+  ],
+  "usage_notes": [
+    "Используется для управления пакетами предоплаченных карт",
+    "Тарифы сервисов при активации карты берутся из TARIFF_ID пакета",
+    "Для получения всех карт пакета: SELECT * FROM CARDS WHERE BATCH_ID = :batch_id",
+    "Для получения тарифного плана пакета: SELECT * FROM BM_TARIFF WHERE TARIFF_ID = (SELECT TARIFF_ID FROM BATCHES WHERE BATCH_ID = :batch_id)"
+  ]
+}
+

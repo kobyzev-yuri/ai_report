@@ -10,6 +10,7 @@ import time
 import streamlit as st
 import sys
 from pathlib import Path
+import io
 
 # Добавляем корневую директорию проекта в путь
 project_root = Path(__file__).parent.parent.parent
@@ -56,11 +57,6 @@ def show_assistant_tab():
     
     st.markdown("---")
     
-    # Инициализация ассистента (кэшируется, не вызывает rerun)
-    assistant = init_assistant()
-    if not assistant:
-        return
-    
     # Инициализация session_state
     if "assistant_question" not in st.session_state:
         st.session_state.assistant_question = ""
@@ -73,27 +69,40 @@ def show_assistant_tab():
     
     st.subheader("💬 Ваш вопрос")
     
-    # Используем форму для предотвращения rerun при вводе
-    with st.form("assistant_form", clear_on_submit=False):
-        # Поле ввода вопроса
-        question_input = st.text_area(
-            "Введите ваш вопрос на русском языке:",
-            height=150,
-            placeholder="Например: Покажи превышение трафика за октябрь 2025",
-            value=st.session_state.assistant_question,
-            key="assistant_question_input"
-        )
-        
-        # Кнопка генерации SQL
-        generate_button = st.form_submit_button("📊 Сгенерировать SQL", type="primary", use_container_width=True)
-        
-        # Обработка нажатия кнопки
-        if generate_button:
+    # Поле ввода вопроса (без формы, чтобы не отправлялось при Enter)
+    question_input = st.text_area(
+        "Введите ваш вопрос на русском языке:",
+        height=150,
+        placeholder="Например: Покажи превышение трафика за октябрь 2025",
+        value=st.session_state.get("assistant_question", ""),
+        key="assistant_question_input"
+    )
+    
+    # Сохраняем введенный текст в session_state
+    if question_input:
+        st.session_state.assistant_question = question_input
+    
+    # Кнопка генерации SQL (отдельно от формы)
+    col1, col2 = st.columns([3, 1])
+    with col1:
+        st.write("")  # Пустое место для выравнивания
+    with col2:
+        generate_button = st.button("📊 Сгенерировать SQL", type="primary", use_container_width=True, key="generate_sql_button")
+    
+    # Обработка нажатия кнопки
+    if generate_button:
+        question_clean = question_input.strip() if question_input else ""
+        # Проверка минимальной длины вопроса
+        if len(question_clean) < 10:
+            st.warning("⚠️ Вопрос слишком короткий. Введите более подробный вопрос (минимум 10 символов).")
+            st.session_state.assistant_action = None
+        else:
             st.session_state.assistant_action = "generate"
-            st.session_state.assistant_question = question_input
+            st.session_state.assistant_question = question_clean
             # Очищаем предыдущие результаты при новой генерации
             st.session_state.last_generated_question = ""
             st.session_state.last_generated_sql = None
+            st.rerun()
     
     # Используем сохраненное значение вопроса
     question = st.session_state.assistant_question
@@ -101,7 +110,14 @@ def show_assistant_tab():
     st.markdown("---")
     
     # Генерация SQL
-    if st.session_state.assistant_action == "generate" and question:
+    # Дополнительная проверка длины вопроса перед генерацией
+    if st.session_state.assistant_action == "generate" and question and len(question.strip()) >= 10:
+        # Ленивая инициализация ассистента - только когда пользователь начинает работать
+        assistant = init_assistant()
+        if not assistant:
+            st.error("❌ Не удалось инициализировать ассистента. Проверьте подключение к Qdrant.")
+            return
+        
         # Проверяем, изменился ли вопрос - если да, генерируем новый SQL
         question_changed = (st.session_state.last_generated_question != question)
         
@@ -133,107 +149,173 @@ def show_assistant_tab():
                         if generated_sql:
                             st.session_state.last_generated_sql = generated_sql
                             st.session_state.last_generated_question = question
+                            # Очищаем ошибку, если SQL успешно сгенерирован
+                            if "sql_generation_error" in st.session_state:
+                                del st.session_state["sql_generation_error"]
                     except Exception as e:
-                        st.warning(f"Не удалось сгенерировать SQL через LLM: {e}")
+                        error_msg = str(e)
+                        st.session_state["sql_generation_error"] = error_msg
+                        st.session_state.last_generated_sql = None
+                        st.session_state.last_generated_question = None
         
-        # Если SQL сгенерирован, показываем и выполняем
+        # Если SQL сгенерирован, показываем и предлагаем выполнить
         if generated_sql:
             st.success("✅ SQL запрос сгенерирован!")
             st.markdown("**Сгенерированный SQL:**")
             st.code(generated_sql, language="sql")
             
-            # Кнопки для анализа и выполнения
-            col_exec, col_stats = st.columns([2, 1])
-            with col_exec:
-                execute_btn = st.button("▶️ Выполнить запрос", key="execute_generated", type="primary", use_container_width=True)
-            with col_stats:
-                stats_btn = st.button("📈 Со статистикой", key="execute_with_stats_generated", use_container_width=True)
+            # Валидация SQL перед выполнением (базовая проверка синтаксиса)
+            validation_error = None
+            try:
+                # Проверяем базовую структуру SQL
+                sql_upper = generated_sql.upper().strip()
+                if not any(sql_upper.startswith(keyword) for keyword in ['SELECT', 'WITH', 'INSERT', 'UPDATE', 'DELETE']):
+                    validation_error = "❌ Сгенерированный SQL запрос некорректен: отсутствует начало запроса (SELECT/WITH/INSERT/UPDATE/DELETE)"
+                
+                # Проверяем баланс скобок
+                if not validation_error:
+                    open_brackets = generated_sql.count('(')
+                    close_brackets = generated_sql.count(')')
+                    if open_brackets != close_brackets:
+                        validation_error = f"❌ SQL запрос содержит незакрытые скобки: открывающих {open_brackets}, закрывающих {close_brackets}"
+            except Exception as e:
+                validation_error = f"❌ Ошибка валидации SQL: {str(e)}"
             
-            # Обработка кнопок
-            if execute_btn:
-                execute_sql_query(generated_sql, result_key="sql_result", check_plan=True)
-            elif stats_btn:
-                st.info("💡 **Примечание:** Эта функция показывает фактический план выполнения запроса. Она НЕ собирает статистику таблиц для оптимизатора Oracle. Для улучшения плана выполнения используйте кнопку '📊 Собрать статистику' после выполнения запроса.")
+            if validation_error:
+                st.error(validation_error)
+            else:
+                # Кнопки для выполнения запроса
+                col1, col2 = st.columns(2)
+                with col1:
+                    if st.button("▶️ Выполнить SQL", key="execute_sql_generated", type="primary", use_container_width=True):
+                        with st.spinner("Выполнение запроса..."):
+                            execute_sql_query(generated_sql, result_key="sql_result", check_plan=True)
+                        st.rerun()
                 
-                with st.spinner("Выполнение запроса со сбором статистики выполнения..."):
-                    df, exec_time, stats_text = execute_sql_with_stats(generated_sql, result_key="generated_with_stats")
-                
-                if df is not None:
-                    if exec_time:
-                        st.metric("⏱️ Время выполнения", f"{exec_time:.2f} сек")
-                    if stats_text:
-                        st.markdown("**Фактический план выполнения (Actual Execution Plan):**")
-                        st.code(stats_text, language="text")
-                        st.info("💡 Этот план показывает, как запрос был выполнен. Для улучшения плана на будущее используйте кнопку '📊 Собрать статистику' ниже.")
+                with col2:
+                    if st.button("📈 План со статистикой", key="execute_with_stats_generated", use_container_width=True):
+                        st.info("💡 **Примечание:** Эта функция показывает фактический план выполнения запроса. Она НЕ собирает статистику таблиц для оптимизатора Oracle. Для улучшения плана выполнения используйте кнопку '📊 Собрать статистику' после выполнения запроса.")
                         
-                        # Извлекаем таблицы из SQL для предложения сбора статистики
-                        tables = extract_tables_from_sql(generated_sql)
-                        if tables:
-                            st.markdown("**📊 Собрать статистику для улучшения плана:**")
-                            for table in tables[:5]:  # Показываем максимум 5 таблиц
-                                if st.button(f"📊 Собрать статистику для {table}", key=f"gather_stats_{table}_generated"):
-                                    with st.spinner(f"Сбор статистики для таблицы {table}... Это может занять несколько минут для больших таблиц."):
-                                        success, message = gather_table_stats(table)
-                                        if success:
-                                            st.success(message)
-                                        else:
-                                            st.error(message)
-                    
-                    # Сохраняем результат для отображения ниже
-                    st.session_state["sql_result"] = {
-                        "sql": generated_sql,
-                        "df": df,
-                        "timestamp": pd.Timestamp.now()
-                    }
+                        with st.spinner("Выполнение запроса со сбором статистики выполнения..."):
+                            df, exec_time, stats_text = execute_sql_with_stats(generated_sql, result_key="generated_with_stats")
+                        
+                        if df is not None:
+                            if exec_time:
+                                st.metric("⏱️ Время выполнения", f"{exec_time:.2f} сек")
+                            if stats_text:
+                                st.markdown("**Фактический план выполнения (Actual Execution Plan):**")
+                                st.code(stats_text, language="text")
+                                st.info("💡 Этот план показывает, как запрос был выполнен. Для улучшения плана на будущее используйте кнопку '📊 Собрать статистику' ниже.")
+                                
+                                # Извлекаем таблицы из SQL для предложения сбора статистики
+                                tables = extract_tables_from_sql(generated_sql)
+                                if tables:
+                                    st.markdown("**📊 Собрать статистику для улучшения плана:**")
+                                    for table in tables[:5]:  # Показываем максимум 5 таблиц
+                                        if st.button(f"📊 Собрать статистику для {table}", key=f"gather_stats_{table}_generated"):
+                                            with st.spinner(f"Сбор статистики для таблицы {table}... Это может занять несколько минут для больших таблиц."):
+                                                success, message = gather_table_stats(table)
+                                                if success:
+                                                    st.success(message)
+                                                else:
+                                                    st.error(message)
+                        
+                        # Сохраняем результат для отображения ниже
+                        if df is not None:
+                            st.session_state["sql_result"] = {
+                                "sql": generated_sql,
+                                "df": df,
+                                "timestamp": pd.Timestamp.now()
+                            }
+                        st.rerun()
         else:
-            # Если LLM недоступен, показываем контекст и примеры
+            # Если SQL не сгенерирован, показываем ошибку и возможность ввода SQL вручную
             api_key = os.getenv("OPENAI_API_KEY")
             if not api_key:
-                st.info("""
-                💡 **Автоматическая генерация SQL через LLM недоступна**
+                st.error("""
+                ❌ **Автоматическая генерация SQL через LLM недоступна**
                 
                 Для включения автоматической генерации SQL установите в `config.env`:
                 - `OPENAI_API_KEY=your-api-key`
                 - `OPENAI_API_BASE=https://api.proxyapi.ru/openai/v1` (опционально, для прокси)
-                
-                **Сейчас доступно:** Вы можете использовать похожие примеры ниже и выполнить их кнопкой "▶️ Выполнить".
                 """)
+            else:
+                error_msg = st.session_state.get("sql_generation_error", "Не удалось сгенерировать SQL запрос")
+                st.error(f"❌ {error_msg}")
             
-            # Форматирование контекста
-            if context:
-                formatted_context = assistant.format_context_for_llm(context)
-                
-                # Показываем контекст
-                st.markdown("**Контекст для генерации:**")
-                with st.expander("Показать контекст", expanded=False):
-                    st.text(formatted_context)
-                
-                # Если есть похожие примеры, показываем их
-                if context.get("examples"):
-                    st.markdown("**Рекомендуемые примеры:**")
-                    for i, example in enumerate(context["examples"][:3], 1):
-                        result_key_gen = f"gen_example_result_{i}"
-                        st.markdown(f"{i}. {example['question']}")
-                        st.code(example['sql'], language="sql")
-                        
-                        # Кнопка выполнения для каждого примера
-                        if st.button(f"▶️ Выполнить пример {i}", key=f"execute_gen_example_{i}"):
-                            execute_sql_query(example['sql'], result_key=result_key_gen)
-                
-                # Информация о таблицах
-                if context.get("tables_info"):
-                    st.markdown("**Используемые таблицы:**")
-                    for table_name in context["tables_info"].keys():
-                        st.markdown(f"- {table_name}")
+            # Предлагаем ввести SQL вручную
+            st.markdown("---")
+            st.markdown("**💡 Альтернатива: введите SQL запрос вручную**")
+            manual_sql = st.text_area(
+                "Введите SQL запрос:",
+                height=150,
+                key="manual_sql_input",
+                help="Вы можете ввести SQL запрос вручную, если автоматическая генерация не работает"
+            )
             
-            st.info("""
-            💡 **Для автоматической генерации SQL:** 
+            if st.button("▶️ Выполнить SQL вручную", key="execute_manual_sql", type="primary", use_container_width=True):
+                if manual_sql.strip():
+                    with st.spinner("Выполнение SQL запроса..."):
+                        execute_sql_query(manual_sql.strip(), result_key="sql_result", check_plan=True)
+                    st.rerun()
+                else:
+                    st.warning("⚠️ Введите SQL запрос перед выполнением")
             
-            Установите переменную окружения OPENAI_API_KEY в config.env.
-            Для использования прокси (например, proxyapi.ru) установите OPENAI_API_BASE=https://api.proxyapi.ru/openai/v1
-            
-            Вы можете скопировать SQL из похожих примеров выше и выполнить его вручную.
-            """)
+            # Показываем пример SQL для запроса пользователя (если возможно определить тип запроса)
+            user_question = question if 'question' in locals() else st.session_state.get("assistant_question", "")
+            if user_question:
+                question_lower = user_question.lower()
+                if any(word in question_lower for word in ["клиент", "код 1с", "финансов", "реквизит", "счет", "фактур"]):
+                    with st.expander("💡 Пример SQL запроса для получения клиентов с кодом 1С и финансовыми реквизитами"):
+                        example_sql = """
+-- Получение клиентов с кодом 1С и финансовыми реквизитами из последнего счета-фактуры
+WITH last_invoices AS (
+    SELECT 
+        inv.CUSTOMER_ID,
+        MAX(inv.MOMENT) AS LAST_INVOICE_DATE
+    FROM BM_INVOICE inv
+    WHERE inv.NOT_EXPORT = 0  -- Только экспортируемые счета
+    GROUP BY inv.CUSTOMER_ID
+)
+SELECT DISTINCT
+    c.CUSTOMER_ID,
+    oi.EXT_ID AS CODE_1C,
+    -- Название клиента (организация или ФИО)
+    COALESCE(
+        MAX(CASE WHEN cd.MNEMONIC = 'description' AND cc.CONTACT_DICT_ID = 23 THEN cc.VALUE END),
+        TRIM(
+            NVL(MAX(CASE WHEN cd.MNEMONIC = 'last_name' AND cc.CONTACT_DICT_ID = 11 THEN cc.VALUE END), '') || ' ' ||
+            NVL(MAX(CASE WHEN cd.MNEMONIC = 'first_name' AND cc.CONTACT_DICT_ID = 11 THEN cc.VALUE END), '') || ' ' ||
+            NVL(MAX(CASE WHEN cd.MNEMONIC = 'middle_name' AND cc.CONTACT_DICT_ID = 11 THEN cc.VALUE END), '')
+        )
+    ) AS CUSTOMER_NAME,
+    -- Финансовые реквизиты из последнего счета-фактуры
+    MAX(inv.BUYER_NAME) AS BUYER_NAME,
+    MAX(inv.BUYER_INN) AS BUYER_INN,
+    MAX(inv.BUYER_KPP) AS BUYER_KPP,
+    MAX(inv.BUYER_ADDRESS) AS BUYER_ADDRESS,
+    MAX(inv.MOMENT) AS LAST_INVOICE_DATE
+FROM last_invoices li
+JOIN BM_INVOICE inv 
+    ON inv.CUSTOMER_ID = li.CUSTOMER_ID 
+    AND inv.MOMENT = li.LAST_INVOICE_DATE
+    AND inv.NOT_EXPORT = 0
+JOIN CUSTOMERS c ON c.CUSTOMER_ID = inv.CUSTOMER_ID
+LEFT JOIN OUTER_IDS oi 
+    ON oi.ID = c.CUSTOMER_ID 
+    AND UPPER(TRIM(oi.TBL)) = 'CUSTOMERS'
+LEFT JOIN BM_CUSTOMER_CONTACT cc 
+    ON cc.CUSTOMER_ID = c.CUSTOMER_ID
+LEFT JOIN BM_CONTACT_DICT cd 
+    ON cd.CONTACT_DICT_ID = cc.CONTACT_DICT_ID
+WHERE oi.EXT_ID IS NOT NULL  -- Только клиенты с кодом 1С
+GROUP BY c.CUSTOMER_ID, oi.EXT_ID
+ORDER BY CUSTOMER_NAME
+                        """
+                        st.code(example_sql.strip(), language="sql")
+                        if st.button("📋 Скопировать пример", key="copy_example_sql"):
+                            st.session_state["manual_sql_input"] = example_sql.strip()
+                            st.rerun()
     
     else:
         st.info("💡 Введите вопрос и нажмите кнопку **📊 Сгенерировать SQL**")
@@ -258,22 +340,93 @@ def show_assistant_tab():
                 if result["df"].empty:
                     st.info("ℹ️ Запрос выполнен успешно, но результатов нет")
                 else:
-                    st.success(f"✅ Запрос выполнен успешно. Найдено записей: {len(result['df'])}")
-                    st.dataframe(result["df"], use_container_width=True, height=400)
+                    # Маскирование чувствительных данных перед выводом
+                    df_display = mask_sensitive_data(result["df"], result.get("sql", ""))
                     
-                    # Кнопка экспорта
-                    csv = result["df"].to_csv(index=False).encode('utf-8')
-                    st.download_button(
-                        label="📥 Скачать CSV",
-                        data=csv,
-                        file_name=f"query_result_{result['timestamp'].strftime('%Y%m%d_%H%M%S')}.csv",
-                        mime="text/csv",
-                        key=f"download_{result_key}_final"
-                    )
+                    st.success(f"✅ Запрос выполнен успешно. Найдено записей: {len(result['df'])}")
+                    
+                    # Отображение плана выполнения, если есть
+                    if "plan_info" in result and result["plan_info"]:
+                        plan_info = result["plan_info"]
+                        with st.expander("📊 План выполнения запроса", expanded=False):
+                            if plan_info.get("cost"):
+                                st.metric("💰 Стоимость запроса", f"{plan_info['cost']:,}")
+                            if plan_info.get("warnings"):
+                                for warning in plan_info["warnings"]:
+                                    if "🚨" in warning or "ОЧЕНЬ ВЫСОКАЯ" in warning:
+                                        st.error(warning)
+                                    else:
+                                        st.warning(warning)
+                            if plan_info.get("plan_text"):
+                                st.markdown("**План выполнения (EXPLAIN PLAN):**")
+                                st.code(plan_info["plan_text"], language="text")
+                    
+                    # Отображение статистики выполнения, если есть
+                    if "execution_time" in result and result["execution_time"]:
+                        st.metric("⏱️ Время выполнения", f"{result['execution_time']:.2f} сек")
+                    if "stats" in result and result["stats"]:
+                        with st.expander("📈 Фактический план выполнения (Actual Execution Plan)", expanded=False):
+                            st.code(result["stats"], language="text")
+                            st.info("💡 Этот план показывает, как запрос был выполнен. Для улучшения плана на будущее используйте кнопку '📊 Собрать статистику' ниже.")
+                            
+                            # Извлекаем таблицы из SQL для предложения сбора статистики
+                            sql_for_tables = result.get("sql", "")
+                            if sql_for_tables:
+                                tables = extract_tables_from_sql(sql_for_tables)
+                                if tables:
+                                    st.markdown("**📊 Собрать статистику для улучшения плана:**")
+                                    for table in tables[:5]:  # Показываем максимум 5 таблиц
+                                        if st.button(f"📊 Собрать статистику для {table}", key=f"gather_stats_{result_key}_{table}"):
+                                            with st.spinner(f"Сбор статистики для таблицы {table}... Это может занять несколько минут для больших таблиц."):
+                                                success, message = gather_table_stats(table)
+                                                if success:
+                                                    st.success(message)
+                                                else:
+                                                    st.error(message)
+                    
+                    st.dataframe(df_display, use_container_width=True, height=400)
+                    
+                    # Кнопки экспорта (также с маскированными данными)
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        csv = df_display.to_csv(index=False).encode('utf-8')
+                        st.download_button(
+                            label="📥 Скачать CSV",
+                            data=csv,
+                            file_name=f"query_result_{result['timestamp'].strftime('%Y%m%d_%H%M%S')}.csv",
+                            mime="text/csv",
+                            key=f"download_{result_key}_csv"
+                        )
+                    with col2:
+                        excel_output = io.BytesIO()
+                        with pd.ExcelWriter(excel_output, engine='openpyxl') as writer:
+                            df_display.to_excel(writer, index=False, sheet_name='Query Result')
+                        excel_data = excel_output.getvalue()
+                        st.download_button(
+                            label="📊 Скачать Excel",
+                            data=excel_data,
+                            file_name=f"query_result_{result['timestamp'].strftime('%Y%m%d_%H%M%S')}.xlsx",
+                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                            key=f"download_{result_key}_excel"
+                        )
                 break  # Показываем только один результат
             elif "error" in result:
                 displayed_result = True
                 st.error(f"❌ Ошибка: {result['error']}")
+                
+                # Отображение плана выполнения даже при ошибке, если он есть
+                if "plan_info" in result and result["plan_info"]:
+                    plan_info = result["plan_info"]
+                    with st.expander("📊 План выполнения запроса (до ошибки)", expanded=False):
+                        if plan_info.get("plan_text"):
+                            st.code(plan_info["plan_text"], language="text")
+                        if plan_info.get("warnings"):
+                            for warning in plan_info["warnings"]:
+                                if "🚨" in warning or "ОЧЕНЬ ВЫСОКАЯ" in warning:
+                                    st.error(warning)
+                                else:
+                                    st.warning(warning)
+                
                 with st.expander("🔍 Детали ошибки", expanded=False):
                     st.code(result.get("traceback", ""), language="python")
                 break
@@ -282,342 +435,67 @@ def show_assistant_tab():
         st.info("💡 Результаты выполнения запросов будут отображаться здесь")
 
 
-def show_financial_analysis_tab():
-    """Отображение закладки с финансовым анализом"""
+# УДАЛЕНО: show_financial_analysis_tab - дублировала функциональность show_assistant_tab
+
+
+def mask_sensitive_data(df: pd.DataFrame, sql: str = None) -> pd.DataFrame:
+    """
+    Маскирование чувствительных данных в DataFrame:
+    - Колонки login и password (из BM_STAFF)
+    - Данные из SERVICES где TYPE_ID = 30 (доступ к веб серверу личного кабинета)
     
-    st.header("📊 Финансовый анализ и исследование прибыльности")
-    st.markdown("""
-    **Финансовый анализ для выявления проблем с прибыльностью:**
-    - 🔍 Выявление убыточных клиентов и услуг (расходы > доходы)
-    - 📈 Анализ динамики прибыльности по периодам
-    - 📉 Выявление тенденций к ухудшению прибыльности
-    - 💡 Анализ структуры затрат и доходов
-    - ⚠️ Выявление клиентов с низкой маржой
-    """)
+    Args:
+        df: DataFrame с данными
+        sql: SQL запрос (опционально, для анализа)
     
-    st.markdown("---")
+    Returns:
+        DataFrame с замаскированными данными
+    """
+    if df is None or df.empty:
+        return df
     
-    # Инициализация ассистента (кэшируется, не вызывает rerun)
-    assistant = init_assistant()
-    if not assistant:
-        return
+    df_masked = df.copy()
+    masked_columns = []
+    masked_rows = 0
     
-    # Инициализация session_state для финансового анализа
-    if "financial_question" not in st.session_state:
-        st.session_state.financial_question = ""
-    if "financial_action" not in st.session_state:
-        st.session_state.financial_action = None
-    if "last_financial_question" not in st.session_state:
-        st.session_state.last_financial_question = ""  # Последний вопрос, для которого был сгенерирован SQL
-    if "last_financial_sql" not in st.session_state:
-        st.session_state.last_financial_sql = None  # Последний сгенерированный SQL
+    # Маскирование колонок login и password (case-insensitive)
+    sensitive_column_names = ['login', 'password']
+    for col in df_masked.columns:
+        col_lower = col.lower()
+        if any(sensitive_name in col_lower for sensitive_name in sensitive_column_names):
+            df_masked[col] = '***СКРЫТО***'
+            masked_columns.append(col)
     
-    st.subheader("💬 Ваш вопрос для финансового анализа")
+    # Маскирование данных из SERVICES где TYPE_ID = 30
+    # Проверяем наличие колонки TYPE_ID
+    type_id_col = None
+    for col in df_masked.columns:
+        if col.upper() == 'TYPE_ID':
+            type_id_col = col
+            break
     
-    # Используем форму для предотвращения rerun при вводе
-    with st.form("financial_form", clear_on_submit=False):
-        # Поле ввода вопроса
-        question_input = st.text_area(
-            "Введите вопрос для финансового анализа:",
-            height=150,
-            placeholder="Например: Найди убыточных клиентов за октябрь\nИли: Покажи динамику прибыльности клиентов по периодам\nИли: Найди клиентов с ухудшением прибыльности",
-            value=st.session_state.financial_question,
-            key="financial_question_input"
-        )
+    if type_id_col is not None:
+        # Находим строки с TYPE_ID = 30
+        mask_type_30 = df_masked[type_id_col] == 30
+        if mask_type_30.any():
+            # Маскируем все колонки для этих строк
+            for col in df_masked.columns:
+                if col != type_id_col:  # TYPE_ID оставляем видимым для понимания
+                    df_masked.loc[mask_type_30, col] = '***СКРЫТО (TYPE_ID=30)***'
+            masked_rows = mask_type_30.sum()
+    
+    # Показываем предупреждение, если были замаскированы данные
+    if masked_columns or masked_rows > 0:
+        warning_parts = []
+        if masked_columns:
+            warning_parts.append(f"колонки: {', '.join(masked_columns)}")
+        if masked_rows > 0:
+            warning_parts.append(f"{masked_rows} строк(и) с TYPE_ID=30")
         
-        # Кнопка генерации SQL
-        generate_button = st.form_submit_button("📊 Сгенерировать SQL для анализа", type="primary", use_container_width=True)
-        
-        # Обработка нажатия кнопки
-        if generate_button:
-            st.session_state.financial_action = "generate"
-            st.session_state.financial_question = question_input
-            # Очищаем предыдущие результаты при новой генерации
-            st.session_state.last_financial_question = ""
-            st.session_state.last_financial_sql = None
+        if warning_parts:
+            st.warning(f"🔒 Чувствительные данные замаскированы: {', '.join(warning_parts)}")
     
-    st.markdown("---")
-    st.subheader("📋 Результаты финансового анализа")
-    
-    question = st.session_state.financial_question
-    
-    if st.session_state.financial_action == "generate" and question:
-        # Инициализируем переменные
-        generated_sql = None
-        context = None
-        
-        # Проверяем, изменился ли вопрос - если да, генерируем новый SQL
-        question_changed = (st.session_state.last_financial_question != question)
-        
-        # Если вопрос не изменился и SQL уже был сгенерирован, показываем его
-        if not question_changed and st.session_state.last_financial_sql:
-            generated_sql = st.session_state.last_financial_sql
-        else:
-            # Генерируем новый SQL только если вопрос изменился
-            with st.spinner("Генерация SQL запроса для финансового анализа..."):
-                # Получение контекста
-                context = assistant.get_context_for_sql_generation(question, max_examples=5)
-                
-                # Попытка генерации SQL через LLM
-                api_key = os.getenv("OPENAI_API_KEY")
-                api_base = os.getenv("OPENAI_BASE_URL") or os.getenv("OPENAI_API_BASE")
-                
-                if api_key:
-                    try:
-                        generated_sql = assistant.generate_sql_with_llm(
-                            question=question,
-                            context=context,
-                            api_key=api_key,
-                            api_base=api_base
-                        )
-                        # Сохраняем сгенерированный SQL и вопрос
-                        if generated_sql:
-                            st.session_state.last_financial_sql = generated_sql
-                            st.session_state.last_financial_question = question
-                    except Exception as e:
-                        st.warning(f"Не удалось сгенерировать SQL через LLM: {e}")
-        
-        # Если SQL сгенерирован, показываем и выполняем
-        if generated_sql:
-            st.success("✅ SQL запрос сгенерирован!")
-            st.markdown("**Сгенерированный SQL:**")
-            st.code(generated_sql, language="sql")
-            
-            # Кнопки для анализа и выполнения
-            col_exec, col_stats = st.columns([2, 1])
-            with col_exec:
-                execute_btn = st.button("▶️ Выполнить запрос", key="execute_financial", type="primary", use_container_width=True)
-            with col_stats:
-                stats_btn = st.button("📈 Со статистикой", key="execute_with_stats_financial", use_container_width=True)
-            
-            # Обработка кнопок
-            if execute_btn:
-                execute_sql_query(generated_sql, result_key="financial_result", check_plan=True)
-            elif stats_btn:
-                # Информация о фактическом плане выполнения
-                with st.expander("ℹ️ О фактическом плане выполнения", expanded=False):
-                    st.markdown("""
-                    **Фактический план выполнения (Actual Execution Plan)** показывает:
-                    - Реальный план, который использовал Oracle при выполнении запроса
-                    - Фактическое количество обработанных строк (A-Rows)
-                    - Фактическое время выполнения операций
-                    - Реальное использование буферов (Buffers)
-                    
-                    **Важно:** Этот план показывает, как запрос был выполнен, но не улучшает план для следующих выполнений.
-                    Для улучшения плана нужно обновить статистику таблиц через `DBMS_STATS.GATHER_TABLE_STATS`.
-                    """)
-                
-                st.info("💡 **Примечание:** Эта функция показывает фактический план выполнения запроса. Она НЕ собирает статистику таблиц для оптимизатора Oracle. Для улучшения плана выполнения используйте кнопку '📊 Собрать статистику' после выполнения запроса.")
-                
-                with st.spinner("Выполнение запроса со сбором статистики выполнения..."):
-                    df, exec_time, stats_text = execute_sql_with_stats(generated_sql, result_key="financial_with_stats")
-                
-                if df is not None:
-                    if exec_time:
-                        st.metric("⏱️ Время выполнения", f"{exec_time:.2f} сек")
-                    if stats_text:
-                        st.markdown("**Фактический план выполнения (Actual Execution Plan):**")
-                        st.code(stats_text, language="text")
-                        st.info("💡 Этот план показывает, как запрос был выполнен. Для улучшения плана на будущее используйте кнопку '📊 Собрать статистику' ниже.")
-                        
-                        # Предложение собрать статистику для улучшения плана
-                        tables = extract_tables_from_sql(generated_sql)
-                        if tables:
-                            st.markdown("---")
-                            
-                            # Кнопка для сбора статистики (только для основных таблиц)
-                            main_tables = ['STECCOM_EXPENSES', 'SPNET_TRAFFIC', 'BM_CURRENCY_RATE', 
-                                         'V_CONSOLIDATED_REPORT_WITH_BILLING', 'V_REVENUE_FROM_INVOICES', 'BM_INVOICE_ITEM', 'BM_PERIOD']
-                            tables_to_gather = [t for t in tables if t in main_tables]
-                            
-                            if tables_to_gather:
-                                # Проверяем актуальность статистики
-                                stats_status = check_table_stats_freshness(tables_to_gather, max_days=30)
-                                
-                                # Показываем статус статистики
-                                st.info("💡 **Статус статистики таблиц:**")
-                                for table in tables_to_gather:
-                                    if table in stats_status:
-                                        is_fresh, days_ago, message = stats_status[table]
-                                        if is_fresh:
-                                            st.success(f"{table}: {message}")
-                                        else:
-                                            st.warning(f"{table}: {message}")
-                                
-                                # Показываем кнопку сбора статистики только если есть устаревшие таблицы
-                                needs_refresh = any(not stats_status.get(t, (True, 0, ""))[0] for t in tables_to_gather if t in stats_status)
-                                
-                                if needs_refresh:
-                                    st.markdown("**📊 Обновить статистику для улучшения плана:**")
-                                    if st.button("📊 Собрать статистику для улучшения плана", key="gather_stats_financial"):
-                                        st.warning("⚠️ **Внимание:** Сбор статистики может занять несколько минут для больших таблиц. Пожалуйста, дождитесь завершения.")
-                                        for table in tables_to_gather:
-                                            # Собираем статистику только для устаревших таблиц
-                                            if table in stats_status and not stats_status[table][0]:
-                                                with st.spinner(f"Сбор статистики для {table}... Это может занять несколько минут для больших таблиц."):
-                                                    success, message = gather_table_stats(table)
-                                                    if success:
-                                                        st.success(message)
-                                                    else:
-                                                        st.warning(message)
-                                else:
-                                    st.success("✅ Статистика для всех таблиц актуальна. Дополнительный сбор статистики не требуется.")
-                    
-                    # Сохраняем результат для отображения ниже
-                    st.session_state["financial_result"] = {
-                        "sql": generated_sql,
-                        "df": df,
-                        "timestamp": pd.Timestamp.now()
-                    }
-        else:
-            # Если LLM недоступен, показываем контекст и примеры
-            api_key = os.getenv("OPENAI_API_KEY")
-            if not api_key:
-                st.info("""
-                💡 **Автоматическая генерация SQL через LLM недоступна**
-                
-                Для включения автоматической генерации SQL установите в `config.env`:
-                - `OPENAI_API_KEY=your-api-key`
-                - `OPENAI_API_BASE=https://api.proxyapi.ru/openai/v1` (опционально, для прокси)
-                """)
-            
-            # Показываем примеры финансового анализа
-            st.markdown("**Примеры запросов для финансового анализа:**")
-            examples = [
-                "Найди убыточных клиентов за октябрь",
-                "Покажи динамику прибыльности клиентов по периодам",
-                "Найди клиентов с ухудшением прибыльности",
-                "Покажи клиентов с низкой маржой за октябрь",
-                "Покажи структуру затрат и доходов по клиенту за октябрь"
-            ]
-            for i, example in enumerate(examples, 1):
-                st.markdown(f"{i}. {example}")
-            
-            # Если есть похожие примеры, показываем их
-            if context and context.get("examples"):
-                st.markdown("**Рекомендуемые примеры:**")
-                for i, example in enumerate(context["examples"][:3], 1):
-                    st.markdown(f"{i}. {example['question']}")
-                    st.code(example['sql'], language="sql")
-                    
-                    # Кнопка выполнения для каждого примера
-                    if st.button(f"▶️ Выполнить пример {i}", key=f"execute_financial_example_{i}"):
-                        execute_sql_query(example['sql'], result_key="financial_result")
-    else:
-        st.info("💡 Введите вопрос для финансового анализа и нажмите кнопку **📊 Сгенерировать SQL для анализа**")
-    
-    # Единое место для отображения результатов снизу
-    st.markdown("---")
-    st.subheader("📋 Результаты выполнения")
-    
-    # Проверяем результат финансового анализа
-    if "financial_result" in st.session_state:
-        result = st.session_state["financial_result"]
-        if "df" in result and result["df"] is not None:
-            df = result["df"]
-            if df.empty:
-                st.info("ℹ️ Запрос выполнен успешно, но результатов нет")
-            else:
-                st.success(f"✅ Запрос выполнен успешно. Найдено записей: {len(df)}")
-                st.dataframe(df, use_container_width=True, height=400)
-                
-                # Кнопка экспорта
-                csv = df.to_csv(index=False).encode('utf-8')
-                st.download_button(
-                    label="📥 Скачать CSV",
-                    data=csv,
-                    file_name=f"financial_result_{result['timestamp'].strftime('%Y%m%d_%H%M%S')}.csv",
-                    mime="text/csv",
-                    key=f"download_financial_result_final"
-                )
-                
-                # Финансовый анализ результатов (только метрики, без дублирования таблиц)
-                st.markdown("---")
-                st.subheader("💡 Финансовый анализ результатов")
-                
-                # Проверяем наличие финансовых полей
-                profit_cols = [col for col in df.columns if any(keyword in col.lower() for keyword in ['прибыль', 'profit', 'убыток', 'loss', 'маржа', 'margin'])]
-                cost_cols = [col for col in df.columns if any(keyword in col.lower() for keyword in ['расход', 'expense', 'cost', 'затрат'])]
-                revenue_cols = [col for col in df.columns if any(keyword in col.lower() for keyword in ['доход', 'revenue', 'выручк'])]
-                
-                if profit_cols or (cost_cols and revenue_cols):
-                    # Показываем только метрики и статистику, без дублирования таблиц
-                    col1, col2 = st.columns(2)
-                    
-                    with col1:
-                        # Анализ убыточных позиций (только количество, без таблицы)
-                        if profit_cols:
-                            profit_col = profit_cols[0]
-                            negative_profit_count = len(df[df[profit_col] < 0]) if profit_col in df.columns else 0
-                            if negative_profit_count > 0:
-                                st.warning(f"⚠️ **Убыточных позиций: {negative_profit_count}**")
-                            else:
-                                st.success("✅ Убыточных позиций не обнаружено")
-                        
-                        # Анализ низкой маржи (только количество, без таблицы)
-                        margin_cols = [col for col in df.columns if 'маржа' in col.lower() or 'margin' in col.lower()]
-                        if margin_cols:
-                            margin_col = margin_cols[0]
-                            low_margin_count = len(df[df[margin_col] < 10]) if margin_col in df.columns else 0
-                            if low_margin_count > 0:
-                                st.info(f"ℹ️ **Позиций с низкой маржой (<10%): {low_margin_count}**")
-                            else:
-                                st.success("✅ Позиций с низкой маржой не обнаружено")
-                    
-                    with col2:
-                        # Статистика по прибыли
-                        if profit_cols:
-                            profit_col = profit_cols[0]
-                            if profit_col in df.columns:
-                                total_profit = df[profit_col].sum()
-                                avg_profit = df[profit_col].mean()
-                                st.metric("Общая прибыль", f"{total_profit:,.2f} RUB")
-                                st.metric("Средняя прибыль", f"{avg_profit:,.2f} RUB")
-                    
-                    # Пояснение результатов
-                    st.markdown("---")
-                    with st.expander("📖 Пояснение расчетов и показателей", expanded=True):
-                        st.markdown("""
-                        **Как считаются показатели:**
-                        
-                        1. **Прибыль (PROFIT_RUB)** = Доходы (REVENUE_RUB) - Расходы (EXPENSES_RUB)
-                           - Если значение **отрицательное** → это **убыток** (расходы превышают доходы)
-                           - Если значение **положительное** → это **прибыль**
-                        
-                        2. **Расходы (EXPENSES_RUB)** включают:
-                           - Превышение трафика (CALCULATED_OVERAGE)
-                           - Стоимость трафика из SPNet (SPNET_TOTAL_AMOUNT)
-                           - Все сборы и комиссии (FEES_TOTAL)
-                           - Конвертация из USD в RUB через курс из счетов-фактур
-                        
-                        3. **Доходы (REVENUE_RUB)** - сумма из счетов-фактур в рублях:
-                           - SBD трафик превышения
-                           - SBD абонплата
-                           - SUSPEND абонплата
-                           - Мониторинг и другие услуги
-                        
-                        4. **Маржа (MARGIN_PCT)** = (Прибыль / Доходы) × 100%
-                           - Показывает процент прибыли от дохода
-                           - Если прибыль отрицательная → маржа тоже отрицательная
-                           - Маржа < 10% считается низкой
-                        
-                        5. **Себестоимость (COST_PCT)** = (Расходы / Доходы) × 100%
-                           - Показывает процент расходов от дохода
-                           - Если себестоимость > 100% → убыток
-                        
-                        **Пример:**
-                        - Доходы: 100,000 RUB
-                        - Расходы: 120,000 RUB
-                        - **Прибыль: -20,000 RUB** (убыток 20,000 руб)
-                        - **Маржа: -20%** (убыток составляет 20% от дохода)
-                        - **Себестоимость: 120%** (расходы превышают доходы на 20%)
-                        """)
-        elif "error" in result:
-            st.error(f"❌ Ошибка: {result['error']}")
-            with st.expander("🔍 Детали ошибки", expanded=False):
-                st.code(result.get("traceback", ""), language="python")
-    else:
-        st.info("💡 Результаты выполнения запросов будут отображаться здесь")
+    return df_masked
 
 
 def get_connection():
@@ -768,13 +646,15 @@ def explain_plan(sql: str, return_analysis: bool = False):
                     warnings.append("🚨 ОБНАРУЖЕНО ДЕКАРТОВО ПРОИЗВЕДЕНИЕ (CARTESIAN JOIN) - запрос может выполняться очень долго!")
                 
                 # Проверка на высокую стоимость
+                # Примечание: стоимость из EXPLAIN PLAN не всегда коррелирует с реальным временем выполнения
+                # При наличии индексов запросы с высокой стоимостью могут выполняться быстро
                 if cost:
-                    if cost > 1000000:
+                    if cost > 10000000:  # > 10M - действительно критично
                         warnings.append(f"🚨 ОЧЕНЬ ВЫСОКАЯ СТОИМОСТЬ ({cost:,}) - запрос может выполняться несколько часов или дней!")
-                    elif cost > 100000:
-                        warnings.append(f"⚠️ Высокая стоимость ({cost:,}) - запрос может выполняться долго (минуты или часы)")
-                    elif cost > 10000:
-                        warnings.append(f"ℹ️ Средняя стоимость ({cost:,}) - запрос может выполняться несколько секунд или минут")
+                    elif cost > 1000000:  # > 1M - высокая стоимость, но может быть быстрым с индексами
+                        warnings.append(f"⚠️ Высокая стоимость ({cost:,}) - запрос может выполняться долго. Рекомендуется проверить наличие индексов в плане выполнения")
+                    elif cost > 500000:  # > 500K - средняя-высокая стоимость
+                        warnings.append(f"ℹ️ Повышенная стоимость ({cost:,}) - запрос может выполняться несколько секунд или минут. При наличии индексов обычно выполняется быстро")
             
             # Очищаем план после получения
             try:
@@ -1118,49 +998,60 @@ def execute_sql_query(sql: str, result_key: str = "sql_result", check_plan: bool
         if check_plan:
             cost, plan_text, warnings, plan_error = explain_plan(sql_clean, return_analysis=True)
             
+            # Проверка стоимости запроса и блокировка выполнения при плохом плане
+            if cost and cost > 1000000:  # Стоимость > 1M - блокируем выполнение
+                error_msg = f"❌ **ВЫПОЛНЕНИЕ ЗАБЛОКИРОВАНО:** Стоимость запроса слишком высока ({cost:,}). Запрос может выполняться очень долго и блокировать систему."
+                if plan_text:
+                    error_msg += "\n\n**План выполнения:**"
+                
+                st.session_state[result_key] = {
+                    "sql": sql_clean,
+                    "error": error_msg,
+                    "traceback": "",
+                    "plan_cost": cost,
+                    "warnings": warnings,
+                    "plan_info": {
+                        "cost": cost,
+                        "warnings": warnings,
+                        "plan_text": plan_text
+                    }
+                }
+                conn.close()
+                return
+            
             # Если есть предупреждения о высокой стоимости, показываем их
             if warnings:
                 # Проверяем критичность предупреждений
-                critical_warnings = [w for w in warnings if '🚨' in w or 'ОЧЕНЬ ВЫСОКАЯ' in w]
+                critical_warnings = [w for w in warnings if '🚨' in w or 'ОЧЕНЬ ВЫСОКАЯ' in w or 'CARTESIAN' in w.upper()]
                 high_warnings = [w for w in warnings if '⚠️' in w and '🚨' not in w]
                 
                 if critical_warnings:
-                    # Критические предупреждения - требуем подтверждения
-                    st.error("🚨 **КРИТИЧЕСКОЕ ПРЕДУПРЕЖДЕНИЕ:**")
+                    # Критические предупреждения - БЛОКИРУЕМ выполнение
+                    error_msg = "❌ **ВЫПОЛНЕНИЕ ЗАБЛОКИРОВАНО:** Обнаружены критические проблемы в плане выполнения:\n\n"
                     for warning in critical_warnings:
-                        st.error(warning)
-                    if high_warnings:
-                        for warning in high_warnings:
-                            st.warning(warning)
+                        error_msg += f"- {warning}\n"
+                    error_msg += "\n**Запрос может выполняться очень долго (часы или дни) и блокировать систему!**\n\n"
+                    error_msg += "**Рекомендации:**\n"
+                    error_msg += "- Проверьте JOIN условия (возможно, отсутствует условие ON)\n"
+                    error_msg += "- Добавьте индексы на используемые колонки\n"
+                    error_msg += "- Упростите запрос или разбейте его на части\n"
+                    if plan_text:
+                        error_msg += "\n**План выполнения:**"
                     
-                    st.markdown("---")
-                    st.warning("**Запрос может выполняться очень долго (часы или дни) и блокировать систему!**")
-                    
-                    # Проверяем, было ли уже подтверждение для этого запроса
-                    confirm_key = f"confirm_execute_{result_key}"
-                    if confirm_key not in st.session_state:
-                        col1, col2 = st.columns(2)
-                        with col1:
-                            if st.button("✅ Продолжить выполнение", key=f"confirm_{result_key}", type="primary"):
-                                st.session_state[confirm_key] = True
-                                st.rerun()
-                        with col2:
-                            if st.button("❌ Отменить выполнение", key=f"cancel_{result_key}"):
-                                st.session_state[result_key] = {
-                                    "sql": sql_clean,
-                                    "error": "Выполнение отменено пользователем из-за высокой стоимости запроса",
-                                    "traceback": "",
-                                    "plan_cost": cost,
-                                    "warnings": warnings
-                                }
-                                conn.close()
-                                return
-                        conn.close()
-                        return  # Ждем подтверждения
-                    else:
-                        # Подтверждение получено, продолжаем
-                        st.info("✅ Выполнение подтверждено пользователем")
-                        st.markdown("---")
+                    st.session_state[result_key] = {
+                        "sql": sql_clean,
+                        "error": error_msg,
+                        "traceback": "",
+                        "plan_cost": cost,
+                        "warnings": warnings,
+                        "plan_info": {
+                            "cost": cost,
+                            "warnings": warnings,
+                            "plan_text": plan_text
+                        }
+                    }
+                    conn.close()
+                    return
                 elif high_warnings:
                     # Высокие предупреждения - показываем, но не блокируем
                     for warning in high_warnings:

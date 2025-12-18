@@ -196,6 +196,7 @@ def get_main_report(period_filter=None, plan_filter=None, contract_id_filter=Non
     
     # Формируем базовый запрос (без параметров в WHERE)
     # В Oracle нужно экранировать % в строковых литералах как %%
+    # Добавляем дополнительный JOIN для получения названия клиента по CODE_1C, если оно отсутствует
     base_query = """
     SELECT 
         v.FINANCIAL_PERIOD AS "Отчетный Период",
@@ -203,10 +204,37 @@ def get_main_report(period_filter=None, plan_filter=None, contract_id_filter=Non
         v.IMEI AS "IMEI",
         v.CONTRACT_ID AS "Contract ID",
         -- Доп. поля из биллинга (после Contract ID)
-        COALESCE(v.ORGANIZATION_NAME, v.CUSTOMER_NAME, '') AS "Organization/Person",
-        v.CODE_1C AS "Code 1C",
-        v.SERVICE_ID AS "Service ID",
-        v.AGREEMENT_NUMBER AS "Agreement #",
+        -- Если название клиента отсутствует в представлении, получаем его по SERVICE_ID, IMEI (через SERVICES_EXT) или CODE_1C
+        COALESCE(
+            v.ORGANIZATION_NAME, 
+            v.CUSTOMER_NAME,
+            service_cust_info.CUSTOMER_NAME,
+            imei_service_ext_info.CUSTOMER_NAME,
+            imei_service_info.CUSTOMER_NAME,
+            cust_info.CUSTOMER_NAME,
+            ''
+        ) AS "Organization/Person",
+        -- CODE_1C: сначала из представления, потом по SERVICE_ID, потом по IMEI через SERVICES_EXT, потом по CODE_1C
+        COALESCE(
+            v.CODE_1C,
+            service_cust_info.CODE_1C,
+            imei_service_ext_info.CODE_1C,
+            imei_service_info.CODE_1C,
+            cust_info.CODE_1C
+        ) AS "Code 1C",
+        -- SERVICE_ID: сначала из представления, потом по IMEI через SERVICES_EXT (для swap случаев)
+        COALESCE(
+            v.SERVICE_ID,
+            imei_service_ext_info.SERVICE_ID,
+            imei_service_info.SERVICE_ID
+        ) AS "Service ID",
+        -- AGREEMENT_NUMBER: если SERVICE_ID есть, сначала из service_cust_info (надежнее), потом из представления и других источников
+        COALESCE(
+            service_cust_info.AGREEMENT_NUMBER,  -- Приоритет: если SERVICE_ID найден, берем из прямого JOIN
+            v.AGREEMENT_NUMBER,                  -- Затем из представления
+            imei_service_ext_info.AGREEMENT_NUMBER,  -- Затем по IMEI через SERVICES_EXT
+            imei_service_info.AGREEMENT_NUMBER      -- Затем по IMEI через SERVICES.VSAT
+        ) AS "Agreement #",
         CASE 
             WHEN v.ACTIVATION_DATE IS NOT NULL THEN TO_CHAR(v.ACTIVATION_DATE, 'YYYY-MM-DD')
             ELSE NULL
@@ -231,6 +259,134 @@ def get_main_report(period_filter=None, plan_filter=None, contract_id_filter=Non
         NVL(v.FEE_CREDITED, 0) AS "Credited",
         NVL(v.FEE_PRORATED, 0) AS "Prorated"
     FROM V_CONSOLIDATED_REPORT_WITH_BILLING v
+    -- Дополнительный JOIN для получения клиента по SERVICE_ID напрямую из SERVICES
+    -- Это нужно для случаев, когда нет CONTRACT_ID в V_IRIDIUM_SERVICES_INFO или IMEI был перенесен на другой контракт
+    -- SERVICE_ID - самый надежный способ найти клиента, так как он уникален
+    LEFT JOIN (
+        SELECT 
+            s.SERVICE_ID,
+            MAX(oi.EXT_ID) AS CODE_1C,
+            MAX(a.DESCRIPTION) AS AGREEMENT_NUMBER,
+            COALESCE(
+                MAX(CASE WHEN cd.MNEMONIC = 'description' AND cc.CONTACT_DICT_ID = 23 THEN cc.VALUE END),
+                TRIM(
+                    NVL(MAX(CASE WHEN cd.MNEMONIC = 'last_name' AND cc.CONTACT_DICT_ID = 11 THEN cc.VALUE END), '') || ' ' ||
+                    NVL(MAX(CASE WHEN cd.MNEMONIC = 'first_name' AND cc.CONTACT_DICT_ID = 11 THEN cc.VALUE END), '') || ' ' ||
+                    NVL(MAX(CASE WHEN cd.MNEMONIC = 'middle_name' AND cc.CONTACT_DICT_ID = 11 THEN cc.VALUE END), '')
+                )
+            ) AS CUSTOMER_NAME
+        FROM SERVICES s
+        JOIN CUSTOMERS c ON s.CUSTOMER_ID = c.CUSTOMER_ID
+        JOIN ACCOUNTS a ON s.ACCOUNT_ID = a.ACCOUNT_ID
+        LEFT JOIN OUTER_IDS oi 
+            ON oi.ID = c.CUSTOMER_ID
+           AND UPPER(TRIM(oi.TBL)) = 'CUSTOMERS'
+        LEFT JOIN BM_CUSTOMER_CONTACT cc ON cc.CUSTOMER_ID = c.CUSTOMER_ID
+        LEFT JOIN BM_CONTACT_DICT cd ON cd.CONTACT_DICT_ID = cc.CONTACT_DICT_ID
+        -- Убираем фильтр TYPE_ID, так как для любого найденного SERVICE_ID должен быть ACCOUNT_ID
+        GROUP BY s.SERVICE_ID
+    ) service_cust_info ON service_cust_info.SERVICE_ID = v.SERVICE_ID
+    -- Дополнительный JOIN для получения SERVICE_ID по IMEI через SERVICES_EXT (когда SERVICE_ID в представлении NULL)
+    -- Для swap IMEI: IMEI может храниться в SERVICES_EXT.VALUE, а не в SERVICES.VSAT
+    LEFT JOIN (
+        SELECT 
+            se.VALUE AS IMEI,
+            se.SERVICE_ID,
+            MAX(oi.EXT_ID) AS CODE_1C,
+            MAX(a.DESCRIPTION) AS AGREEMENT_NUMBER,
+            COALESCE(
+                MAX(CASE WHEN cd.MNEMONIC = 'description' AND cc.CONTACT_DICT_ID = 23 THEN cc.VALUE END),
+                TRIM(
+                    NVL(MAX(CASE WHEN cd.MNEMONIC = 'last_name' AND cc.CONTACT_DICT_ID = 11 THEN cc.VALUE END), '') || ' ' ||
+                    NVL(MAX(CASE WHEN cd.MNEMONIC = 'first_name' AND cc.CONTACT_DICT_ID = 11 THEN cc.VALUE END), '') || ' ' ||
+                    NVL(MAX(CASE WHEN cd.MNEMONIC = 'middle_name' AND cc.CONTACT_DICT_ID = 11 THEN cc.VALUE END), '')
+                )
+            ) AS CUSTOMER_NAME
+        FROM SERVICES_EXT se
+        JOIN SERVICES s ON se.SERVICE_ID = s.SERVICE_ID
+        JOIN CUSTOMERS c ON s.CUSTOMER_ID = c.CUSTOMER_ID
+        JOIN ACCOUNTS a ON s.ACCOUNT_ID = a.ACCOUNT_ID
+        LEFT JOIN OUTER_IDS oi 
+            ON oi.ID = c.CUSTOMER_ID
+           AND UPPER(TRIM(oi.TBL)) = 'CUSTOMERS'
+        LEFT JOIN BM_CUSTOMER_CONTACT cc ON cc.CUSTOMER_ID = c.CUSTOMER_ID
+        LEFT JOIN BM_CONTACT_DICT cd ON cd.CONTACT_DICT_ID = cc.CONTACT_DICT_ID
+        WHERE se.VALUE IS NOT NULL
+          AND se.DATE_END IS NULL  -- Только активные записи
+          -- Убираем фильтр TYPE_ID, так как для любого найденного SERVICE_ID должен быть ACCOUNT_ID
+        GROUP BY se.VALUE, se.SERVICE_ID
+    ) imei_service_ext_info ON TRIM(imei_service_ext_info.IMEI) = TRIM(v.IMEI)
+    -- Дополнительный JOIN для получения SERVICE_ID и клиента по IMEI (VSAT) для случаев swap IMEI
+    -- Когда IMEI был перенесен на другой контракт, SERVICE_ID в представлении может быть NULL
+    -- Ищем активный сервис по IMEI (VSAT) с приоритетом активным (STATUS=10) и более новым
+    LEFT JOIN (
+        SELECT 
+            s_ranked.VSAT AS IMEI,
+            s_ranked.SERVICE_ID,
+            s_ranked.CODE_1C,
+            s_ranked.AGREEMENT_NUMBER,
+            s_ranked.CUSTOMER_NAME
+        FROM (
+            SELECT 
+                s.VSAT,
+                s.SERVICE_ID,
+                MAX(oi.EXT_ID) AS CODE_1C,
+                MAX(a.DESCRIPTION) AS AGREEMENT_NUMBER,
+                COALESCE(
+                    MAX(CASE WHEN cd.MNEMONIC = 'description' AND cc.CONTACT_DICT_ID = 23 THEN cc.VALUE END),
+                    TRIM(
+                        NVL(MAX(CASE WHEN cd.MNEMONIC = 'last_name' AND cc.CONTACT_DICT_ID = 11 THEN cc.VALUE END), '') || ' ' ||
+                        NVL(MAX(CASE WHEN cd.MNEMONIC = 'first_name' AND cc.CONTACT_DICT_ID = 11 THEN cc.VALUE END), '') || ' ' ||
+                        NVL(MAX(CASE WHEN cd.MNEMONIC = 'middle_name' AND cc.CONTACT_DICT_ID = 11 THEN cc.VALUE END), '')
+                    )
+                ) AS CUSTOMER_NAME,
+                MAX(s.STATUS) AS STATUS,
+                MAX(s.CREATE_DATE) AS CREATE_DATE,
+                ROW_NUMBER() OVER (
+                    PARTITION BY s.VSAT 
+                    ORDER BY 
+                        CASE WHEN MAX(s.STATUS) = 10 THEN 0 ELSE 1 END,  -- Приоритет активным
+                        MAX(s.CREATE_DATE) DESC NULLS LAST,  -- Затем по дате создания
+                        MAX(s.SERVICE_ID) DESC  -- Затем по SERVICE_ID (больший = новее)
+                ) AS rn
+            FROM SERVICES s
+            JOIN CUSTOMERS c ON s.CUSTOMER_ID = c.CUSTOMER_ID
+            JOIN ACCOUNTS a ON s.ACCOUNT_ID = a.ACCOUNT_ID
+            LEFT JOIN OUTER_IDS oi 
+                ON oi.ID = c.CUSTOMER_ID
+               AND UPPER(TRIM(oi.TBL)) = 'CUSTOMERS'
+            LEFT JOIN BM_CUSTOMER_CONTACT cc ON cc.CUSTOMER_ID = c.CUSTOMER_ID
+            LEFT JOIN BM_CONTACT_DICT cd ON cd.CONTACT_DICT_ID = cc.CONTACT_DICT_ID
+            WHERE s.VSAT IS NOT NULL
+              -- Убираем фильтр TYPE_ID, так как для любого найденного SERVICE_ID должен быть ACCOUNT_ID
+            GROUP BY s.VSAT, s.SERVICE_ID
+        ) s_ranked
+        WHERE s_ranked.rn = 1  -- Берем только первый (самый приоритетный) сервис
+    ) imei_service_info ON TRIM(imei_service_info.IMEI) = TRIM(v.IMEI)
+        AND (v.SERVICE_ID IS NULL OR v.SERVICE_ID = imei_service_info.SERVICE_ID)
+    -- Дополнительный JOIN для получения названия клиента по CODE_1C, если оно отсутствует
+    LEFT JOIN (
+        SELECT 
+            oi.EXT_ID AS CODE_1C,
+            COALESCE(
+                MAX(CASE WHEN cd.MNEMONIC = 'description' AND cc.CONTACT_DICT_ID = 23 THEN cc.VALUE END),
+                TRIM(
+                    NVL(MAX(CASE WHEN cd.MNEMONIC = 'last_name' AND cc.CONTACT_DICT_ID = 11 THEN cc.VALUE END), '') || ' ' ||
+                    NVL(MAX(CASE WHEN cd.MNEMONIC = 'first_name' AND cc.CONTACT_DICT_ID = 11 THEN cc.VALUE END), '') || ' ' ||
+                    NVL(MAX(CASE WHEN cd.MNEMONIC = 'middle_name' AND cc.CONTACT_DICT_ID = 11 THEN cc.VALUE END), '')
+                )
+            ) AS CUSTOMER_NAME
+        FROM CUSTOMERS c
+        LEFT JOIN OUTER_IDS oi 
+            ON oi.ID = c.CUSTOMER_ID
+           AND UPPER(TRIM(oi.TBL)) = 'CUSTOMERS'
+        LEFT JOIN BM_CUSTOMER_CONTACT cc 
+            ON cc.CUSTOMER_ID = c.CUSTOMER_ID
+        LEFT JOIN BM_CONTACT_DICT cd 
+            ON cd.CONTACT_DICT_ID = cc.CONTACT_DICT_ID
+        WHERE oi.EXT_ID IS NOT NULL
+        GROUP BY oi.EXT_ID
+    ) cust_info ON cust_info.CODE_1C = v.CODE_1C
     WHERE 1=1
         {plan_condition}
         {period_condition}
@@ -271,20 +427,82 @@ def get_main_report(period_filter=None, plan_filter=None, contract_id_filter=Non
 
 # Временно отключено кэширование для диагностики зацикливания
 # @st.cache_data(ttl=300)  # Кэшируем на 5 минут
+def get_current_period():
+    """Получение текущего периода из BM_PERIOD (где SYSDATE между START_DATE и STOP_DATE, или самый последний открытый)"""
+    try:
+        conn = get_connection()
+        if not conn:
+            return None
+        
+        # Ищем период, где текущая дата попадает в диапазон START_DATE - STOP_DATE
+        # Если такого нет, берем последний открытый период (IS_CLOSED = 0 или NULL)
+        query = """
+        SELECT 
+            TO_CHAR(START_DATE, 'YYYY-MM') AS PERIOD_YYYYMM
+        FROM (
+            SELECT 
+                START_DATE,
+                STOP_DATE,
+                IS_CLOSED
+            FROM BM_PERIOD
+            WHERE SYSDATE BETWEEN START_DATE AND STOP_DATE
+            ORDER BY PERIOD_ID DESC
+            FETCH FIRST 1 ROW ONLY
+        )
+        UNION ALL
+        SELECT 
+            TO_CHAR(START_DATE, 'YYYY-MM') AS PERIOD_YYYYMM
+        FROM (
+            SELECT 
+                START_DATE,
+                STOP_DATE,
+                IS_CLOSED
+            FROM BM_PERIOD
+            WHERE SYSDATE NOT BETWEEN START_DATE AND STOP_DATE
+              AND (IS_CLOSED = 0 OR IS_CLOSED IS NULL)
+            ORDER BY PERIOD_ID DESC
+            FETCH FIRST 1 ROW ONLY
+        )
+        FETCH FIRST 1 ROW ONLY
+        """
+        
+        cursor = conn.cursor()
+        cursor.execute(query)
+        row = cursor.fetchone()
+        cursor.close()
+        
+        if row and row[0]:
+            return str(row[0])
+        # Если период не найден в BM_PERIOD, возвращаем текущий месяц
+        return datetime.now().strftime('%Y-%m')
+    except Exception as e:
+        import traceback
+        print(f"Ошибка получения текущего периода: {e}")
+        print(traceback.format_exc())
+        # В случае ошибки возвращаем текущий месяц
+        return datetime.now().strftime('%Y-%m')
+    finally:
+        try:
+            if conn:
+                conn.close()
+        except:
+            pass
+
+
 def get_periods():
-    """Получение списка периодов (возвращаем FINANCIAL_PERIOD для отображения и фильтрации)"""
+    """Получение списка периодов из BM_PERIOD (возвращаем период в формате YYYY-MM для отображения и фильтрации)"""
     try:
         conn = get_connection()
         if not conn:
             return []
         
-        # Используем FINANCIAL_PERIOD для отображения и фильтрации (Отчетный период на месяц меньше BILL_MONTH)
+        # Загружаем периоды из BM_PERIOD, используем TO_CHAR(START_DATE, 'YYYY-MM') для отображения
         query = """
         SELECT DISTINCT 
-            FINANCIAL_PERIOD AS display_period
-        FROM V_CONSOLIDATED_REPORT_WITH_BILLING
-        WHERE FINANCIAL_PERIOD IS NOT NULL
-        ORDER BY FINANCIAL_PERIOD DESC
+            TO_CHAR(START_DATE, 'YYYY-MM') AS display_period
+        FROM BM_PERIOD
+        WHERE START_DATE IS NOT NULL
+        ORDER BY START_DATE DESC
         FETCH FIRST 100 ROWS ONLY
         """
         
@@ -426,6 +644,8 @@ def get_revenue_report(period_filter=None, contract_id_filter=None, imei_filter=
         v.ORDER_NUMBER AS "Order #",
         v.ACC_CURRENCY_NAME AS "Валюта учета",
         v.REVENUE_SBD_TRAFFIC AS "SBD Трафик превышения",
+        NVL(v.REVENUE_SBD_TRAFFIC_SBD1, 0) AS "SBD Трафик SBD-1",
+        NVL(v.REVENUE_SBD_TRAFFIC_SBD10, 0) AS "SBD Трафик SBD-10",
         v.REVENUE_SBD_ABON AS "SBD Абонплата",
         v.REVENUE_SBD_TOTAL AS "SBD Всего",
         v.REVENUE_SUSPEND_ABON AS "SUSPEND Абонплата",
@@ -457,6 +677,286 @@ def get_revenue_report(period_filter=None, contract_id_filter=None, imei_filter=
         return df
     except Exception as e:
         st.error(f"Ошибка получения отчета по доходам: {e}")
+        return None
+    finally:
+        if conn:
+            conn.close()
+
+
+def get_analytics_duplicates(period_id):
+    """Поиск дубликатов в ANALYTICS для конкретного PERIOD_ID.
+    
+    Дубликаты - это записи, где все поля совпадают, кроме AID (первичного ключа).
+    """
+    conn = get_connection()
+    if not conn:
+        return None
+    
+    if not period_id:
+        return None
+    
+    # Запрос для поиска дубликатов: группируем по всем полям кроме AID
+    query = """
+    WITH duplicate_groups AS (
+        SELECT 
+            PERIOD_ID,
+            SERVICE_ID,
+            CUSTOMER_ID,
+            ACCOUNT_ID,
+            TYPE_ID,
+            TARIFF_ID,
+            TARIFFEL_ID,
+            VSAT,
+            MONEY,
+            PRICE,
+            TRAF,
+            TOTAL_TRAF,
+            CBYTE,
+            INVOICE_ITEM_ID,
+            FLAG,
+            RESOURCE_TYPE_ID,
+            CLASS_ID,
+            CLASS_NAME,
+            BLANK,
+            COUNTER_ID,
+            COUNTER_CF,
+            ZONE_ID,
+            THRESHOLD,
+            SUB_TYPE_ID,
+            SUB_PERIOD_ID,
+            PMONEY,
+            PARTNER_PERCENT,
+            COUNT(*) AS DUPLICATE_COUNT,
+            LISTAGG(AID, ', ') WITHIN GROUP (ORDER BY AID) AS AID_LIST
+        FROM ANALYTICS
+        WHERE PERIOD_ID = :period_id
+        GROUP BY 
+            PERIOD_ID,
+            SERVICE_ID,
+            CUSTOMER_ID,
+            ACCOUNT_ID,
+            TYPE_ID,
+            TARIFF_ID,
+            TARIFFEL_ID,
+            VSAT,
+            MONEY,
+            PRICE,
+            TRAF,
+            TOTAL_TRAF,
+            CBYTE,
+            INVOICE_ITEM_ID,
+            FLAG,
+            RESOURCE_TYPE_ID,
+            CLASS_ID,
+            CLASS_NAME,
+            BLANK,
+            COUNTER_ID,
+            COUNTER_CF,
+            ZONE_ID,
+            THRESHOLD,
+            SUB_TYPE_ID,
+            SUB_PERIOD_ID,
+            PMONEY,
+            PARTNER_PERCENT
+        HAVING COUNT(*) > 1
+    )
+    SELECT 
+        dg.PERIOD_ID,
+        dg.SERVICE_ID AS SERVICE_ID_ANALYTICS,
+        dg.CUSTOMER_ID AS CUSTOMER_ID_ANALYTICS,
+        dg.ACCOUNT_ID,
+        dg.TYPE_ID,
+        dg.TARIFF_ID,
+        dg.TARIFFEL_ID,
+        dg.VSAT,
+        dg.MONEY,
+        dg.PRICE,
+        dg.TRAF,
+        dg.TOTAL_TRAF,
+        dg.CBYTE,
+        dg.INVOICE_ITEM_ID,
+        dg.FLAG,
+        dg.RESOURCE_TYPE_ID,
+        dg.CLASS_ID,
+        dg.CLASS_NAME,
+        dg.BLANK,
+        dg.COUNTER_ID,
+        dg.COUNTER_CF,
+        dg.ZONE_ID,
+        dg.THRESHOLD,
+        dg.SUB_TYPE_ID,
+        dg.SUB_PERIOD_ID,
+        dg.PMONEY,
+        dg.PARTNER_PERCENT,
+        dg.DUPLICATE_COUNT,
+        dg.AID_LIST,
+        c.CUSTOMER_ID,
+        oi.EXT_ID AS CODE_1C,
+        MAX(CASE WHEN cd.MNEMONIC = 'description' AND cc.CONTACT_DICT_ID = 23 THEN cc.VALUE END) AS CUSTOMER_NAME,
+        s.LOGIN AS CONTRACT_ID,
+        s.SERVICE_ID,
+        rt.MNEMONIC AS RESOURCE_MNEMONIC,
+        rt.NAME AS RESOURCE_NAME,
+        t.NAME AS TARIFF_NAME,
+        z.DESCRIPTION AS ZONE_NAME
+    FROM duplicate_groups dg
+    LEFT JOIN SERVICES s ON dg.SERVICE_ID = s.SERVICE_ID
+    LEFT JOIN CUSTOMERS c ON dg.CUSTOMER_ID = c.CUSTOMER_ID
+    LEFT JOIN OUTER_IDS oi ON oi.ID = c.CUSTOMER_ID AND UPPER(TRIM(oi.TBL)) = 'CUSTOMERS'
+    LEFT JOIN BM_CUSTOMER_CONTACT cc ON cc.CUSTOMER_ID = c.CUSTOMER_ID
+    LEFT JOIN BM_CONTACT_DICT cd ON cd.CONTACT_DICT_ID = cc.CONTACT_DICT_ID
+    LEFT JOIN BM_RESOURCE_TYPE rt ON dg.RESOURCE_TYPE_ID = rt.RESOURCE_TYPE_ID
+    LEFT JOIN BM_TARIFF t ON dg.TARIFF_ID = t.TARIFF_ID
+    LEFT JOIN BM_ZONE z ON dg.ZONE_ID = z.ZONE_ID
+    GROUP BY 
+        dg.PERIOD_ID,
+        dg.SERVICE_ID,
+        dg.CUSTOMER_ID,
+        dg.ACCOUNT_ID,
+        dg.TYPE_ID,
+        dg.TARIFF_ID,
+        dg.TARIFFEL_ID,
+        dg.VSAT,
+        dg.MONEY,
+        dg.PRICE,
+        dg.TRAF,
+        dg.TOTAL_TRAF,
+        dg.CBYTE,
+        dg.INVOICE_ITEM_ID,
+        dg.FLAG,
+        dg.RESOURCE_TYPE_ID,
+        dg.CLASS_ID,
+        dg.CLASS_NAME,
+        dg.BLANK,
+        dg.COUNTER_ID,
+        dg.COUNTER_CF,
+        dg.ZONE_ID,
+        dg.THRESHOLD,
+        dg.SUB_TYPE_ID,
+        dg.SUB_PERIOD_ID,
+        dg.PMONEY,
+        dg.PARTNER_PERCENT,
+        dg.DUPLICATE_COUNT,
+        dg.AID_LIST,
+        c.CUSTOMER_ID,
+        oi.EXT_ID,
+        s.LOGIN,
+        s.SERVICE_ID,
+        rt.MNEMONIC,
+        rt.NAME,
+        t.NAME,
+        z.DESCRIPTION
+    ORDER BY dg.DUPLICATE_COUNT DESC, dg.MONEY DESC
+    """
+    
+    try:
+        df = pd.read_sql_query(query, conn, params={'period_id': period_id})
+        return df
+    except Exception as e:
+        st.error(f"Ошибка поиска дубликатов: {e}")
+        import traceback
+        st.code(traceback.format_exc())
+        return None
+    finally:
+        if conn:
+            conn.close()
+
+
+def get_analytics_invoice_period_report(period_filter=None, contract_id_filter=None, imei_filter=None, 
+                                        customer_name_filter=None, code_1c_filter=None, tariff_filter=None, zone_filter=None):
+    """Получение отчета по счетам за период из ANALYTICS"""
+    conn = get_connection()
+    if not conn:
+        return None
+    
+    # Фильтр по периодам
+    period_condition = ""
+    if period_filter and period_filter != "All Periods":
+        period_condition = f"AND v.PERIOD_YYYYMM = '{period_filter}'"
+    
+    # Фильтр по CONTRACT_ID (SUB-*)
+    contract_condition = ""
+    if contract_id_filter and contract_id_filter.strip():
+        contract_value = contract_id_filter.strip().replace("'", "''")
+        contract_condition = f"AND v.CONTRACT_ID LIKE '%{contract_value}%'"
+    
+    # Фильтр по IMEI
+    imei_condition = ""
+    if imei_filter and imei_filter.strip():
+        imei_value = imei_filter.strip().replace("'", "''")
+        imei_condition = f"AND v.IMEI = '{imei_value}'"
+    
+    # Фильтр по названию клиента
+    customer_condition = ""
+    if customer_name_filter and customer_name_filter.strip():
+        customer_value = customer_name_filter.strip().replace("'", "''")
+        customer_condition = f"AND UPPER(COALESCE(v.CUSTOMER_NAME, '')) LIKE UPPER('%{customer_value}%')"
+    
+    # Фильтр по коду 1С
+    code_1c_condition = ""
+    if code_1c_filter and code_1c_filter.strip():
+        code_1c_value = code_1c_filter.strip().replace("'", "''")
+        code_1c_condition = f"AND v.CODE_1C LIKE '%{code_1c_value}%'"
+    
+    # Фильтр по тарифу
+    tariff_condition = ""
+    if tariff_filter and tariff_filter.strip():
+        tariff_value = tariff_filter.strip().replace("'", "''")
+        tariff_condition = f"AND v.TARIFF_ID = {tariff_value}"
+    
+    # Фильтр по зоне
+    zone_condition = ""
+    if zone_filter and zone_filter.strip():
+        zone_value = zone_filter.strip().replace("'", "''")
+        zone_condition = f"AND v.ZONE_ID = {zone_value}"
+    
+    query = """
+    SELECT 
+        v.PERIOD_YYYYMM AS "Период",
+        v.CUSTOMER_NAME AS "Клиент",
+        v.CODE_1C AS "Код 1С",
+        v.ACCOUNT_NAME AS "Договор",
+        v.CONTRACT_ID AS "Contract ID",
+        v.SERVICE_ID AS "Service ID",
+        v.IMEI AS "IMEI",
+        v.TARIFF_NAME AS "Тариф",
+        v.ZONE_NAME AS "Зона",
+        v.RESOURCE_MNEMONIC AS "Тип ресурса",
+        v.RESOURCE_TYPE_NAME AS "Название ресурса",
+        v.MONEY AS "Сумма (руб)",
+        v.MONEY_ABON AS "Абонплата (руб)",
+        v.MONEY_TRAFFIC AS "Трафик (руб)",
+        v.TRAF AS "Трафик (объем)",
+        v.TOTAL_TRAF AS "Общий трафик",
+        v.IN_INVOICE AS "В счете",
+        v.SERVICE_STATUS AS "Статус услуги"
+    FROM V_ANALYTICS_INVOICE_PERIOD v
+    WHERE 1=1
+        {period_condition}
+        {contract_condition}
+        {imei_condition}
+        {customer_condition}
+        {code_1c_condition}
+        {tariff_condition}
+        {zone_condition}
+    ORDER BY v.PERIOD_YYYYMM DESC, v.CUSTOMER_NAME, v.CONTRACT_ID, v.TARIFF_ID, v.ZONE_ID
+    """
+    
+    query = query.format(
+        period_condition=period_condition,
+        contract_condition=contract_condition,
+        imei_condition=imei_condition,
+        customer_condition=customer_condition,
+        code_1c_condition=code_1c_condition,
+        tariff_condition=tariff_condition,
+        zone_condition=zone_condition
+    )
+    
+    try:
+        df = pd.read_sql_query(query, conn)
+        return df
+    except Exception as e:
+        st.error(f"Ошибка получения отчета по счетам за период: {e}")
         return None
     finally:
         if conn:
@@ -628,7 +1128,13 @@ def main():
         st.header("⚙️ Filters")
         
         # Кэшируем периоды и планы, чтобы не делать запросы при каждом rerun
-        periods_data = get_periods()
+        # Загружаем периоды только если они еще не загружены или нужно обновить
+        if 'cached_periods_data' not in st.session_state:
+            with st.spinner("Загрузка периодов..."):
+                periods_data = get_periods()
+                st.session_state.cached_periods_data = periods_data
+        else:
+            periods_data = st.session_state.cached_periods_data
         
         # Проверяем, что periods_data не пустой
         if not periods_data:
@@ -650,9 +1156,21 @@ def main():
             st.error("⚠️ Нет доступных периодов для отображения.")
             st.stop()
         
-        # По умолчанию выбираем последний период (первый в отсортированном списке)
+        # Получаем текущий период из BM_PERIOD (в формате YYYY-MM)
+        current_period = get_current_period()
+        
+        # Если текущий период не найден, используем текущий месяц
+        if not current_period:
+            current_period = datetime.now().strftime('%Y-%m')
+        
+        # По умолчанию выбираем текущий период, если он есть в списке, иначе последний период
         if 'selected_period_index' not in st.session_state:
-            st.session_state.selected_period_index = 0  # 0 = последний период (не "All Periods")
+            if current_period and current_period in period_display_list:
+                # Находим индекс текущего периода
+                st.session_state.selected_period_index = period_display_list.index(current_period)
+            else:
+                # Иначе выбираем последний период (первый в отсортированном списке)
+                st.session_state.selected_period_index = 0
         
         # Проверяем, что индекс не выходит за границы
         if st.session_state.selected_period_index >= len(period_display_list):
@@ -763,12 +1281,13 @@ def main():
         
         st.info("💡 Конфигурация загружается из config.env при запуске через run_streamlit.sh")
     
-    # Создаем вкладки для отчета, доходов, загрузки данных, ассистента и финансового анализа
-    tab_assistant, tab_financial, tab_report, tab_revenue, tab_loader = st.tabs([
+    # Создаем вкладки для отчета, доходов, загрузки данных, ассистента и расширения KB
+    tab_assistant, tab_kb_expansion, tab_report, tab_revenue, tab_analytics, tab_loader = st.tabs([
         "🤖 Ассистент",
-        "📊 Финансовый анализ",
+        "📚 Расширение KB",
         "💰 Расходы Иридиум", 
-        "💰 Доходы", 
+        "💰 Доходы",
+        "📋 Счета за период",
         "📥 Data Loader"
     ])
     
@@ -793,15 +1312,15 @@ def main():
             with st.expander("Детали ошибки"):
                 st.code(traceback.format_exc())
     
-    # ========== FINANCIAL ANALYSIS TAB ==========
-    with tab_financial:
+    # ========== KB EXPANSION TAB ==========
+    with tab_kb_expansion:
         try:
             # Убеждаемся, что переменная окружения установлена перед импортом
             os.environ['PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION'] = 'python'
-            from kb_billing.rag.streamlit_assistant import show_financial_analysis_tab
-            show_financial_analysis_tab()
+            from kb_billing.rag.streamlit_kb_expansion import show_kb_expansion_tab
+            show_kb_expansion_tab()
         except ImportError as e:
-            st.error(f"❌ Ошибка импорта модуля финансового анализа: {e}")
+            st.error(f"❌ Ошибка импорта модуля расширения KB: {e}")
             st.info("""
             Убедитесь, что:
             1. Установлены зависимости: `pip install qdrant-client sentence-transformers`
@@ -809,7 +1328,7 @@ def main():
             3. KB инициализирована: `python kb_billing/rag/init_kb.py`
             """)
         except Exception as e:
-            st.error(f"❌ Ошибка при загрузке финансового анализа: {e}")
+            st.error(f"❌ Ошибка при загрузке расширения KB: {e}")
             import traceback
             with st.expander("Детали ошибки"):
                 st.code(traceback.format_exc())
@@ -852,15 +1371,34 @@ def main():
             st.success(f"✅ Загружено записей: {len(df):,}")
             
             # Метрики
-            col1, col2, col3 = st.columns(3)
+            col1, col2, col3, col4 = st.columns(4)
             with col1:
                 st.metric("Всего записей", f"{len(df):,}")
             with col2:
                 total_overage = df["Calculated Overage ($)"].sum()
                 st.metric("Total Overage", f"${total_overage:,.2f}")
             with col3:
+                total_advance = df["Advance Charge"].sum()
+                st.metric("Advance Charge", f"${total_advance:,.2f}")
+            with col4:
                 total_advance_prev = df["Advance Charge Previous Month"].sum()
                 st.metric("Advance Charge Previous Month", f"${total_advance_prev:,.2f}")
+
+            # Дополнительные метрики по тарифам SBD-1 / SBD-10
+            if "Plan Name" in df.columns:
+                sbd1_mask = df["Plan Name"] == "SBD Tiered 1250 1K"
+                sbd10_mask = df["Plan Name"] == "SBD Tiered 1250 10K"
+
+                sbd1_overage = df.loc[sbd1_mask, "Calculated Overage ($)"].sum()
+                sbd10_overage = df.loc[sbd10_mask, "Calculated Overage ($)"].sum()
+
+                col_s1, col_s2, col_s3 = st.columns(3)
+                with col_s1:
+                    st.metric("SBD-1 Overage ($)", f"${sbd1_overage:,.2f}")
+                with col_s2:
+                    st.metric("SBD-10 Overage ($)", f"${sbd10_overage:,.2f}")
+                with col_s3:
+                    st.metric("SBD Overage SBD-1+10 ($)", f"${(sbd1_overage + sbd10_overage):,.2f}")
             
             st.markdown("---")
             
@@ -1058,6 +1596,11 @@ def main():
                     col1, col2, col3, col4 = st.columns(4)
                     with col1:
                         st.metric("SBD Трафик превышения", f"{df_curr['SBD Трафик превышения'].sum():,.2f}")
+                        # Разделение по тарифам
+                        if 'SBD Трафик SBD-1' in df_curr.columns:
+                            st.metric("SBD Трафик SBD-1", f"{df_curr['SBD Трафик SBD-1'].sum():,.2f}")
+                        if 'SBD Трафик SBD-10' in df_curr.columns:
+                            st.metric("SBD Трафик SBD-10", f"{df_curr['SBD Трафик SBD-10'].sum():,.2f}")
                         st.metric("SBD Абонплата", f"{df_curr['SBD Абонплата'].sum():,.2f}")
                         st.metric("SBD Всего", f"{df_curr['SBD Всего'].sum():,.2f}")
                     with col2:
@@ -1076,6 +1619,11 @@ def main():
                 col1, col2, col3, col4 = st.columns(4)
                 with col1:
                     st.metric("SBD Трафик превышения", f"{df_revenue['SBD Трафик превышения'].sum():,.2f}")
+                    # Разделение по тарифам
+                    if 'SBD Трафик SBD-1' in df_revenue.columns:
+                        st.metric("SBD Трафик SBD-1", f"{df_revenue['SBD Трафик SBD-1'].sum():,.2f}")
+                    if 'SBD Трафик SBD-10' in df_revenue.columns:
+                        st.metric("SBD Трафик SBD-10", f"{df_revenue['SBD Трафик SBD-10'].sum():,.2f}")
                     st.metric("SBD Абонплата", f"{df_revenue['SBD Абонплата'].sum():,.2f}")
                     st.metric("SBD Всего", f"{df_revenue['SBD Всего'].sum():,.2f}")
                 with col2:
@@ -1123,6 +1671,299 @@ def main():
             st.warning("⚠️ Данные не найдены для выбранных фильтров")
         else:
             st.error("❌ Ошибка загрузки данных по доходам")
+    
+    # ========== ANALYTICS INVOICE PERIOD TAB ==========
+    with tab_analytics:
+        st.header("📋 Счета за период")
+        st.markdown("Отчет по счетам за период на основе таблицы ANALYTICS. Иерархия: клиент → договор → сервис. Группировка по тарифам и зонам.")
+        
+        # Создаем подвкладки для аналитики
+        sub_tab_report, sub_tab_duplicates = st.tabs([
+            "📊 Отчет по счетам",
+            "🔍 Проверка дубликатов"
+        ])
+        
+        # Используем те же фильтры из sidebar
+        period_filter = selected_period  # Фильтр по PERIOD_YYYYMM
+        contract_id_filter = contract_id_filter if contract_id_filter else None
+        imei_filter = imei_filter if imei_filter else None
+        customer_name_filter = customer_name_filter if customer_name_filter else None
+        code_1c_filter = code_1c_filter if code_1c_filter else None
+        
+        # ========== SUB TAB: ОТЧЕТ ПО СЧЕТАМ ==========
+        with sub_tab_report:
+        
+            # Дополнительные фильтры для аналитики
+            col1, col2 = st.columns(2)
+            with col1:
+                tariff_filter = st.text_input(
+                    "Tariff ID",
+                    value="",
+                    key='tariff_filter',
+                    help="Фильтр по ID тарифа (BM_TARIFF.TARIFF_ID)"
+                )
+            with col2:
+                zone_filter = st.text_input(
+                    "Zone ID",
+                    value="",
+                    key='zone_filter',
+                    help="Фильтр по ID зоны (BM_ZONE.ZONE_ID)"
+                )
+            
+            # Загружаем отчет ТОЛЬКО если выбран период (не "All Periods")
+            filter_key = f"analytics_{period_filter}_{contract_id_filter}_{imei_filter}_{customer_name_filter}_{code_1c_filter}_{tariff_filter}_{zone_filter}"
+            
+            if period_filter is not None:
+                if 'last_analytics_key' not in st.session_state or st.session_state.last_analytics_key != filter_key:
+                    with st.spinner("Загрузка данных по счетам за период..."):
+                        df_analytics = get_analytics_invoice_period_report(
+                            period_filter,
+                            contract_id_filter,
+                            imei_filter,
+                            customer_name_filter,
+                            code_1c_filter,
+                            tariff_filter if tariff_filter else None,
+                            zone_filter if zone_filter else None
+                        )
+                        st.session_state.last_analytics_key = filter_key
+                        st.session_state.last_analytics_df = df_analytics
+                else:
+                    df_analytics = st.session_state.get('last_analytics_df', None)
+            else:
+                df_analytics = None
+                st.info("ℹ️ Выберите период для загрузки отчета по счетам за период")
+            
+            if df_analytics is not None and not df_analytics.empty:
+                st.success(f"✅ Загружено записей: {len(df_analytics):,}")
+                
+                # Статистика вверху
+                st.markdown("---")
+                st.subheader("📊 Статистика по счетам за период")
+                
+                col1, col2, col3, col4 = st.columns(4)
+                with col1:
+                    st.metric("Всего сумм (руб)", f"{df_analytics['Сумма (руб)'].sum():,.2f}")
+                    st.metric("Абонплата (руб)", f"{df_analytics['Абонплата (руб)'].sum():,.2f}")
+                with col2:
+                    st.metric("Трафик (руб)", f"{df_analytics['Трафик (руб)'].sum():,.2f}")
+                    st.metric("В счетах", f"{len(df_analytics[df_analytics['В счете'] == 'Y']):,}")
+                with col3:
+                    st.metric("Уникальных клиентов", f"{df_analytics['Клиент'].nunique():,}")
+                    st.metric("Уникальных договоров", f"{df_analytics['Договор'].nunique():,}")
+                with col4:
+                    st.metric("Уникальных сервисов", f"{df_analytics['Service ID'].nunique():,}")
+                    st.metric("Записей", f"{len(df_analytics):,}")
+                
+                st.markdown("---")
+                
+                # Группировка по тарифам и зонам
+                st.subheader("📈 Группировка по тарифам и зонам")
+                grouping_option = st.selectbox(
+                    "Группировка",
+                    ["По тарифам", "По зонам", "По тарифам и зонам", "Детализация"],
+                    key='analytics_grouping'
+                )
+                
+                if grouping_option == "По тарифам":
+                    grouped_df = df_analytics.groupby('Тариф').agg({
+                        'Сумма (руб)': 'sum',
+                        'Абонплата (руб)': 'sum',
+                        'Трафик (руб)': 'sum',
+                        'Service ID': 'nunique'
+                    }).reset_index()
+                    grouped_df.columns = ['Тариф', 'Сумма (руб)', 'Абонплата (руб)', 'Трафик (руб)', 'Кол-во сервисов']
+                    st.dataframe(grouped_df, use_container_width=True, height=300)
+                elif grouping_option == "По зонам":
+                    grouped_df = df_analytics.groupby('Зона').agg({
+                        'Сумма (руб)': 'sum',
+                        'Абонплата (руб)': 'sum',
+                        'Трафик (руб)': 'sum',
+                        'Service ID': 'nunique'
+                    }).reset_index()
+                    grouped_df.columns = ['Зона', 'Сумма (руб)', 'Абонплата (руб)', 'Трафик (руб)', 'Кол-во сервисов']
+                    st.dataframe(grouped_df, use_container_width=True, height=300)
+                elif grouping_option == "По тарифам и зонам":
+                    grouped_df = df_analytics.groupby(['Тариф', 'Зона']).agg({
+                        'Сумма (руб)': 'sum',
+                        'Абонплата (руб)': 'sum',
+                        'Трафик (руб)': 'sum',
+                        'Service ID': 'nunique'
+                    }).reset_index()
+                    grouped_df.columns = ['Тариф', 'Зона', 'Сумма (руб)', 'Абонплата (руб)', 'Трафик (руб)', 'Кол-во сервисов']
+                    st.dataframe(grouped_df, use_container_width=True, height=400)
+                else:
+                    # Детализация - показываем все записи
+                    display_df_analytics = df_analytics.copy()
+                    
+                    # Заполняем NULL пустыми строками для строковых колонок
+                    for col in display_df_analytics.columns:
+                        if display_df_analytics[col].dtype == 'object':
+                            display_df_analytics[col] = display_df_analytics[col].fillna('')
+                    
+                    st.dataframe(display_df_analytics, use_container_width=True, height=400)
+                
+                # Экспорт
+                st.markdown("---")
+                col1, col2 = st.columns(2)
+                with col1:
+                    csv_data = export_to_csv(df_analytics)
+                    st.download_button(
+                        label="📥 Download CSV",
+                        data=csv_data,
+                        file_name=f"analytics_invoice_period_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+                        mime="text/csv"
+                    )
+                with col2:
+                    excel_data = export_to_excel(df_analytics)
+                    st.download_button(
+                        label="📥 Download Excel",
+                        data=excel_data,
+                        file_name=f"analytics_invoice_period_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                    )
+            elif df_analytics is not None and df_analytics.empty:
+                st.warning("⚠️ Данные не найдены для выбранных фильтров")
+            else:
+                st.error("❌ Ошибка загрузки данных по счетам за период")
+        
+        # ========== SUB TAB: ПРОВЕРКА ДУБЛИКАТОВ ==========
+        with sub_tab_duplicates:
+            st.header("🔍 Проверка дубликатов в ANALYTICS")
+            st.markdown("Поиск записей, где все поля совпадают, кроме AID (первичного ключа).")
+            st.info("💡 Дубликаты могут возникать при повторной загрузке данных или ошибках в процессе формирования ANALYTICS.")
+            
+            # Получаем список периодов для выбора PERIOD_ID
+            conn = get_connection()
+            if conn:
+                try:
+                    periods_query = """
+                    SELECT 
+                        p.PERIOD_ID,
+                        TO_CHAR(p.START_DATE, 'YYYY-MM') AS PERIOD_YYYYMM,
+                        p.MONTH AS PERIOD_NAME,
+                        p.START_DATE,
+                        p.STOP_DATE
+                    FROM BM_PERIOD p
+                    ORDER BY p.PERIOD_ID DESC
+                    """
+                    periods_df = pd.read_sql_query(periods_query, conn)
+                    conn.close()
+                    
+                    if not periods_df.empty:
+                        # Создаем список опций для selectbox
+                        period_options = [
+                            f"{row['PERIOD_ID']} - {row['PERIOD_YYYYMM']} ({row['PERIOD_NAME']})"
+                            for _, row in periods_df.iterrows()
+                        ]
+                        period_options.insert(0, "Выберите период...")
+                        
+                        selected_period_option = st.selectbox(
+                            "Выберите период (PERIOD_ID) для проверки дубликатов:",
+                            period_options,
+                            key='duplicates_period_select'
+                        )
+                        
+                        if selected_period_option and selected_period_option != "Выберите период...":
+                            # Извлекаем PERIOD_ID из выбранной опции
+                            period_id = int(selected_period_option.split(' - ')[0])
+                            
+                            st.markdown("---")
+                            
+                            if st.button("🔍 Найти дубликаты", key='find_duplicates_btn'):
+                                with st.spinner("Поиск дубликатов..."):
+                                    df_duplicates = get_analytics_duplicates(period_id)
+                                    
+                                    if df_duplicates is not None and not df_duplicates.empty:
+                                        st.success(f"✅ Найдено групп дубликатов: {len(df_duplicates)}")
+                                        
+                                        # Статистика
+                                        total_duplicate_records = df_duplicates['DUPLICATE_COUNT'].sum()
+                                        total_unique_groups = len(df_duplicates)
+                                        
+                                        col1, col2, col3 = st.columns(3)
+                                        with col1:
+                                            st.metric("Групп дубликатов", total_unique_groups)
+                                        with col2:
+                                            st.metric("Всего дублирующихся записей", total_duplicate_records)
+                                        with col3:
+                                            st.metric("Максимум дубликатов в группе", df_duplicates['DUPLICATE_COUNT'].max())
+                                        
+                                        st.markdown("---")
+                                        
+                                        # Отображаем таблицу дубликатов
+                                        display_columns = [
+                                            'DUPLICATE_COUNT', 'AID_LIST', 'CUSTOMER_ID', 'CUSTOMER_NAME', 'CODE_1C',
+                                            'CONTRACT_ID', 'SERVICE_ID', 'VSAT', 'RESOURCE_MNEMONIC',
+                                            'RESOURCE_NAME', 'TARIFF_NAME', 'ZONE_NAME', 'MONEY',
+                                            'PRICE', 'TRAF', 'INVOICE_ITEM_ID'
+                                        ]
+                                        
+                                        # Фильтруем только существующие колонки
+                                        available_columns = [col for col in display_columns if col in df_duplicates.columns]
+                                        
+                                        # Переименовываем для отображения
+                                        rename_dict = {
+                                            'DUPLICATE_COUNT': 'Кол-во дубликатов',
+                                            'AID_LIST': 'AID (список)',
+                                            'CUSTOMER_ID': 'Customer ID',
+                                            'CUSTOMER_NAME': 'Клиент',
+                                            'CODE_1C': 'Код 1С',
+                                            'CONTRACT_ID': 'Contract ID',
+                                            'SERVICE_ID': 'Service ID',
+                                            'VSAT': 'IMEI',
+                                            'RESOURCE_MNEMONIC': 'Тип ресурса (мнемоника)',
+                                            'RESOURCE_NAME': 'Тип ресурса',
+                                            'TARIFF_NAME': 'Тариф',
+                                            'ZONE_NAME': 'Зона',
+                                            'MONEY': 'Сумма',
+                                            'PRICE': 'Цена',
+                                            'TRAF': 'Трафик',
+                                            'INVOICE_ITEM_ID': 'Invoice Item ID'
+                                        }
+                                        
+                                        display_df = df_duplicates[available_columns].copy()
+                                        display_df = display_df.rename(columns=rename_dict)
+                                        
+                                        st.dataframe(display_df, use_container_width=True, height=400)
+                                        
+                                        # Экспорт
+                                        st.markdown("---")
+                                        col1, col2 = st.columns(2)
+                                        with col1:
+                                            csv_data = export_to_csv(df_duplicates)
+                                            st.download_button(
+                                                label="📥 Download CSV",
+                                                data=csv_data,
+                                                file_name=f"analytics_duplicates_period_{period_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+                                                mime="text/csv"
+                                            )
+                                        with col2:
+                                            excel_data = export_to_excel(df_duplicates)
+                                            st.download_button(
+                                                label="📥 Download Excel",
+                                                data=excel_data,
+                                                file_name=f"analytics_duplicates_period_{period_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
+                                                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                                            )
+                                    elif df_duplicates is not None and df_duplicates.empty:
+                                        st.success("✅ Дубликаты не найдены для выбранного периода!")
+                                    else:
+                                        st.error("❌ Ошибка при поиске дубликатов")
+                    else:
+                        st.warning("⚠️ Периоды не найдены в базе данных")
+                except Exception as e:
+                    st.error(f"❌ Ошибка получения списка периодов: {e}")
+                    import traceback
+                    with st.expander("Детали ошибки"):
+                        st.code(traceback.format_exc())
+                finally:
+                    if 'conn' in locals() and conn:
+                        try:
+                            conn.close()
+                        except:
+                            pass
+            else:
+                st.error("❌ Ошибка подключения к базе данных")
     
     # ========== DATA LOADER TAB ==========
     with tab_loader:

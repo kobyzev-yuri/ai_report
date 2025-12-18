@@ -26,6 +26,30 @@ PROMPT Создание V_IRIDIUM_SERVICES_INFO...
 PROMPT Создание V_CONSOLIDATED_REPORT_WITH_BILLING...
 @@04_v_consolidated_report_with_billing.sql
 
+-- 5. V_REVENUE_FROM_INVOICES - отчет по доходам из счетов-фактур
+PROMPT Создание V_REVENUE_FROM_INVOICES...
+@@05_v_revenue_from_invoices.sql
+
+-- 5.1. V_COST_OF_GOODS_SOLD - себестоимость проданных товаров
+PROMPT Создание V_COST_OF_GOODS_SOLD...
+@@05_v_cost_of_goods_sold.sql
+
+-- 6. V_PROFITABILITY_BY_PERIOD - базовая прибыльность по периодам
+PROMPT Создание V_PROFITABILITY_BY_PERIOD...
+@@06_v_profitability_by_period.sql
+
+-- 7. V_PROFITABILITY_TREND - тенденции прибыльности с LAG
+PROMPT Создание V_PROFITABILITY_TREND...
+@@07_v_profitability_trend.sql
+
+-- 8. V_UNPROFITABLE_CUSTOMERS - убыточные клиенты и клиенты с низкой маржой
+PROMPT Создание V_UNPROFITABLE_CUSTOMERS...
+@@08_v_unprofitable_customers.sql
+
+-- 9. V_ANALYTICS_INVOICE_PERIOD - отчет "Счета за период" для биллинг операторов
+PROMPT Создание V_ANALYTICS_INVOICE_PERIOD...
+@@07_v_analytics_invoice_period.sql
+
 PROMPT
 PROMPT ========================================
 PROMPT Проверка созданных представлений
@@ -49,7 +73,32 @@ UNION ALL
 SELECT 
     'V_CONSOLIDATED_REPORT_WITH_BILLING',
     COUNT(*)
-FROM V_CONSOLIDATED_REPORT_WITH_BILLING;
+FROM V_CONSOLIDATED_REPORT_WITH_BILLING
+UNION ALL
+SELECT 
+    'V_REVENUE_FROM_INVOICES',
+    COUNT(*)
+FROM V_REVENUE_FROM_INVOICES
+UNION ALL
+SELECT 
+    'V_PROFITABILITY_BY_PERIOD',
+    COUNT(*)
+FROM V_PROFITABILITY_BY_PERIOD
+UNION ALL
+SELECT 
+    'V_PROFITABILITY_TREND',
+    COUNT(*)
+FROM V_PROFITABILITY_TREND
+UNION ALL
+SELECT 
+    'V_UNPROFITABLE_CUSTOMERS',
+    COUNT(*)
+FROM V_UNPROFITABLE_CUSTOMERS
+UNION ALL
+SELECT 
+    'V_ANALYTICS_INVOICE_PERIOD',
+    COUNT(*)
+FROM V_ANALYTICS_INVOICE_PERIOD;
 
 PROMPT
 PROMPT ========================================

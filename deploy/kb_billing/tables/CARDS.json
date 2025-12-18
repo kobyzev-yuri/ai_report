@@ -1,0 +1,70 @@
+{
+  "table_name": "CARDS",
+  "schema": "billing",
+  "description": "Предоплаченные карты для SSG и VOIP сервисов. Карты генерируются в пакетах (BATCHES) и для дилеров нарезаются кусками через BM_SERIES. При активации карты radiusd тарификатор создает группу сервисов (SSG, VOIP, доступ к Личному кабинету TYPE_ID=30), которые ссылаются на card_id. Тарифы связаны с batches.",
+  "database": "Oracle (production)",
+  "key_columns": {
+    "CARD_ID": "Уникальный идентификатор карты (PRIMARY KEY). Связь с SERVICES через card_id",
+    "BATCH_ID": "ID пакета карт из BATCHES. Связь с BATCHES.BATCH_ID",
+    "SERIAL_ID": "ID серии из BM_SERIES (для дилеров - нарезка карт кусками)",
+    "CARD_NUMBER": "Номер карты",
+    "PIN": "PIN-код карты",
+    "STATUS": "Статус карты",
+    "TYPE_ID": "Тип карты из BM_TYPE_CARD или CARD_TYPES",
+    "MONEY": "Баланс карты (предоплаченная сумма)",
+    "DATE_BEG": "Дата начала действия карты",
+    "DATE_END": "Дата окончания действия карты",
+    "ACTIVATION_DATE": "Дата активации карты",
+    "SERVICE_ID": "ID сервиса (может быть NULL, если карта не активирована)"
+  },
+  "business_rules": [
+    "Карты генерируются в пакетах (BATCHES) - партиями",
+    "Для дилеров карты нарезаются кусками через BM_SERIES (SERIAL_ID связывается с SERVICE_ID дилера)",
+    "BM_SERIES.SERVICE_ID - связка с аккаунтом дилера (ACCOUNT_ID)",
+    "Иногда карты продаются без дилерской продажи (SERIAL_ID может быть NULL)",
+    "При активации карты radiusd тарификатор получает запрос и создает группу сервисов",
+    "Группа сервисов при активации карты обычно включает:",
+    "  1. SSG сервис (TYPE_ID=14) - групповой сервис с подписками",
+    "  2. VOIP сервис - услуга телефонии",
+    "  3. Доступ к Личному кабинету (TYPE_ID=30) - веб-сервер личного кабинета",
+    "Все сервисы в группе ссылаются на card_id (CARD_ID)",
+    "Тарифы сервисов связаны с batches (BATCHES) через тарифный план",
+    "CARD_ID используется для связи всех сервисов группы с картой"
+  ],
+  "relationships": [
+    {
+      "table": "BATCHES",
+      "type": "JOIN",
+      "on": "CARDS.BATCH_ID = BATCHES.BATCH_ID",
+      "note": "Пакет карт, в котором была сгенерирована карта"
+    },
+    {
+      "table": "BM_SERIES",
+      "type": "LEFT JOIN",
+      "on": "CARDS.SERIAL_ID = BM_SERIES.SERIAL_ID",
+      "note": "Серия для дилеров (нарезка карт кусками)"
+    },
+    {
+      "table": "SERVICES",
+      "type": "LEFT JOIN",
+      "on": "CARDS.CARD_ID = SERVICES.CARD_ID",
+      "note": "Группа сервисов, созданная при активации карты (SSG, VOIP, TYPE_ID=30)"
+    },
+    {
+      "table": "BM_TYPE_CARD",
+      "type": "LEFT JOIN",
+      "on": "CARDS.TYPE_ID = BM_TYPE_CARD.TYPE_ID",
+      "note": "Тип карты"
+    }
+  ],
+  "usage_notes": [
+    "Используется для предоплаченных карт SSG и VOIP",
+    "Карты генерируются партиями в BATCHES",
+    "Для дилеров карты нарезаются через BM_SERIES (SERVICE_ID дилера)",
+    "При активации создается группа сервисов (SSG, VOIP, TYPE_ID=30), все ссылаются на card_id",
+    "Для получения всех сервисов карты: SELECT * FROM SERVICES WHERE CARD_ID = :card_id",
+    "Для получения карты по сервису: SELECT * FROM CARDS WHERE CARD_ID = (SELECT CARD_ID FROM SERVICES WHERE SERVICE_ID = :service_id)",
+    "Тарифы сервисов связаны с batches через тарифный план"
+  ]
+}
+

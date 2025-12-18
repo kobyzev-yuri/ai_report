@@ -1,0 +1,43 @@
+{
+  "table_name": "BM_CUSTOMER_CONTACT",
+  "schema": "billing",
+  "description": "Контактная информация клиентов. Содержит различные типы контактных данных (название организации, ФИО, адреса, телефоны, email и т.д.) для каждого клиента. Тип контактной информации определяется через BM_CONTACT_DICT (CONTACT_DICT_ID и MNEMONIC).",
+  "database": "Oracle (production)",
+  "key_columns": {
+    "CUSTOMER_CONTACT_ID": "Уникальный идентификатор контактной информации (PRIMARY KEY)",
+    "CUSTOMER_ID": "ID клиента из CUSTOMERS. Связь с CUSTOMERS.CUSTOMER_ID",
+    "CONTACT_DICT_ID": "ID типа контактной информации из BM_CONTACT_DICT. Определяет тип данных (23 = для организаций, 11 = для физлиц)",
+    "VALUE": "Значение контактной информации (название организации, ФИО, адрес, телефон и т.д.)"
+  },
+  "business_rules": [
+    "Один клиент (CUSTOMER_ID) может иметь множество записей контактной информации",
+    "CONTACT_DICT_ID = 23: контактная информация для организаций (юр.лиц)",
+    "CONTACT_DICT_ID = 11: контактная информация для физических лиц",
+    "Тип контактной информации определяется через BM_CONTACT_DICT.MNEMONIC",
+    "Для получения названия организации: CONTACT_DICT_ID = 23, MNEMONIC = 'description'",
+    "Для получения ФИО: CONTACT_DICT_ID = 11, MNEMONIC IN ('first_name', 'last_name', 'middle_name')",
+    "Для получения адреса клиента используй COALESCE с приоритетом: сначала b_paddress (CONTACT_DICT_ID = 140), затем paddress (CONTACT_DICT_ID = 10), затем address (CONTACT_DICT_ID = 9). ВАЖНО: CONTACT_DICT_ID = 8 содержит только email, НЕ адреса!"
+  ],
+  "relationships": [
+    {
+      "table": "CUSTOMERS",
+      "type": "JOIN",
+      "on": "BM_CUSTOMER_CONTACT.CUSTOMER_ID = CUSTOMERS.CUSTOMER_ID"
+    },
+    {
+      "table": "BM_CONTACT_DICT",
+      "type": "JOIN",
+      "on": "BM_CUSTOMER_CONTACT.CONTACT_DICT_ID = BM_CONTACT_DICT.CONTACT_DICT_ID",
+      "note": "Для получения типа контактной информации (MNEMONIC)"
+    }
+  ],
+  "usage_notes": [
+    "Используется для получения контактной информации клиентов",
+    "Для получения названия организации: JOIN с BM_CONTACT_DICT WHERE CONTACT_DICT_ID = 23 AND MNEMONIC = 'description'",
+    "Для получения ФИО: JOIN с BM_CONTACT_DICT WHERE CONTACT_DICT_ID = 11 AND MNEMONIC IN ('first_name', 'last_name', 'middle_name')",
+    "Для получения адреса клиента: JOIN с BM_CONTACT_DICT WHERE CONTACT_DICT_ID IN (9, 10, 140). Используй COALESCE для fallback: COALESCE(MAX(CASE WHEN cd.MNEMONIC = 'b_paddress' AND cc.CONTACT_DICT_ID = 140 THEN cc.VALUE END), MAX(CASE WHEN cd.MNEMONIC = 'paddress' AND cc.CONTACT_DICT_ID = 10 THEN cc.VALUE END), MAX(CASE WHEN cd.MNEMONIC = 'address' AND cc.CONTACT_DICT_ID = 9 THEN cc.VALUE END)). ВАЖНО: CONTACT_DICT_ID = 8 содержит только email!",
+    "ВАЖНО: При использовании GROUP BY нужно включить CUSTOMER_ID в GROUP BY",
+    "Пример: SELECT c.CUSTOMER_ID, MAX(CASE WHEN cd.MNEMONIC = 'description' AND cc.CONTACT_DICT_ID = 23 THEN cc.VALUE END) AS ORGANIZATION_NAME FROM CUSTOMERS c LEFT JOIN BM_CUSTOMER_CONTACT cc ON c.CUSTOMER_ID = cc.CUSTOMER_ID LEFT JOIN BM_CONTACT_DICT cd ON cc.CONTACT_DICT_ID = cd.CONTACT_DICT_ID GROUP BY c.CUSTOMER_ID"
+  ]
+}
+

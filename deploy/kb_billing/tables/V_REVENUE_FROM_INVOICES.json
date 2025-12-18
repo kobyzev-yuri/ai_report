@@ -1,0 +1,55 @@
+{
+  "table_name": "V_REVENUE_FROM_INVOICES",
+  "schema": "billing",
+  "description": "VIEW отчет по доходам из счетов-фактур (BM_INVOICE_ITEM). Группировка по базовому SUB- (без -clone-...) и периоду. Разделение доходов по типам услуг (SBD, SUSPEND, мониторинг, блокировка, сообщения) с разделением на трафик и абонплату. Одна строка на SUB- + период. Сопутствующие услуги (9005, 9008, 9013) связаны с основной услугой 9002 по VSAT=IMEI.",
+  "database": "Oracle (production)",
+  "key_columns": {
+    "SERVICE_ID": "SERVICE_ID главной услуги SBD (TYPE_ID = 9002). ВАЖНО: Это уникальный идентификатор услуги, а не тип услуги. Для фильтрации SBD сервисов используй REVENUE_SBD_TOTAL > 0 или REVENUE_SBD_TRAFFIC > 0 или REVENUE_SBD_ABON > 0. НЕ используй SERVICE_ID = 9002 - это неправильно!",
+    "CONTRACT_ID": "Базовый SUB-XXXXX (без -clone-...) - ключевая связь для сопоставления с затратами",
+    "IMEI": "IMEI устройства",
+    "CUSTOMER_NAME": "Имя клиента",
+    "CODE_1C": "Код 1С клиента",
+    "PERIOD_YYYYMM": "Период в формате YYYY-MM (из BM_PERIOD.START_DATE). ВАЖНО: Это СТРОКА формата 'YYYY-MM' (например, '2025-11'), а НЕ дата! Для фильтрации по году используй: PERIOD_YYYYMM LIKE '2025-%' или SUBSTR(PERIOD_YYYYMM, 1, 4) = '2025'. НЕ используй TO_CHAR(PERIOD_YYYYMM, 'YYYY') - это неправильно! Для доходов используется PERIOD_YYYYMM, а не FINANCIAL_PERIOD",
+    "CUSTOMER_ID": "ID клиента из CUSTOMERS. Связь с BM_CUSTOMER_CONTACT для получения названия и адреса клиента",
+    "REVENUE_SBD_TRAFFIC": "Доходы от трафика превышения SBD (overage)",
+    "REVENUE_SBD_ABON": "Доходы от абонентской платы SBD",
+    "REVENUE_SBD_TOTAL": "Итого доходов SBD (трафик + абонплата)",
+    "REVENUE_SUSPEND_ABON": "Доходы от приостановления (TYPE_ID=9008)",
+    "REVENUE_MONITORING_ABON": "Доходы от мониторинга (TYPE_ID=9005)",
+    "REVENUE_MONITORING_BLOCK_ABON": "Доходы от блокировки мониторинга (TYPE_ID=9013)",
+    "REVENUE_MSG_ABON": "Доходы от сообщений (TYPE_ID=9014)",
+    "REVENUE_TOTAL": "Итого доходов (все типы услуг)"
+  },
+  "business_rules": [
+    "VIEW содержит только записи для Iridium услуг (TYPE_ID IN (9002, 9005, 9008, 9013, 9014))",
+    "SERVICE_ID в VIEW - это SERVICE_ID главной услуги SBD (TYPE_ID = 9002)",
+    "Для фильтрации клиентов с SBD сервисами используй REVENUE_SBD_TOTAL > 0 или REVENUE_SBD_TRAFFIC > 0 или REVENUE_SBD_ABON > 0",
+    "НЕ используй SERVICE_ID = 9002 для фильтрации - это неправильно! SERVICE_ID - это уникальный идентификатор услуги, а не тип услуги",
+    "TYPE_ID = 9002 - это тип услуги SBD, но в VIEW нет колонки TYPE_ID",
+    "Для проверки типа услуги используй JOIN с SERVICES: JOIN SERVICES s ON v.SERVICE_ID = s.SERVICE_ID WHERE s.TYPE_ID = 9002",
+    "PERIOD_YYYYMM используется для фильтрации по периоду (из BM_PERIOD.START_DATE), а не FINANCIAL_PERIOD"
+  ],
+  "relationships": [
+    {
+      "table": "SERVICES",
+      "type": "JOIN",
+      "on": "V_REVENUE_FROM_INVOICES.SERVICE_ID = SERVICES.SERVICE_ID",
+      "note": "Для получения TYPE_ID услуги (SERVICE_ID в VIEW - это SERVICE_ID главной услуги SBD с TYPE_ID = 9002)"
+    },
+    {
+      "table": "BM_INVOICE_ITEM",
+      "type": "SOURCE",
+      "note": "VIEW построен на основе BM_INVOICE_ITEM"
+    }
+  ],
+  "usage_notes": [
+    "Используется для получения доходов из счетов-фактур",
+    "Для фильтрации клиентов с SBD сервисами: WHERE REVENUE_SBD_TOTAL > 0",
+    "Для фильтрации по периоду: WHERE PERIOD_YYYYMM = '2025-11'",
+    "Для фильтрации по году: WHERE PERIOD_YYYYMM LIKE '2025-%' или WHERE SUBSTR(PERIOD_YYYYMM, 1, 4) = '2025'",
+    "ВАЖНО: Для получения простого списка клиентов с счетами-фактурами НЕ используй V_REVENUE_FROM_INVOICES - это неэффективно! Вместо этого используй таблицу BM_INVOICE напрямую, так как там есть CUSTOMER_ID и PERIOD_ID. Пример: WHERE EXISTS (SELECT 1 FROM BM_INVOICE inv JOIN BM_PERIODS p ON inv.PERIOD_ID = p.PERIOD_ID WHERE inv.CUSTOMER_ID = cc.CUSTOMER_ID AND TO_CHAR(p.DATE_BEG, 'YYYY') = '2025' AND ROWNUM = 1). V_REVENUE_FROM_INVOICES предназначен для анализа доходов с детализацией по типам услуг (SBD, SUSPEND, мониторинг и т.д.), а не для простого списка клиентов.",
+    "ВАЖНО: SERVICE_ID - это уникальный идентификатор услуги, а не тип услуги. Для фильтрации SBD используй REVENUE_SBD_TOTAL > 0",
+    "Пример правильного запроса для поиска клиентов с SBD сервисами: SELECT DISTINCT CUSTOMER_NAME, CODE_1C FROM V_REVENUE_FROM_INVOICES WHERE PERIOD_YYYYMM = '2025-11' AND (REVENUE_SBD_TOTAL > 0 OR REVENUE_SBD_TRAFFIC > 0 OR REVENUE_SBD_ABON > 0)"
+  ]
+}
+

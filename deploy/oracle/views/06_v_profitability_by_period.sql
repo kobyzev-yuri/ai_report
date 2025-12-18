@@ -1,0 +1,114 @@
+-- ============================================================================
+-- V_PROFITABILITY_BY_PERIOD
+-- Базовое представление для анализа прибыльности клиентов по периодам
+-- Используется как основа для кастомизации фильтров через LLM
+-- База данных: Oracle (billing7@bm7)
+-- ============================================================================
+
+SET SQLBLANKLINES ON
+SET DEFINE OFF
+
+CREATE OR REPLACE VIEW V_PROFITABILITY_BY_PERIOD AS
+WITH currency_rate AS (
+    SELECT 
+        TO_CHAR(pm.START_DATE, 'YYYY-MM') AS PERIOD_YYYYMM, 
+        AVG(ii.RATE) AS RATE 
+    FROM BM_INVOICE_ITEM ii 
+    JOIN BM_PERIOD pm ON ii.PERIOD_ID = pm.PERIOD_ID 
+    WHERE (ii.CURRENCY_ID = 4 OR ii.ACC_CURRENCY_ID = 4) 
+      AND ii.RATE IS NOT NULL 
+    GROUP BY TO_CHAR(pm.START_DATE, 'YYYY-MM')
+),
+expenses_by_period AS (
+    SELECT 
+        FINANCIAL_PERIOD, 
+        CUSTOMER_NAME, 
+        CODE_1C,
+        COUNT(DISTINCT IMEI) AS IMEI_COUNT,
+        COUNT(DISTINCT CONTRACT_ID) AS CONTRACT_COUNT,
+        SUM(CALCULATED_OVERAGE + SPNET_TOTAL_AMOUNT + FEES_TOTAL) AS EXPENSES_USD
+    FROM V_CONSOLIDATED_REPORT_WITH_BILLING
+    GROUP BY FINANCIAL_PERIOD, CUSTOMER_NAME, CODE_1C
+),
+revenue_by_period AS (
+    SELECT 
+        PERIOD_YYYYMM, 
+        CUSTOMER_NAME, 
+        CODE_1C,
+        COUNT(DISTINCT IMEI) AS IMEI_COUNT,
+        COUNT(DISTINCT CONTRACT_ID) AS CONTRACT_COUNT,
+        SUM(REVENUE_TOTAL) AS REVENUE_RUB
+    FROM V_REVENUE_FROM_INVOICES
+    GROUP BY PERIOD_YYYYMM, CUSTOMER_NAME, CODE_1C
+    HAVING SUM(REVENUE_TOTAL) > 0
+)
+SELECT 
+    e.FINANCIAL_PERIOD AS PERIOD,
+    e.CUSTOMER_NAME,
+    e.CODE_1C,
+    e.EXPENSES_USD AS EXPENSES_USD,
+    e.EXPENSES_USD * NVL(cr.RATE, 1) AS EXPENSES_RUB,
+    r.REVENUE_RUB AS REVENUE_RUB,
+    r.REVENUE_RUB - (e.EXPENSES_USD * NVL(cr.RATE, 1)) AS PROFIT_RUB,
+    ROUND(((r.REVENUE_RUB - (e.EXPENSES_USD * NVL(cr.RATE, 1))) / NULLIF(r.REVENUE_RUB, 0) * 100), 2) AS MARGIN_PCT,
+    ROUND((e.EXPENSES_USD * NVL(cr.RATE, 1) / NULLIF(r.REVENUE_RUB, 0) * 100), 2) AS COST_PCT,
+    CASE 
+        WHEN r.REVENUE_RUB < (e.EXPENSES_USD * NVL(cr.RATE, 1)) THEN 'UNPROFITABLE'
+        WHEN ((r.REVENUE_RUB - (e.EXPENSES_USD * NVL(cr.RATE, 1))) / NULLIF(r.REVENUE_RUB, 0) * 100) < 10 THEN 'LOW_MARGIN'
+        ELSE 'PROFITABLE'
+    END AS STATUS
+FROM (
+    SELECT 
+        FINANCIAL_PERIOD, 
+        CUSTOMER_NAME, 
+        CODE_1C,
+        SUM(CALCULATED_OVERAGE + SPNET_TOTAL_AMOUNT + FEES_TOTAL) AS EXPENSES_USD
+    FROM V_CONSOLIDATED_REPORT_WITH_BILLING
+    GROUP BY FINANCIAL_PERIOD, CUSTOMER_NAME, CODE_1C
+) e
+INNER JOIN (
+    SELECT 
+        PERIOD_YYYYMM, 
+        CUSTOMER_NAME, 
+        CODE_1C,
+        SUM(REVENUE_TOTAL) AS REVENUE_RUB
+    FROM V_REVENUE_FROM_INVOICES
+    GROUP BY PERIOD_YYYYMM, CUSTOMER_NAME, CODE_1C
+    HAVING SUM(REVENUE_TOTAL) > 0
+) r ON e.FINANCIAL_PERIOD = r.PERIOD_YYYYMM 
+    AND e.CUSTOMER_NAME = r.CUSTOMER_NAME 
+    AND e.CODE_1C = r.CODE_1C
+LEFT JOIN (
+    SELECT 
+        TO_CHAR(pm.START_DATE, 'YYYY-MM') AS PERIOD_YYYYMM, 
+        AVG(ii.RATE) AS RATE 
+    FROM BM_INVOICE_ITEM ii 
+    JOIN BM_PERIOD pm ON ii.PERIOD_ID = pm.PERIOD_ID 
+    WHERE (ii.CURRENCY_ID = 4 OR ii.ACC_CURRENCY_ID = 4) 
+      AND ii.RATE IS NOT NULL 
+    GROUP BY TO_CHAR(pm.START_DATE, 'YYYY-MM')
+) cr ON e.FINANCIAL_PERIOD = cr.PERIOD_YYYYMM
+/
+
+COMMENT ON TABLE V_PROFITABILITY_BY_PERIOD IS 'Базовое представление для анализа прибыльности клиентов по периодам. Используется как основа для кастомизации фильтров. Содержит расходы, доходы, прибыль, маржу и статус (убыточно/низкая маржа/прибыльно).'
+/
+
+COMMENT ON COLUMN V_PROFITABILITY_BY_PERIOD.PERIOD IS 'Отчетный период (FINANCIAL_PERIOD) в формате YYYY-MM'
+/
+COMMENT ON COLUMN V_PROFITABILITY_BY_PERIOD.EXPENSES_USD IS 'Расходы в долларах (USD) из V_CONSOLIDATED_REPORT_WITH_BILLING'
+/
+COMMENT ON COLUMN V_PROFITABILITY_BY_PERIOD.EXPENSES_RUB IS 'Расходы в рублях с конверсией через курс из счетов-фактур'
+/
+COMMENT ON COLUMN V_PROFITABILITY_BY_PERIOD.REVENUE_RUB IS 'Доходы в рублях из счетов-фактур'
+/
+COMMENT ON COLUMN V_PROFITABILITY_BY_PERIOD.PROFIT_RUB IS 'Прибыль = Доходы - Расходы (в рублях)'
+/
+COMMENT ON COLUMN V_PROFITABILITY_BY_PERIOD.MARGIN_PCT IS 'Маржа в процентах: (Прибыль / Доходы) * 100'
+/
+COMMENT ON COLUMN V_PROFITABILITY_BY_PERIOD.COST_PCT IS 'Себестоимость в процентах: (Расходы / Доходы) * 100'
+/
+COMMENT ON COLUMN V_PROFITABILITY_BY_PERIOD.STATUS IS 'Статус: UNPROFITABLE (убыток), LOW_MARGIN (низкая маржа <10%), PROFITABLE (прибыльно)'
+/
+
+SET DEFINE ON
+

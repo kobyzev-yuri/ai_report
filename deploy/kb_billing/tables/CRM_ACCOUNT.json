@@ -1,0 +1,41 @@
+{
+  "table_name": "[Account]",
+  "schema": "CRM",
+  "description": "Таблица аккаунтов (клиентов) в CRM системе. Содержит информацию о клиентах, включая код 1С и email адреса.",
+  "database": "SQL Server (CRM через ODBC)",
+  "key_columns": {
+    "Code1C": "Код 1С клиента. Связь с Oracle биллингом через OUTER_IDS.EXT_ID (где TBL='CUSTOMERS')",
+    "Web": "Email адрес клиента или веб-сайт. Может содержать email (с символом @) или URL. Требует валидации перед использованием как email",
+    "Name": "Название аккаунта/клиента",
+    "Id": "Уникальный идентификатор аккаунта в CRM"
+  },
+  "business_rules": [
+    "Code1C связывает запись в CRM с клиентом в Oracle биллинге через OUTER_IDS.EXT_ID",
+    "Поле Web может содержать как email адреса, так и веб-сайты (URL)",
+    "Для получения email нужно фильтровать по Web LIKE '%@%' и валидировать формат email",
+    "Email должен соответствовать стандартному формату: local@domain.tld",
+    "В поле Web могут быть ошибки (невалидные email), поэтому требуется валидация"
+  ],
+  "relationships": [
+    {
+      "table": "OUTER_IDS",
+      "type": "JOIN",
+      "on": "[Account].Code1C = OUTER_IDS.EXT_ID AND OUTER_IDS.TBL = 'CUSTOMERS'",
+      "note": "Связь с Oracle биллингом через код 1С"
+    },
+    {
+      "table": "CUSTOMERS",
+      "type": "JOIN",
+      "on": "OUTER_IDS.ID = CUSTOMERS.CUSTOMER_ID",
+      "note": "Связь с клиентом в Oracle биллинге"
+    }
+  ],
+  "usage_notes": [
+    "Для получения email клиента по коду 1С: SELECT Web FROM [Account] WHERE Code1C = ? AND Web LIKE '%@%'",
+    "ВАЖНО: После получения значения из Web нужно валидировать, что это действительно email адрес",
+    "Email должен соответствовать формату: [a-zA-Z0-9._-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}",
+    "Невалидные значения в Web нужно игнорировать и логировать",
+    "Подключение к CRM через ODBC: DSN=crmdb, User=bpm, Password=bpm"
+  ]
+}
+

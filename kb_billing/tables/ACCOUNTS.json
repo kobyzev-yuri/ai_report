@@ -1,0 +1,50 @@
+{
+  "table_name": "ACCOUNTS",
+  "schema": "billing",
+  "description": "Таблица договоров (аккаунтов) клиентов. Содержит информацию о договорах между клиентами и компанией. ВАЖНО: В таблице ACCOUNTS НЕТ колонки ACCOUNT_NAME! Название договора хранится в колонке DESCRIPTION. Связь с клиентом через CUSTOMER_ID.",
+  "database": "Oracle (production)",
+  "key_columns": {
+    "ACCOUNT_ID": "Уникальный идентификатор договора (PRIMARY KEY). Используется в SERVICES.ACCOUNT_ID, ANALYTICS.ACCOUNT_ID",
+    "CUSTOMER_ID": "ID клиента (FOREIGN KEY -> CUSTOMERS.CUSTOMER_ID). Связь с клиентом",
+    "DESCRIPTION": "Название/описание договора (VARCHAR2). ВАЖНО: Колонка называется DESCRIPTION, не ACCOUNT_NAME! Это название договора (например, номер договора)",
+    "STATUS": "Статус договора (если есть)",
+    "CREATE_DATE": "Дата создания договора (если есть)",
+    "DOMAIN_ID": "ID домена (NUMBER)"
+  },
+  "business_rules": [
+    "ACCOUNT_ID - основная связь договора с услугами (SERVICES.ACCOUNT_ID) и аналитикой (ANALYTICS.ACCOUNT_ID)",
+    "CUSTOMER_ID связывает договор с клиентом (CUSTOMERS.CUSTOMER_ID)",
+    "ВАЖНО: В таблице ACCOUNTS НЕТ колонки ACCOUNT_NAME! Используйте ACCOUNTS.DESCRIPTION для получения названия договора",
+    "Один клиент может иметь несколько договоров (ACCOUNTS)",
+    "Один договор может содержать несколько услуг (SERVICES)"
+  ],
+  "relationships": [
+    {
+      "table": "CUSTOMERS",
+      "type": "JOIN",
+      "on": "ACCOUNTS.CUSTOMER_ID = CUSTOMERS.CUSTOMER_ID",
+      "note": "Связь с клиентом"
+    },
+    {
+      "table": "SERVICES",
+      "type": "JOIN",
+      "on": "ACCOUNTS.ACCOUNT_ID = SERVICES.ACCOUNT_ID",
+      "note": "Услуги по договору"
+    },
+    {
+      "table": "ANALYTICS",
+      "type": "JOIN",
+      "on": "ACCOUNTS.ACCOUNT_ID = ANALYTICS.ACCOUNT_ID",
+      "note": "Начисления по договору"
+    }
+  ],
+  "usage_notes": [
+    "ВАЖНО: Не используйте ACCOUNTS.ACCOUNT_NAME - такой колонки нет! Используйте ACCOUNTS.DESCRIPTION",
+    "Для получения названия договора: SELECT acc.DESCRIPTION AS ACCOUNT_NAME FROM ACCOUNTS acc",
+    "Иерархия: Клиент (CUSTOMERS) -> Договор (ACCOUNTS) -> Услуга (SERVICES)",
+    "Используется в отчетах для группировки услуг по договорам"
+  ]
+}
+
+
+

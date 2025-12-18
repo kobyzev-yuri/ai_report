@@ -133,6 +133,29 @@ acc_currency_info AS (
         MNEMONIC AS ACC_CURRENCY_MNEMONIC
     FROM BM_CURRENCY
     WHERE CURRENCY_ID IN (1, 4)  -- 1 = рубли, 4 = УЕ (доллары)
+),
+-- Информация о тарифных планах для разделения трафика превышения на SBD-1 и SBD-10
+-- Связываем через CONTRACT_ID, IMEI и период
+plan_info AS (
+    SELECT DISTINCT
+        cor.CONTRACT_ID,
+        cor.IMEI,
+        -- Используем BILL_MONTH_YYYMM для связи с периодами доходов
+        -- BILL_MONTH_YYYMM в формате YYYYMM (число), PERIOD_YYYYMM в формате YYYY-MM (строка)
+        TO_CHAR(cor.BILL_MONTH_YYYMM) AS BILL_MONTH_STR,
+        TO_CHAR(TO_DATE(SUBSTR(TO_CHAR(cor.BILL_MONTH_YYYMM), 1, 6), 'YYYYMM'), 'YYYY-MM') AS PERIOD_YYYYMM,
+        cor.PLAN_NAME,
+        -- Определяем PLAN_CODE из PLAN_NAME
+        CASE 
+            WHEN cor.PLAN_NAME = 'SBD Tiered 1250 1K' THEN 'SBD-1'
+            WHEN cor.PLAN_NAME = 'SBD Tiered 1250 10K' THEN 'SBD-10'
+            ELSE NULL
+        END AS PLAN_CODE
+    FROM V_CONSOLIDATED_REPORT_WITH_BILLING cor
+    WHERE cor.PLAN_NAME IN ('SBD Tiered 1250 1K', 'SBD Tiered 1250 10K')
+      AND cor.CONTRACT_ID IS NOT NULL
+      AND cor.IMEI IS NOT NULL
+      AND cor.BILL_MONTH_YYYMM IS NOT NULL
 )
 SELECT 
     -- Информационные колонки (как в затратах)
@@ -171,6 +194,24 @@ SELECT
         THEN bc.MONEY - bc.MONEY_REVERSED
         ELSE 0
     END) AS REVENUE_SBD_TRAFFIC,
+    
+    -- Доходы SBD (9002) - трафик превышения для SBD-1 (в рублях - валюта счета-фактуры)
+    SUM(CASE 
+        WHEN bc.TYPE_ID = 9002 
+        AND bc.RESOURCE_MNEMONIC IN ('IRIDIUM_SBD', 'kb_traffic_pay', 'IRIDIUM_SBD_MBOX', 'sbd_reg', 'woufzwv')
+        AND pi.PLAN_CODE = 'SBD-1'
+        THEN bc.MONEY - bc.MONEY_REVERSED
+        ELSE 0
+    END) AS REVENUE_SBD_TRAFFIC_SBD1,
+    
+    -- Доходы SBD (9002) - трафик превышения для SBD-10 (в рублях - валюта счета-фактуры)
+    SUM(CASE 
+        WHEN bc.TYPE_ID = 9002 
+        AND bc.RESOURCE_MNEMONIC IN ('IRIDIUM_SBD', 'kb_traffic_pay', 'IRIDIUM_SBD_MBOX', 'sbd_reg', 'woufzwv')
+        AND pi.PLAN_CODE = 'SBD-10'
+        THEN bc.MONEY - bc.MONEY_REVERSED
+        ELSE 0
+    END) AS REVENUE_SBD_TRAFFIC_SBD10,
     
     -- Доходы SBD (9002) - абонплата (в рублях - валюта счета-фактуры)
     SUM(CASE 
@@ -253,6 +294,11 @@ LEFT JOIN currency_info curr
 -- Справочник валют лицевого счета (валюта учета договора)
 LEFT JOIN acc_currency_info acc_curr 
     ON bc.ACC_CURRENCY_ID = acc_curr.CURRENCY_ID
+-- Информация о тарифных планах для разделения трафика на SBD-1 и SBD-10
+LEFT JOIN plan_info pi
+    ON bc.BASE_CONTRACT_ID = pi.CONTRACT_ID
+    AND bc.IMEI = pi.IMEI
+    AND pm.PERIOD_YYYYMM = pi.PERIOD_YYYYMM
 GROUP BY 
     ms.SERVICE_ID,
     bc.BASE_CONTRACT_ID,
@@ -287,7 +333,11 @@ COMMENT ON COLUMN V_REVENUE_FROM_INVOICES.CONTRACT_ID IS 'Базовый SUB-XXX
 /
 COMMENT ON COLUMN V_REVENUE_FROM_INVOICES.SERVICE_ID IS 'SERVICE_ID главной услуги SBD (TYPE_ID = 9002)'
 /
-COMMENT ON COLUMN V_REVENUE_FROM_INVOICES.REVENUE_SBD_TRAFFIC IS 'Доходы от трафика превышения SBD (IRIDIUM_SBD, kb_traffic_pay, IRIDIUM_SBD_MBOX, sbd_reg, woufzwv). В счетах-фактурах показывается только трафик, превышающий включенный в абонплату (overage)'
+COMMENT ON COLUMN V_REVENUE_FROM_INVOICES.REVENUE_SBD_TRAFFIC IS 'Доходы от трафика превышения SBD (IRIDIUM_SBD, kb_traffic_pay, IRIDIUM_SBD_MBOX, sbd_reg, woufzwv). В счетах-фактурах показывается только трафик, превышающий включенный в абонплату (overage). Итого для всех тарифов.'
+/
+COMMENT ON COLUMN V_REVENUE_FROM_INVOICES.REVENUE_SBD_TRAFFIC_SBD1 IS 'Доходы от трафика превышения SBD для тарифа SBD-1 (SBD Tiered 1250 1K). Разделение по тарифным планам.'
+/
+COMMENT ON COLUMN V_REVENUE_FROM_INVOICES.REVENUE_SBD_TRAFFIC_SBD10 IS 'Доходы от трафика превышения SBD для тарифа SBD-10 (SBD Tiered 1250 10K). Разделение по тарифным планам.'
 /
 COMMENT ON COLUMN V_REVENUE_FROM_INVOICES.REVENUE_SBD_ABON IS 'Доходы от абонплаты SBD (fee_sbd, abon_payment)'
 /

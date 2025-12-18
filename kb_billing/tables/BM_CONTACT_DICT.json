@@ -1,0 +1,55 @@
+{
+  "table_name": "BM_CONTACT_DICT",
+  "schema": "billing",
+  "description": "Справочник типов контактной информации клиентов. Определяет типы контактных данных (название организации, ФИО, адреса, телефоны, email и т.д.) через мнемоники (MNEMONIC). Используется вместе с BM_CUSTOMER_CONTACT для хранения контактной информации клиентов.",
+  "database": "Oracle (production)",
+  "key_columns": {
+    "CONTACT_DICT_ID": "Уникальный идентификатор типа контактной информации (PRIMARY KEY)",
+    "MNEMONIC": "Мнемоника типа контактной информации (например, 'description', 'first_name', 'last_name', 'middle_name', 'b_name', адреса и т.д.)",
+    "NAME": "Название типа контактной информации"
+  },
+  "business_rules": [
+    "CONTACT_DICT_ID = 23: контактная информация для организаций (юр.лиц)",
+    "CONTACT_DICT_ID = 11: контактная информация для физических лиц",
+    "MNEMONIC = 'description' (CONTACT_DICT_ID = 23): название организации",
+    "MNEMONIC = 'b_name' (CONTACT_DICT_ID = 23): альтернативная мнемоника для названия организации (может использоваться в старых данных)",
+    "MNEMONIC IN ('first_name', 'last_name', 'middle_name') (CONTACT_DICT_ID = 11): ФИО физического лица",
+    "CONTACT_DICT_ID = 8: содержит только email (MNEMONIC = 'email'), НЕ адреса!",
+    "Адреса находятся в других CONTACT_DICT_ID:",
+    "  - CONTACT_DICT_ID = 140, MNEMONIC = 'b_paddress': почтовый адрес организации (приоритет 1)",
+    "  - CONTACT_DICT_ID = 10, MNEMONIC = 'paddress': почтовый адрес (Postal address) - приоритет 2",
+    "  - CONTACT_DICT_ID = 9, MNEMONIC = 'address': домашний адрес (Home address) - приоритет 3",
+    "ВАЖНО: При получении адреса клиента используй COALESCE для fallback: сначала b_paddress (CONTACT_DICT_ID = 140), затем paddress (CONTACT_DICT_ID = 10), затем address (CONTACT_DICT_ID = 9). НЕ используй CONTACT_DICT_ID = 8 для адресов!",
+    "Банковские реквизиты могут храниться в разных полях с различными мнемониками. Возможные варианты:",
+    "  - bank_name, bank - название банка",
+    "  - bank_account, rs, r_s, account - расчетный счет",
+    "  - correspondent_account, ks, k_s, corr_account - корреспондентский счет",
+    "  - bik, bank_bik - БИК банка",
+    "  - inn - ИНН организации",
+    "  - kpp - КПП организации",
+    "  - bank_details, bank_info, banking_details - полные банковские реквизиты (все в одном поле)",
+    "ВАЖНО: Для получения банковских реквизитов нужно проверять фактические мнемоники в BM_CONTACT_DICT. Используй запрос: SELECT DISTINCT cd.CONTACT_DICT_ID, cd.MNEMONIC, cd.NAME FROM BM_CONTACT_DICT cd WHERE UPPER(cd.MNEMONIC) LIKE '%BANK%' OR UPPER(cd.MNEMONIC) LIKE '%ACCOUNT%' OR UPPER(cd.MNEMONIC) LIKE '%RS%' OR UPPER(cd.MNEMONIC) LIKE '%KS%' OR UPPER(cd.MNEMONIC) LIKE '%BIK%' OR UPPER(cd.NAME) LIKE '%БАНК%' OR UPPER(cd.NAME) LIKE '%СЧЕТ%'",
+    "Мнемоники могут различаться в зависимости от версии системы и типа данных"
+  ],
+  "relationships": [
+    {
+      "table": "BM_CUSTOMER_CONTACT",
+      "type": "JOIN",
+      "on": "BM_CONTACT_DICT.CONTACT_DICT_ID = BM_CUSTOMER_CONTACT.CONTACT_DICT_ID",
+      "note": "Связь с контактной информацией клиентов"
+    }
+  ],
+  "usage_notes": [
+    "Используется для получения контактной информации клиентов через BM_CUSTOMER_CONTACT",
+    "Для названия организации: CONTACT_DICT_ID = 23, MNEMONIC = 'description' (или 'b_name' в старых данных)",
+    "Для ФИО физлица: CONTACT_DICT_ID = 11, MNEMONIC IN ('first_name', 'last_name', 'middle_name')",
+    "Для адреса клиента используй COALESCE с приоритетом: b_paddress (CONTACT_DICT_ID = 140) → paddress (CONTACT_DICT_ID = 10) → address (CONTACT_DICT_ID = 9)",
+    "Пример получения названия организации: MAX(CASE WHEN cd.MNEMONIC = 'description' AND cc.CONTACT_DICT_ID = 23 THEN cc.VALUE END)",
+    "Пример получения ФИО: TRIM(NVL(MAX(CASE WHEN cd.MNEMONIC = 'last_name' AND cc.CONTACT_DICT_ID = 11 THEN cc.VALUE END), '') || ' ' || NVL(MAX(CASE WHEN cd.MNEMONIC = 'first_name' AND cc.CONTACT_DICT_ID = 11 THEN cc.VALUE END), '') || ' ' || NVL(MAX(CASE WHEN cd.MNEMONIC = 'middle_name' AND cc.CONTACT_DICT_ID = 11 THEN cc.VALUE END), ''))",
+    "Пример получения адреса с fallback: COALESCE(MAX(CASE WHEN cd.MNEMONIC = 'b_paddress' AND cc.CONTACT_DICT_ID = 140 THEN cc.VALUE END), MAX(CASE WHEN cd.MNEMONIC = 'paddress' AND cc.CONTACT_DICT_ID = 10 THEN cc.VALUE END), MAX(CASE WHEN cd.MNEMONIC = 'address' AND cc.CONTACT_DICT_ID = 9 THEN cc.VALUE END))",
+    "Для получения банковских реквизитов используй отдельные поля для каждого типа реквизита: MAX(CASE WHEN cd.MNEMONIC = 'bank_name' THEN cc.VALUE END) AS BANK_NAME, MAX(CASE WHEN cd.MNEMONIC = 'bank_account' OR cd.MNEMONIC = 'rs' THEN cc.VALUE END) AS BANK_ACCOUNT, MAX(CASE WHEN cd.MNEMONIC = 'correspondent_account' OR cd.MNEMONIC = 'ks' THEN cc.VALUE END) AS CORR_ACCOUNT, MAX(CASE WHEN cd.MNEMONIC = 'bik' THEN cc.VALUE END) AS BIK. Если реквизиты хранятся в одном поле, используй: MAX(CASE WHEN cd.MNEMONIC = 'bank_details' OR cd.MNEMONIC = 'bank_info' THEN cc.VALUE END) AS BANK_DETAILS",
+    "ВАЖНО: CONTACT_DICT_ID = 8 содержит только email (MNEMONIC = 'email'), НЕ адреса!",
+    "ВАЖНО: Перед использованием мнемоник для банковских реквизитов проверь их наличие в BM_CONTACT_DICT, так как они могут отличаться в разных версиях системы!"
+  ]
+}
+
