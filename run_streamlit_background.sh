@@ -1,6 +1,6 @@
 #!/bin/bash
 # Запуск Streamlit приложения в фоновом режиме на удаленной машине
-# Использование: ./run_streamlit_background.sh [oracle|postgresql] [port]
+# Использование: ./run_streamlit_background.sh
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"

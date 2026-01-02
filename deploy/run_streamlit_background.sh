@@ -1,6 +1,6 @@
 #!/bin/bash
 # Запуск Streamlit приложения в фоновом режиме на удаленной машине
-# Использование: ./run_streamlit_background.sh [oracle|postgresql] [port]
+# Использование: ./run_streamlit_background.sh
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
@@ -76,7 +76,7 @@ if ps -p "$STREAMLIT_PID" > /dev/null 2>&1; then
     echo "Внешний URL: stat.steccom.ru:7776${BASE_URL_PATH}"
     echo ""
     echo "Остановить: kill $STREAMLIT_PID"
-    echo "Или: ./stop_streamlit.sh $DB_TYPE $PORT"
+    echo "Или: ./stop_streamlit.sh"
 else
     echo "❌ Ошибка запуска Streamlit!"
     echo "Проверьте логи: cat $LOG_FILE"

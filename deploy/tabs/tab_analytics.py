@@ -1,0 +1,232 @@
+"""
+Закладка: Счета за период
+"""
+import streamlit as st
+import pandas as pd
+from datetime import datetime
+from tabs.common import export_to_csv, export_to_excel
+
+def show_tab(get_connection, get_analytics_invoice_period_report, get_analytics_duplicates,
+             selected_period, contract_id_filter, imei_filter,
+             customer_name_filter, code_1c_filter):
+    """
+    Отображение закладки отчетов по счетам за период
+    """
+    st.header("📋 Счета за период")
+    st.markdown("Отчет по счетам за период на основе таблицы ANALYTICS. Иерархия: клиент → договор → сервис.")
+    
+    # Создаем подвкладки
+    sub_tab_report, sub_tab_duplicates = st.tabs([
+        "📊 Отчет по счетам",
+        "🔍 Проверка дубликатов"
+    ])
+    
+    period_filter = selected_period
+    contract_id_filter = contract_id_filter if contract_id_filter else None
+    imei_filter = imei_filter if imei_filter else None
+    customer_name_filter = customer_name_filter if customer_name_filter else None
+    code_1c_filter = code_1c_filter if code_1c_filter else None
+    
+    # ========== SUB TAB: ОТЧЕТ ПО СЧЕТАМ ==========
+    with sub_tab_report:
+        # Дополнительные фильтры
+        col1, col2 = st.columns(2)
+        with col1:
+            tariff_filter = st.text_input(
+                "Tariff ID",
+                value="",
+                key='tariff_filter',
+                help="Фильтр по ID тарифа (BM_TARIFF.TARIFF_ID)"
+            )
+        with col2:
+            zone_filter = st.text_input(
+                "Zone ID",
+                value="",
+                key='zone_filter',
+                help="Фильтр по ID зоны (BM_ZONE.ZONE_ID)"
+            )
+        
+        filter_key = f"analytics_{period_filter}_{contract_id_filter}_{imei_filter}_{customer_name_filter}_{code_1c_filter}_{tariff_filter}_{zone_filter}"
+        
+        # Кнопка загрузки отчета
+        col1, col2 = st.columns([3, 1])
+        with col1:
+            st.markdown("**Настройте фильтры и нажмите кнопку для загрузки отчета:**")
+        with col2:
+            load_analytics = st.button("📊 Загрузить отчет", type="primary", use_container_width=True, key="load_analytics_btn")
+        
+        if load_analytics:
+            if period_filter is not None:
+                with st.spinner("Загрузка данных по счетам за период..."):
+                    df_analytics = get_analytics_invoice_period_report(
+                        get_connection,
+                        period_filter,
+                        contract_id_filter,
+                        imei_filter,
+                        customer_name_filter,
+                        code_1c_filter,
+                        tariff_filter if tariff_filter else None,
+                        zone_filter if zone_filter else None
+                    )
+                    st.session_state.last_analytics_key = filter_key
+                    st.session_state.last_analytics_df = df_analytics
+                    st.session_state.analytics_loaded = True
+            else:
+                st.warning("⚠️ Выберите период для загрузки отчета")
+                df_analytics = None
+                st.session_state.analytics_loaded = False
+        else:
+            saved_key = st.session_state.get('last_analytics_key')
+            if (st.session_state.get('analytics_loaded', False) and 
+                saved_key is not None and 
+                saved_key == filter_key):
+                df_analytics = st.session_state.get('last_analytics_df', None)
+            else:
+                df_analytics = None
+                if saved_key is not None and saved_key != filter_key:
+                    st.session_state.analytics_loaded = False
+                if not st.session_state.get('analytics_loaded', False):
+                    st.info("ℹ️ Настройте фильтры и нажмите кнопку 'Загрузить отчет' для просмотра данных")
+        
+        # Показываем отчет ТОЛЬКО если он был загружен по кнопке
+        if df_analytics is not None and not df_analytics.empty and st.session_state.get('analytics_loaded', False):
+            st.success(f"✅ Загружено записей: {len(df_analytics):,}")
+            
+            # Простая статистика
+            st.markdown("---")
+            col1, col2, col3, col4 = st.columns(4)
+            with col1:
+                st.metric("Всего сумм (руб)", f"{df_analytics['Сумма (руб)'].sum():,.2f}")
+            with col2:
+                st.metric("Абонплата (руб)", f"{df_analytics['Абонплата (руб)'].sum():,.2f}")
+            with col3:
+                st.metric("Трафик (руб)", f"{df_analytics['Трафик (руб)'].sum():,.2f}")
+            with col4:
+                st.metric("Записей", f"{len(df_analytics):,}")
+            
+            st.markdown("---")
+            
+            # Детализированная таблица (простая, без группировок)
+            st.subheader("📋 Детализированный отчет")
+            display_columns = [
+                'Период', 'Клиент', 'Код 1С', 'Договор', 'Contract ID', 'Service ID', 'IMEI',
+                'Тариф', 'Зона', 'Тип ресурса', 'Название ресурса',
+                'Сумма (руб)', 'Абонплата (руб)', 'Трафик (руб)', 
+                'Трафик (объем)', 'Общий трафик', 'В счете', 'Статус услуги'
+            ]
+            display_df = df_analytics[display_columns].copy()
+            for col in display_df.columns:
+                if display_df[col].dtype == 'object':
+                    display_df[col] = display_df[col].fillna('')
+            
+            st.dataframe(display_df, use_container_width=True, height=400)
+            
+            # Экспорт
+            st.markdown("---")
+            col1, col2 = st.columns(2)
+            with col1:
+                csv_data = df_analytics.to_csv(index=False).encode('utf-8')
+                st.download_button(
+                    label="📥 Скачать CSV",
+                    data=csv_data,
+                    file_name=f"analytics_invoice_period_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+                    mime="text/csv"
+                )
+            with col2:
+                import io as io_module
+                excel_buffer = io_module.BytesIO()
+                with pd.ExcelWriter(excel_buffer, engine='openpyxl') as writer:
+                    df_analytics.to_excel(writer, index=False, sheet_name='Analytics Invoice Period')
+                    worksheet = writer.sheets['Analytics Invoice Period']
+                    from openpyxl.utils import get_column_letter
+                    for idx, col in enumerate(df_analytics.columns, start=1):
+                        max_length = max(
+                            df_analytics[col].astype(str).map(len).max() if len(df_analytics) > 0 else 0,
+                            len(str(col))
+                        )
+                        col_letter = get_column_letter(idx)
+                        worksheet.column_dimensions[col_letter].width = min(max_length + 2, 50)
+                excel_buffer.seek(0)
+                excel_data = excel_buffer.getvalue()
+                st.download_button(
+                    label="📥 Скачать Excel",
+                    data=excel_data,
+                    file_name=f"analytics_invoice_period_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                )
+        elif df_analytics is not None and df_analytics.empty:
+            st.warning("⚠️ Данные не найдены для выбранных фильтров")
+    
+    # ========== SUB TAB: ПРОВЕРКА ДУБЛИКАТОВ ==========
+    with sub_tab_duplicates:
+        st.header("🔍 Проверка дубликатов в ANALYTICS")
+        st.markdown("Поиск записей, где все поля совпадают, кроме AID (первичного ключа).")
+        st.info("💡 Дубликаты могут возникать при повторной загрузке данных или ошибках в процессе формирования ANALYTICS.")
+        
+        conn = get_connection()
+        if conn:
+            try:
+                periods_query = """
+                SELECT 
+                    p.PERIOD_ID,
+                    TO_CHAR(p.START_DATE, 'YYYY-MM') AS PERIOD_YYYYMM,
+                    p.MONTH AS PERIOD_NAME,
+                    p.START_DATE,
+                    p.STOP_DATE
+                FROM BM_PERIOD p
+                ORDER BY p.PERIOD_ID DESC
+                """
+                periods_df = pd.read_sql_query(periods_query, conn)
+                
+                if not periods_df.empty:
+                    period_options = [
+                        f"{row['PERIOD_ID']} - {row['PERIOD_YYYYMM']} ({row['PERIOD_NAME']})"
+                        for _, row in periods_df.iterrows()
+                    ]
+                    period_options.insert(0, "Выберите период...")
+                    
+                    selected_period_option = st.selectbox(
+                        "Выберите период (PERIOD_ID) для проверки дубликатов:",
+                        period_options,
+                        key='duplicates_period_select'
+                    )
+                    
+                    if selected_period_option and selected_period_option != "Выберите период...":
+                        period_id = int(selected_period_option.split(' - ')[0])
+                        
+                        st.markdown("---")
+                        
+                        if st.button("🔍 Найти дубликаты", key='find_duplicates_btn'):
+                            with st.spinner("Поиск дубликатов..."):
+                                duplicates_df = get_analytics_duplicates(get_connection, period_id)
+                                
+                                if duplicates_df is not None and not duplicates_df.empty:
+                                    st.success(f"✅ Найдено дубликатов: {len(duplicates_df):,}")
+                                    st.dataframe(duplicates_df, use_container_width=True, height=400)
+                                    
+                                    # Экспорт
+                                    st.markdown("---")
+                                    col1, col2 = st.columns(2)
+                                    with col1:
+                                        csv_data = duplicates_df.to_csv(index=False).encode('utf-8')
+                                        st.download_button(
+                                            label="📥 Скачать CSV",
+                                            data=csv_data,
+                                            file_name=f"analytics_duplicates_{period_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+                                            mime="text/csv"
+                                        )
+                                elif duplicates_df is not None and duplicates_df.empty:
+                                    st.info("✅ Дубликатов не найдено")
+                                else:
+                                    st.error("❌ Ошибка при поиске дубликатов")
+            except Exception as e:
+                st.error(f"❌ Ошибка: {e}")
+                import traceback
+                with st.expander("Детали ошибки"):
+                    st.code(traceback.format_exc())
+            finally:
+                conn.close()
+        else:
+            st.error("❌ Ошибка подключения к базе данных")
+
+

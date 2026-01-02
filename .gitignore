@@ -55,6 +55,10 @@ ENV/
 *.backup
 *.old
 
+# Test scripts (temporary)
+test_*.py
+!tests/
+
 # Database dumps (keep only structure files)
 *.sql.gz
 *.dump
