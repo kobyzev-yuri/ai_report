@@ -174,7 +174,7 @@ def show_tab(get_connection, count_file_records, get_records_in_db):
                 
                 st.markdown(f"**Found files: {len(spnet_files)}**")
                 files_info = []
-                for f in sorted(spnet_files, key=lambda x: x.stat().st_mtime, reverse=True)[:10]:
+                for idx, f in enumerate(sorted(spnet_files, key=lambda x: x.stat().st_mtime, reverse=True)[:10]):
                     is_loaded = f.name.lower() in loaded_files
                     records_in_file = count_file_records(f)
                     records_in_file_str = f"{records_in_file:,}" if records_in_file is not None else "N/A"
@@ -191,6 +191,57 @@ def show_tab(get_connection, count_file_records, get_records_in_db):
                         'Modified': datetime.fromtimestamp(f.stat().st_mtime).strftime('%Y-%m-%d %H:%M:%S'),
                         'Status': '✅ Loaded' if is_loaded else '⏳ Not loaded'
                     })
+                    
+                    # Кнопка импорта для каждого файла
+                    col_btn1, col_btn2 = st.columns([3, 1])
+                    with col_btn1:
+                        st.text(f.name[:60] + ('...' if len(f.name) > 60 else ''))
+                    with col_btn2:
+                        if st.button("📥 Import", key=f'import_spnet_{idx}', use_container_width=True):
+                            try:
+                                # Импорт одного файла
+                                try:
+                                    from python.load_spnet_traffic import SPNetDataLoader
+                                except ImportError:
+                                    sys.path.insert(0, str(deploy_dir.parent))
+                                    from python.load_spnet_traffic import SPNetDataLoader
+                                import os
+                                oracle_config = {
+                                    'username': os.getenv('ORACLE_USER', 'billing7'),
+                                    'password': os.getenv('ORACLE_PASSWORD', ''),
+                                    'host': os.getenv('ORACLE_HOST', ''),
+                                    'port': int(os.getenv('ORACLE_PORT', '1521')),
+                                    'service_name': os.getenv('ORACLE_SERVICE', 'bm7')
+                                }
+                                loader = SPNetDataLoader(oracle_config)
+                                if loader.connect_to_oracle():
+                                    file_start_time = datetime.now()
+                                    with st.spinner(f"Импорт {f.name}..."):
+                                        records_loaded = loader.load_single_file(str(f))
+                                        file_end_time = datetime.now()
+                                        file_duration = (file_end_time - file_start_time).total_seconds()
+                                        
+                                        if records_loaded > 0:
+                                            # Логируем успешную загрузку в LOAD_LOGS
+                                            try:
+                                                loader.log_load_success('SPNET_TRAFFIC', f.name, records_loaded, file_start_time, file_end_time, file_duration)
+                                            except Exception as log_error:
+                                                st.warning(f"⚠️ Файл загружен, но не удалось записать в LOAD_LOGS: {log_error}")
+                                            
+                                            st.success(f"✅ Импортировано {records_loaded:,} записей из {f.name}")
+                                            # Обновляем кэш
+                                            if cache_key in st.session_state:
+                                                del st.session_state[cache_key]
+                                            st.rerun()
+                                        else:
+                                            st.warning(f"⚠️ Файл {f.name} не содержит данных или уже загружен")
+                                    loader.close_connection()
+                                else:
+                                    st.error("❌ Не удалось подключиться к базе данных")
+                            except Exception as e:
+                                import traceback
+                                st.error(f"❌ Ошибка импорта: {e}")
+                                st.code(traceback.format_exc())
                 df_files = pd.DataFrame(files_info)
                 st.dataframe(df_files, use_container_width=True, hide_index=True, height=200)
                 
@@ -248,7 +299,7 @@ def show_tab(get_connection, count_file_records, get_records_in_db):
                 
                 st.markdown(f"**Found files: {len(access_fees_files)}**")
                 files_info = []
-                for f in sorted(access_fees_files, key=lambda x: x.stat().st_mtime, reverse=True)[:10]:
+                for idx, f in enumerate(sorted(access_fees_files, key=lambda x: x.stat().st_mtime, reverse=True)[:10]):
                     is_loaded = f.name.lower() in loaded_files
                     records_in_file = count_file_records(f)
                     records_in_file_str = f"{records_in_file:,}" if records_in_file is not None else "N/A"
@@ -265,6 +316,57 @@ def show_tab(get_connection, count_file_records, get_records_in_db):
                         'Modified': datetime.fromtimestamp(f.stat().st_mtime).strftime('%Y-%m-%d %H:%M:%S'),
                         'Status': '✅ Loaded' if is_loaded else '⏳ Not loaded'
                     })
+                    
+                    # Кнопка импорта для каждого файла
+                    col_btn1, col_btn2 = st.columns([3, 1])
+                    with col_btn1:
+                        st.text(f.name[:60] + ('...' if len(f.name) > 60 else ''))
+                    with col_btn2:
+                        if st.button("📥 Import", key=f'import_access_fees_{idx}', use_container_width=True):
+                            try:
+                                # Импорт одного файла
+                                try:
+                                    from python.load_steccom_expenses import STECCOMDataLoader
+                                except ImportError:
+                                    sys.path.insert(0, str(deploy_dir.parent))
+                                    from python.load_steccom_expenses import STECCOMDataLoader
+                                import os
+                                oracle_config = {
+                                    'username': os.getenv('ORACLE_USER', 'billing7'),
+                                    'password': os.getenv('ORACLE_PASSWORD', ''),
+                                    'host': os.getenv('ORACLE_HOST', ''),
+                                    'port': int(os.getenv('ORACLE_PORT', '1521')),
+                                    'service_name': os.getenv('ORACLE_SERVICE', 'bm7')
+                                }
+                                loader = STECCOMDataLoader(oracle_config)
+                                if loader.connect_to_oracle():
+                                    file_start_time = datetime.now()
+                                    with st.spinner(f"Импорт {f.name}..."):
+                                        records_loaded = loader.load_single_file(str(f))
+                                        file_end_time = datetime.now()
+                                        file_duration = (file_end_time - file_start_time).total_seconds()
+                                        
+                                        if records_loaded > 0:
+                                            # Логируем успешную загрузку в LOAD_LOGS
+                                            try:
+                                                loader.log_load_success('STECCOM_EXPENSES', f.name, records_loaded, file_start_time, file_end_time, file_duration)
+                                            except Exception as log_error:
+                                                st.warning(f"⚠️ Файл загружен, но не удалось записать в LOAD_LOGS: {log_error}")
+                                            
+                                            st.success(f"✅ Импортировано {records_loaded:,} записей из {f.name}")
+                                            # Обновляем кэш
+                                            if cache_key in st.session_state:
+                                                del st.session_state[cache_key]
+                                            st.rerun()
+                                        else:
+                                            st.warning(f"⚠️ Файл {f.name} не содержит данных или уже загружен")
+                                    loader.close_connection()
+                                else:
+                                    st.error("❌ Не удалось подключиться к базе данных")
+                            except Exception as e:
+                                import traceback
+                                st.error(f"❌ Ошибка импорта: {e}")
+                                st.code(traceback.format_exc())
                 df_files = pd.DataFrame(files_info)
                 st.dataframe(df_files, use_container_width=True, hide_index=True, height=200)
                 
@@ -295,7 +397,7 @@ def show_tab(get_connection, count_file_records, get_records_in_db):
                     try:
                         from python.load_spnet_traffic import SPNetDataLoader
                     except ImportError:
-                        import sys
+                        # Модуль может находиться на уровень выше (deploy/python)
                         sys.path.insert(0, str(deploy_dir.parent))
                         from python.load_spnet_traffic import SPNetDataLoader
                     import os
@@ -338,7 +440,7 @@ def show_tab(get_connection, count_file_records, get_records_in_db):
                     try:
                         from python.load_steccom_expenses import STECCOMDataLoader
                     except ImportError:
-                        import sys
+                        # Модуль может находиться на уровень выше (deploy/python)
                         sys.path.insert(0, str(deploy_dir.parent))
                         from python.load_steccom_expenses import STECCOMDataLoader
                     import os

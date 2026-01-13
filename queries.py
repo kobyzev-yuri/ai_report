@@ -189,21 +189,56 @@ def get_periods(get_connection):
 
 @st.cache_data(ttl=300)
 def get_plans(_get_connection):
-    """Получение списка тарифных планов"""
+    """Получение списка тарифных планов
+    Оптимизировано: сначала пытаемся использовать таблицу TARIFF_PLANS (быстро),
+    если её нет или она пуста - используем представление V_CONSOLIDATED_REPORT_WITH_BILLING (медленно)
+    """
     conn = _get_connection()
     if not conn:
         return []
     try:
-        query = "SELECT DISTINCT PLAN_NAME FROM V_CONSOLIDATED_REPORT_WITH_BILLING WHERE PLAN_NAME IS NOT NULL ORDER BY PLAN_NAME"
         cursor = conn.cursor()
+        
+        # Сначала пытаемся использовать таблицу TARIFF_PLANS (быстро)
+        try:
+            query = """
+                SELECT DISTINCT PLAN_NAME 
+                FROM TARIFF_PLANS 
+                WHERE PLAN_NAME IS NOT NULL 
+                  AND (ACTIVE = 'Y' OR ACTIVE IS NULL)
+                ORDER BY PLAN_NAME
+            """
+            cursor.execute(query)
+            plans = [row[0] for row in cursor.fetchall() if row[0]]
+            if plans:
+                cursor.close()
+                return plans
+        except:
+            # Таблица TARIFF_PLANS не существует или недоступна - используем представление
+            pass
+        
+        # Fallback: используем представление V_CONSOLIDATED_REPORT_WITH_BILLING (медленно)
+        # Ограничиваем выборку для ускорения
+        query = """
+            SELECT DISTINCT PLAN_NAME 
+            FROM (
+                SELECT PLAN_NAME 
+                FROM V_CONSOLIDATED_REPORT_WITH_BILLING 
+                WHERE PLAN_NAME IS NOT NULL 
+                  AND ROWNUM <= 10000
+            )
+            ORDER BY PLAN_NAME
+        """
         cursor.execute(query)
         plans = [row[0] for row in cursor.fetchall() if row[0]]
         cursor.close()
         return plans
-    except:
+    except Exception as e:
+        # В случае ошибки возвращаем пустой список
         return []
     finally:
-        if conn: conn.close()
+        if conn: 
+            conn.close()
 
 def get_revenue_periods(get_connection):
     """Получение списка периодов из доходов"""

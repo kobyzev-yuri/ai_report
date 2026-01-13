@@ -150,7 +150,8 @@ class SPNetDataLoader:
                             try:
                                 df = pd.read_csv(file_path, sep=sep, encoding=encoding, 
                                                dtype=str,  # Читаем все как строки
-                                               na_filter=False)  # Не конвертируем в NaN
+                                               na_filter=False,  # Не конвертируем в NaN
+                                               quotechar='"')  # Кавычки для полей
                                 if len(df.columns) > 1:
                                     logger.info(f"Успешно прочитан файл {file_path} с разделителем '{sep}' и кодировкой {encoding}")
                                     break
@@ -207,13 +208,30 @@ class SPNetDataLoader:
             raise
     
     def insert_records(self, records):
-        """Вставка записей в Oracle"""
+        """Вставка записей в Oracle с проверкой на дубликаты"""
         if not self.connection:
             raise Exception("Нет подключения к Oracle")
         
+        if not records:
+            return 0
+        
         cursor = self.connection.cursor()
+        inserted_count = 0
+        skipped_count = 0
         
         try:
+            # SQL для проверки существования записи (по ключевым полям)
+            check_sql = """
+            SELECT COUNT(*) FROM SPNET_TRAFFIC
+            WHERE CONTRACT_ID = :contract_id
+              AND IMEI = :imei
+              AND BILL_MONTH = :bill_month
+              AND SERVICE = :service
+              AND USAGE_TYPE = :usage_type
+              AND NVL(USAGE_BYTES, -999999) = NVL(:usage_bytes, -999999)
+              AND SOURCE_FILE = :source_file
+            """
+            
             # SQL для вставки
             insert_sql = """
             INSERT INTO SPNET_TRAFFIC (
@@ -229,11 +247,38 @@ class SPNetDataLoader:
             )
             """
             
-            # Выполняем вставку
-            cursor.executemany(insert_sql, records)
+            # Вставляем записи с проверкой на дубликаты
+            for record in records:
+                try:
+                    # Проверяем, существует ли уже такая запись
+                    cursor.execute(check_sql, {
+                        'contract_id': record.get('contract_id'),
+                        'imei': record.get('imei'),
+                        'bill_month': record.get('bill_month'),
+                        'service': record.get('service'),
+                        'usage_type': record.get('usage_type'),
+                        'usage_bytes': record.get('usage_bytes'),
+                        'source_file': record.get('source_file')
+                    })
+                    exists = cursor.fetchone()[0] > 0
+                    
+                    if not exists:
+                        # Запись не существует - вставляем
+                        cursor.execute(insert_sql, record)
+                        inserted_count += 1
+                    else:
+                        # Запись уже существует - пропускаем
+                        skipped_count += 1
+                except Exception as e:
+                    logger.warning(f"Ошибка при вставке записи: {e}")
+                    continue
+            
             self.connection.commit()
             
-            return len(records)
+            if skipped_count > 0:
+                logger.info(f"Пропущено дубликатов: {skipped_count}")
+            
+            return inserted_count
             
         except Exception as e:
             self.connection.rollback()
@@ -326,7 +371,8 @@ class SPNetDataLoader:
                         df = pd.read_excel(file_path, dtype=str, na_filter=False, engine='openpyxl')
                     else:
                         import pandas as pd
-                        df = pd.read_csv(file_path, dtype=str, na_filter=False)
+                        df = pd.read_csv(file_path, dtype=str, na_filter=False, 
+                                       quotechar='"')
                     df = df.dropna(how='all')
                     records_in_file = len(df)
                 except Exception as e:
@@ -511,7 +557,11 @@ class SPNetDataLoader:
             logger.info("Подключение к Oracle закрыто")
 
 def main():
-    """Основная функция"""
+    """Основная функция
+    Использование:
+        python load_spnet_traffic.py                    # Импорт всех файлов из директории
+        python load_spnet_traffic.py /path/to/file.csv # Импорт одного файла
+    """
     # Конфигурация Oracle (прямое подключение из интранет)
     oracle_config = {
         'host': os.getenv('ORACLE_HOST'),  # Из переменной окружения
@@ -526,38 +576,74 @@ def main():
     missing = [p for p in required_params if not oracle_config.get(p)]
     if missing:
         logger.error(f"❌ Ошибка: Не установлены переменные окружения: {', '.join(missing)}")
-        return
+        return False
     
-    logger.info("Запуск загрузчика данных SPNet...")
-    
-    # Создаем загрузчик
-    loader = SPNetDataLoader(oracle_config)
-    
-    try:
-        # Подключаемся к Oracle
-        if not loader.connect_to_oracle():
-            logger.error("Не удалось подключиться к Oracle")
+    # Проверяем, передан ли путь к файлу как аргумент
+    if len(sys.argv) > 1:
+        # Импорт одного файла
+        file_path = sys.argv[1]
+        if not Path(file_path).exists():
+            logger.error(f"❌ Файл не найден: {file_path}")
             return False
         
-        # Загружаем данные
-        if loader.load_spnet_files():
-            # Получаем статистику
-            stats = loader.get_load_statistics()
-            if stats:
-                logger.info("Загрузка SPNet завершена успешно!")
+        logger.info(f"Импорт одного файла: {file_path}")
+        loader = SPNetDataLoader(oracle_config)
+        
+        try:
+            if not loader.connect_to_oracle():
+                logger.error("Не удалось подключиться к Oracle")
+                return False
+            
+            records_loaded = loader.load_single_file(file_path)
+            
+            if records_loaded > 0:
+                logger.info(f"✅ Импорт завершен успешно! Загружено записей: {records_loaded:,}")
                 return True
             else:
-                logger.error("Не удалось получить статистику")
+                logger.warning("⚠️  Файл не загружен или не содержит данных")
                 return False
-        else:
-            logger.error("Ошибка при загрузке данных SPNet")
+                
+        except Exception as e:
+            logger.error(f"Критическая ошибка: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
             return False
+        finally:
+            loader.close_connection()
+    else:
+        # Импорт всех файлов из директории (обычный режим)
+        logger.info("Запуск загрузчика данных SPNet...")
+        
+        # Создаем загрузчик
+        loader = SPNetDataLoader(oracle_config)
+        
+        try:
+            # Подключаемся к Oracle
+            if not loader.connect_to_oracle():
+                logger.error("Не удалось подключиться к Oracle")
+                return False
             
-    except Exception as e:
-        logger.error(f"Критическая ошибка: {e}")
-        return False
-    finally:
-        loader.close_connection()
+            # Загружаем данные
+            if loader.load_spnet_files():
+                # Получаем статистику
+                stats = loader.get_load_statistics()
+                if stats:
+                    logger.info("Загрузка SPNet завершена успешно!")
+                    return True
+                else:
+                    logger.error("Не удалось получить статистику")
+                    return False
+            else:
+                logger.error("Ошибка при загрузке данных SPNet")
+                return False
+                
+        except Exception as e:
+            logger.error(f"Критическая ошибка: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+            return False
+        finally:
+            loader.close_connection()
 
 if __name__ == "__main__":
     success = main()

@@ -153,7 +153,8 @@ class STECCOMDataLoader:
                         try:
                             df = pd.read_csv(file_path, sep=sep, encoding=encoding, 
                                            dtype=str,  # Читаем все как строки
-                                           na_filter=False)  # Не конвертируем в NaN
+                                           na_filter=False,  # Не конвертируем в NaN
+                                           quotechar='"')  # Кавычки для полей
                             if len(df.columns) > 1:
                                 logger.info(f"Успешно прочитан файл {file_path} с разделителем '{sep}' и кодировкой {encoding}")
                                 break
@@ -417,7 +418,7 @@ class STECCOMDataLoader:
                     if file_ext == '.xlsx':
                         df = pd.read_excel(file_path, dtype=str, na_filter=False, engine='openpyxl')
                     else:
-                        df = pd.read_csv(file_path, dtype=str, na_filter=False)
+                        df = pd.read_csv(file_path, dtype=str, na_filter=False, quotechar='"')
                     df = df.dropna(how='all')
                     records_in_file = len(df)
                 except Exception as e:

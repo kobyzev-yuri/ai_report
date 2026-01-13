@@ -133,13 +133,13 @@ def count_file_records(file_path):
         else:
             # CSV файл
             try:
-                df = pd.read_csv(file_path, dtype=str, na_filter=False)
+                df = pd.read_csv(file_path, dtype=str, na_filter=False, quotechar='"')
                 return len(df)
             except Exception as e:
                 # Пробуем разные кодировки
                 for encoding in ['utf-8', 'latin-1', 'cp1252', 'iso-8859-1']:
                     try:
-                        df = pd.read_csv(file_path, dtype=str, na_filter=False, encoding=encoding)
+                        df = pd.read_csv(file_path, dtype=str, na_filter=False, encoding=encoding, quotechar='"')
                         return len(df)
                     except:
                         continue
