@@ -49,15 +49,19 @@ def show_tab(get_connection, count_file_records, get_records_in_db):
     st.markdown("---")
     
     # Директории для данных
-    # Определяем путь к deploy директории
+    # Определяем путь к директории данных
     script_dir = Path(__file__).resolve()
-    # Если мы в tabs/, то deploy/ на уровень выше
-    if 'tabs' in script_dir.parts:
-        deploy_dir = script_dir.parent / 'deploy'
+    # Находим корень проекта (где есть tabs/)
+    current = script_dir
+    while current.parent != current:
+        if (current / 'tabs').exists():
+            project_root = current
+            break
+        current = current.parent
     else:
-        # Если запускаем из корня проекта
-        deploy_dir = script_dir / 'deploy'
-    DATA_DIR = deploy_dir / 'data'
+        # Fallback: используем текущую директорию
+        project_root = script_dir
+    DATA_DIR = project_root / 'data'
     SPNET_DIR = DATA_DIR / 'SPNet reports'
     ACCESS_FEES_DIR = DATA_DIR / 'STECCOMLLCRussiaSBD.AccessFees_reports'
     
@@ -203,7 +207,7 @@ def show_tab(get_connection, count_file_records, get_records_in_db):
                                 try:
                                     from python.load_spnet_traffic import SPNetDataLoader
                                 except ImportError:
-                                    sys.path.insert(0, str(deploy_dir.parent))
+                                    sys.path.insert(0, str(project_root))
                                     from python.load_spnet_traffic import SPNetDataLoader
                                 import os
                                 oracle_config = {
@@ -328,7 +332,7 @@ def show_tab(get_connection, count_file_records, get_records_in_db):
                                 try:
                                     from python.load_steccom_expenses import STECCOMDataLoader
                                 except ImportError:
-                                    sys.path.insert(0, str(deploy_dir.parent))
+                                    sys.path.insert(0, str(project_root))
                                     from python.load_steccom_expenses import STECCOMDataLoader
                                 import os
                                 oracle_config = {
@@ -397,8 +401,8 @@ def show_tab(get_connection, count_file_records, get_records_in_db):
                     try:
                         from python.load_spnet_traffic import SPNetDataLoader
                     except ImportError:
-                        # Модуль может находиться на уровень выше (deploy/python)
-                        sys.path.insert(0, str(deploy_dir.parent))
+                        # Модуль может находиться на уровень выше
+                        sys.path.insert(0, str(project_root))
                         from python.load_spnet_traffic import SPNetDataLoader
                     import os
                     oracle_config = {
@@ -440,8 +444,8 @@ def show_tab(get_connection, count_file_records, get_records_in_db):
                     try:
                         from python.load_steccom_expenses import STECCOMDataLoader
                     except ImportError:
-                        # Модуль может находиться на уровень выше (deploy/python)
-                        sys.path.insert(0, str(deploy_dir.parent))
+                        # Модуль может находиться на уровень выше
+                        sys.path.insert(0, str(project_root))
                         from python.load_steccom_expenses import STECCOMDataLoader
                     import os
                     oracle_config = {

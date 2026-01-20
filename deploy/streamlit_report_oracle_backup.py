@@ -28,23 +28,19 @@ from tabs.tab_analytics import show_tab as show_analytics_tab
 from tabs.tab_loader import show_tab as show_loader_tab
 from tabs.tab_ifindex import show_tab as show_ifindex_tab
 from tabs.tab_ifindex_mapping import show_tab as show_ifindex_mapping_tab
+from tabs.tab_lbs import show_tab as show_lbs_tab
 
 # Подавляем предупреждение pandas о cx_Oracle (работает корректно)
 warnings.filterwarnings('ignore', message='pandas only supports SQLAlchemy')
 
 from db_connection import load_config_env, get_db_connection as get_connection
-
 from queries import (
     count_file_records, get_records_in_db, get_main_report,
     get_current_period, get_periods, get_plans,
     get_revenue_periods, get_revenue_report,
-    get_analytics_invoice_period_report,
-    remove_analytics_duplicates
+    get_analytics_duplicates, get_analytics_invoice_period_report,
+    remove_analytics_duplicates, get_lbs_services_report
 )
-
-# Импортируем queries как модуль для прямого доступа к get_analytics_duplicates
-# Это позволяет перезагружать модуль при необходимости
-import queries
 
 # Конфигурация базы данных
 load_config_env()
@@ -311,8 +307,12 @@ def main():
     
     # Получаем разрешенные вкладки
     allowed_tabs_keys = st.session_state.get('allowed_tabs', [])
-    if st.session_state.get('is_superuser', False) or not allowed_tabs_keys:
+    if st.session_state.get('is_superuser', False):
+        # Суперпользователи видят все табы
         allowed_tabs_keys = list(AVAILABLE_TABS.keys())
+    elif not allowed_tabs_keys:
+        # Если у пользователя нет прав, не показываем табы
+        allowed_tabs_keys = []
     
     # Формируем список закладок
     tab_configs = []
@@ -335,32 +335,15 @@ def main():
             elif tab_key == 'revenue':
                 show_revenue_tab(get_connection, get_revenue_report, selected_period, contract_id_filter, imei_filter, customer_name_filter, code_1c_filter)
             elif tab_key == 'analytics':
-                # Используем queries.get_analytics_duplicates напрямую для избежания кэширования
-                # Перезагружаем модуль каждый раз при открытии закладки
-                import importlib
-                import sys
-                # Удаляем модуль из кэша, если он есть
-                if 'queries' in sys.modules:
-                    del sys.modules['queries']
-                # Импортируем заново
-                import queries
-                importlib.reload(queries)
-                # Проверяем версию функции
-                import inspect
-                try:
-                    func_source = inspect.getsource(queries.get_analytics_duplicates)
-                    if 'ВЕРСИЯ 2.1' not in func_source:
-                        st.error("⚠️ Используется старая версия функции get_analytics_duplicates!")
-                        st.stop()
-                except:
-                    pass
-                show_analytics_tab(get_connection, get_analytics_invoice_period_report, queries.get_analytics_duplicates, selected_period, contract_id_filter, imei_filter, customer_name_filter, code_1c_filter, remove_analytics_duplicates)
+                show_analytics_tab(get_connection, get_analytics_invoice_period_report, get_analytics_duplicates, selected_period, contract_id_filter, imei_filter, customer_name_filter, code_1c_filter, remove_analytics_duplicates)
             elif tab_key == 'loader':
                 show_loader_tab(get_connection, count_file_records, get_records_in_db)
             elif tab_key == 'ifindex':
                 show_ifindex_tab(get_connection)
             elif tab_key == 'ifindex_mapping':
                 show_ifindex_mapping_tab(get_connection)
+            elif tab_key == 'lbs':
+                show_lbs_tab(get_connection, get_lbs_services_report)
             elif tab_key == 'assistant':
                 try:
                     from kb_billing.rag.streamlit_assistant import show_assistant_tab

@@ -542,3 +542,115 @@ def get_analytics_invoice_period_report(get_connection, period_filter=None, cont
         return None
     finally:
         if conn: conn.close()
+
+def get_lbs_services_report(get_connection, contract_id_filter=None, imei_filter=None, customer_name_filter=None, code_1c_filter=None):
+    """
+    Получение отчета по активным SBD IMEI сервисам без расходов за последний месяц
+    
+    Условия:
+    - TYPE_ID = 9002 (SBD)
+    - OPEN_DATE (START_DATE) IS NOT NULL
+    - CLOSE_DATE (STOP_DATE) IS NULL
+    - Отсутствуют в SPNET_TRAFFIC за последний месяц
+    
+    Returns:
+        DataFrame с колонками: IMEI, SERVICE_ID, CUSTOMER_NAME, AGREEMENT_NUMBER, CONTRACT_ID (LOGIN), CODE_1C, OPEN_DATE
+    """
+    conn = get_connection()
+    if not conn:
+        return None
+    
+    try:
+        cursor = conn.cursor()
+        
+        # Получаем последний месяц из SPNET_TRAFFIC
+        cursor.execute("""
+            SELECT MAX(BILL_MONTH) AS LAST_MONTH
+            FROM SPNET_TRAFFIC
+            WHERE BILL_MONTH IS NOT NULL
+        """)
+        last_month_result = cursor.fetchone()
+        last_month = last_month_result[0] if last_month_result and last_month_result[0] else None
+        
+        # Формируем условия фильтрации
+        conditions = []
+        
+        # Основные условия для активных SBD сервисов
+        conditions.append("s.TYPE_ID = 9002")  # SBD сервисы
+        conditions.append("s.START_DATE IS NOT NULL")  # open_date не пустая
+        conditions.append("s.STOP_DATE IS NULL")  # close_date пустая
+        conditions.append("s.LOGIN LIKE 'SUB-%'")  # LOGIN должен начинаться с SUB-
+        
+        # Исключаем сервисы, которые есть в расходах за последний месяц
+        if last_month:
+            conditions.append(f"""
+                NOT EXISTS (
+                    SELECT 1 
+                    FROM SPNET_TRAFFIC st 
+                    WHERE (st.IMEI = s.VSAT OR st.CONTRACT_ID = s.LOGIN)
+                      AND st.BILL_MONTH = {last_month}
+                )
+            """)
+        
+        # Фильтры от пользователя
+        if contract_id_filter and contract_id_filter.strip():
+            val = contract_id_filter.strip().replace("'", "''")
+            conditions.append(f"s.LOGIN LIKE '%{val}%'")
+        
+        if imei_filter and imei_filter.strip():
+            val = imei_filter.strip().replace("'", "''")
+            conditions.append(f"s.VSAT = '{val}'")
+        
+        if customer_name_filter and customer_name_filter.strip():
+            val = customer_name_filter.strip().replace("'", "''")
+            conditions.append(f"""
+                EXISTS (
+                    SELECT 1 
+                    FROM V_IRIDIUM_SERVICES_INFO v 
+                    WHERE v.SERVICE_ID = s.SERVICE_ID 
+                      AND UPPER(COALESCE(v.CUSTOMER_NAME, '')) LIKE UPPER('%{val}%')
+                )
+            """)
+        
+        if code_1c_filter and code_1c_filter.strip():
+            val = code_1c_filter.strip().replace("'", "''")
+            conditions.append(f"""
+                EXISTS (
+                    SELECT 1 
+                    FROM V_IRIDIUM_SERVICES_INFO v 
+                    WHERE v.SERVICE_ID = s.SERVICE_ID 
+                      AND v.CODE_1C LIKE '%{val}%'
+                )
+            """)
+        
+        where_clause = " AND ".join(conditions)
+        
+        # Основной запрос
+        query = f"""
+            SELECT 
+                v.IMEI,
+                v.SERVICE_ID,
+                v.CUSTOMER_NAME,
+                v.AGREEMENT_NUMBER,
+                v.CONTRACT_ID AS SUB_IRIDIUM,
+                v.CODE_1C,
+                v.START_DATE AS OPEN_DATE
+            FROM SERVICES s
+            JOIN V_IRIDIUM_SERVICES_INFO v ON s.SERVICE_ID = v.SERVICE_ID
+            WHERE {where_clause}
+            ORDER BY v.CUSTOMER_NAME, v.IMEI, v.START_DATE
+        """
+        
+        df = pd.read_sql_query(query, conn)
+        cursor.close()
+        
+        return df
+        
+    except Exception as e:
+        import traceback
+        print(f"Error in get_lbs_services_report: {e}")
+        print(traceback.format_exc())
+        return None
+    finally:
+        if conn:
+            conn.close()
