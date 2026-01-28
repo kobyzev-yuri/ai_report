@@ -73,11 +73,16 @@ def show_tab(get_connection, get_lbs_services_report):
     
     st.markdown("---")
     
-    # Кнопка загрузки отчета
-    col1, col2 = st.columns([3, 1])
-    with col1:
+    # Дополнительные опции
+    col_opts1, col_opts2 = st.columns([3, 1])
+    with col_opts1:
+        exclude_steccom = st.checkbox(
+            "Без СТЭККОМ (customer_id=521)",
+            value=True,
+            help="Если включено, исключаются тестовые/внутренние услуги клиента СТЭККОМ (customer_id=521)"
+        )
         st.markdown("**Настройте фильтры и нажмите кнопку для загрузки отчета:**")
-    with col2:
+    with col_opts2:
         load_report = st.button("📊 Загрузить отчет", type="primary", use_container_width=True, key='lbs_load_report')
     
     # Загружаем отчет только при нажатии кнопки
@@ -88,7 +93,8 @@ def show_tab(get_connection, get_lbs_services_report):
                 contract_id_filter if contract_id_filter else None,
                 imei_filter if imei_filter else None,
                 customer_name_filter if customer_name_filter else None,
-                code_1c_filter if code_1c_filter else None
+                code_1c_filter if code_1c_filter else None,
+                exclude_steccom
             )
             
             if df is not None:

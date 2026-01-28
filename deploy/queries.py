@@ -388,7 +388,7 @@ def get_analytics_invoice_period_report(get_connection, period_filter=None, cont
     finally:
         if conn: conn.close()
 
-def get_lbs_services_report(get_connection, contract_id_filter=None, imei_filter=None, customer_name_filter=None, code_1c_filter=None):
+def get_lbs_services_report(get_connection, contract_id_filter=None, imei_filter=None, customer_name_filter=None, code_1c_filter=None, exclude_steccom=True):
     """Получение отчета по активным SBD IMEI сервисам без расходов за последний месяц"""
     conn = get_connection()
     if not conn:
@@ -429,6 +429,11 @@ def get_lbs_services_report(get_connection, contract_id_filter=None, imei_filter
               AND TO_CHAR(se.INVOICE_DATE, 'YYYY-MM') = TO_CHAR(ADD_MONTHS(TRUNC(SYSDATE, 'MM'), -1), 'YYYY-MM')
         )
     """
+
+    # Исключаем тестовые/внутренние услуги клиента СТЭККОМ (customer_id=521), если флаг включен
+    steccom_condition = ""
+    if exclude_steccom:
+        steccom_condition = "AND vi.CUSTOMER_ID <> 521"
     
     query = f"""
     SELECT 
@@ -443,8 +448,22 @@ def get_lbs_services_report(get_connection, contract_id_filter=None, imei_filter
     JOIN SERVICES s ON vi.SERVICE_ID = s.SERVICE_ID
     WHERE s.TYPE_ID = 9002
       AND vi.START_DATE IS NOT NULL
-      AND (s.CLOSE_DATE IS NULL OR s.CLOSE_DATE >= ADD_MONTHS(SYSDATE, -24))
-      AND (vi.STOP_DATE IS NULL OR vi.STOP_DATE >= ADD_MONTHS(SYSDATE, -24))
+      -- Только реальные контракты Iridium: SUB-XXXXX, исключаем тестовые клоны
+      AND vi.CONTRACT_ID LIKE 'SUB-%'
+      AND vi.CONTRACT_ID NOT LIKE '%-clone-%'
+      -- Не показываем услуги, закрытые до начала последнего месяца
+      AND (s.CLOSE_DATE IS NULL OR s.CLOSE_DATE >= ADD_MONTHS(TRUNC(SYSDATE, 'MM'), -1))
+      AND (vi.STOP_DATE IS NULL OR vi.STOP_DATE >= ADD_MONTHS(TRUNC(SYSDATE, 'MM'), -1))
+      -- Также учитываем период действия IMEI в SERVICES_EXT (DICT_ID = 90021):
+      -- DATE_END либо NULL, либо не раньше начала последнего месяца расходов
+      AND EXISTS (
+          SELECT 1 
+          FROM SERVICES_EXT se 
+          WHERE se.SERVICE_ID = s.SERVICE_ID
+            AND se.DICT_ID = 90021
+            AND (se.DATE_END IS NULL OR se.DATE_END >= ADD_MONTHS(TRUNC(SYSDATE, 'MM'), -1))
+      )
+      {steccom_condition}
       {contract_condition}
       {imei_condition}
       {customer_condition}
