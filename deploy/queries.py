@@ -189,56 +189,21 @@ def get_periods(get_connection):
 
 @st.cache_data(ttl=300)
 def get_plans(_get_connection):
-    """Получение списка тарифных планов
-    Оптимизировано: сначала пытаемся использовать таблицу TARIFF_PLANS (быстро),
-    если её нет или она пуста - используем представление V_CONSOLIDATED_REPORT_WITH_BILLING (медленно)
-    """
+    """Получение списка тарифных планов"""
     conn = _get_connection()
     if not conn:
         return []
     try:
+        query = "SELECT DISTINCT PLAN_NAME FROM V_CONSOLIDATED_REPORT_WITH_BILLING WHERE PLAN_NAME IS NOT NULL ORDER BY PLAN_NAME"
         cursor = conn.cursor()
-        
-        # Сначала пытаемся использовать таблицу TARIFF_PLANS (быстро)
-        try:
-            query = """
-                SELECT DISTINCT PLAN_NAME 
-                FROM TARIFF_PLANS 
-                WHERE PLAN_NAME IS NOT NULL 
-                  AND (ACTIVE = 'Y' OR ACTIVE IS NULL)
-                ORDER BY PLAN_NAME
-            """
-            cursor.execute(query)
-            plans = [row[0] for row in cursor.fetchall() if row[0]]
-            if plans:
-                cursor.close()
-                return plans
-        except:
-            # Таблица TARIFF_PLANS не существует или недоступна - используем представление
-            pass
-        
-        # Fallback: используем представление V_CONSOLIDATED_REPORT_WITH_BILLING (медленно)
-        # Ограничиваем выборку для ускорения
-        query = """
-            SELECT DISTINCT PLAN_NAME 
-            FROM (
-                SELECT PLAN_NAME 
-                FROM V_CONSOLIDATED_REPORT_WITH_BILLING 
-                WHERE PLAN_NAME IS NOT NULL 
-                  AND ROWNUM <= 10000
-            )
-            ORDER BY PLAN_NAME
-        """
         cursor.execute(query)
         plans = [row[0] for row in cursor.fetchall() if row[0]]
         cursor.close()
         return plans
-    except Exception as e:
-        # В случае ошибки возвращаем пустой список
+    except:
         return []
     finally:
-        if conn: 
-            conn.close()
+        if conn: conn.close()
 
 def get_revenue_periods(get_connection):
     """Получение списка периодов из доходов"""
@@ -289,226 +254,106 @@ def get_revenue_report(get_connection, period_filter=None, contract_id_filter=No
         if conn: conn.close()
 
 def get_analytics_duplicates(get_connection, period_id):
-    """Поиск дубликатов в ANALYTICS
-    Дубликаты определяются как записи, где ВСЕ поля совпадают, кроме AID
-    ВЕРСИЯ 2.1 - включает все поля таблицы ANALYTICS (исправлено 2026-01-03)
-    """
+    """Поиск дубликатов в ANALYTICS"""
     conn = get_connection()
     if not conn: return None
     
-    # Явно указываем все колонки для избежания проблем с кэшированием
     query = f"""
     SELECT 
         COUNT(*) AS DUPLICATE_COUNT,
         LISTAGG(AID, ', ') WITHIN GROUP (ORDER BY AID) AS AID_LIST,
-        MAX(PERIOD_ID) AS PERIOD_ID,
-        MAX(DOMAIN_ID) AS DOMAIN_ID,
-        MAX(GROUP_ID) AS GROUP_ID,
-        MAX(SERVICE_ID) AS SERVICE_ID,
-        MAX(CUSTOMER_ID) AS CUSTOMER_ID,
-        MAX(ACCOUNT_ID) AS ACCOUNT_ID,
-        MAX(TYPE_ID) AS TYPE_ID,
-        MAX(TARIFF_ID) AS TARIFF_ID,
-        MAX(TARIFFEL_ID) AS TARIFFEL_ID,
-        MAX(VSAT) AS VSAT,
-        MAX(MONEY) AS MONEY,
-        MAX(PRICE) AS PRICE,
-        MAX(TRAF) AS TRAF,
-        MAX(TOTAL_TRAF) AS TOTAL_TRAF,
-        MAX(CBYTE) AS CBYTE,
-        MAX(INVOICE_ITEM_ID) AS INVOICE_ITEM_ID,
-        MAX(FLAG) AS FLAG,
-        MAX(RESOURCE_TYPE_ID) AS RESOURCE_TYPE_ID,
-        MAX(CLASS_ID) AS CLASS_ID,
-        MAX(CLASS_NAME) AS CLASS_NAME,
-        MAX(BLANK) AS BLANK,
-        MAX(COUNTER_ID) AS COUNTER_ID,
-        MAX(COUNTER_CF) AS COUNTER_CF,
-        MAX(ZONE_ID) AS ZONE_ID,
-        MAX(THRESHOLD) AS THRESHOLD,
-        MAX(SUB_TYPE_ID) AS SUB_TYPE_ID,
-        MAX(SUB_PERIOD_ID) AS SUB_PERIOD_ID,
-        MAX(PMONEY) AS PMONEY,
-        MAX(PARTNER_PERCENT) AS PARTNER_PERCENT,
-        MAX(CARD_ID) AS CARD_ID,
-        MAX(SERIAL_ID) AS SERIAL_ID,
-        MAX(SUBSCRIPTION_ID) AS SUBSCRIPTION_ID,
-        MAX(IRIFILENUM) AS IRIFILENUM
+        PERIOD_ID, SERVICE_ID, CUSTOMER_ID, VSAT, MONEY, PRICE, TRAF
     FROM ANALYTICS
     WHERE PERIOD_ID = {period_id}
-    GROUP BY 
-        PERIOD_ID,
-        NVL(DOMAIN_ID, -999999),
-        NVL(GROUP_ID, -999999),
-        NVL(SERVICE_ID, -999999),
-        NVL(CUSTOMER_ID, -999999),
-        NVL(ACCOUNT_ID, -999999),
-        NVL(TYPE_ID, -999999),
-        NVL(TARIFF_ID, -999999),
-        NVL(TARIFFEL_ID, -999999),
-        NVL(VSAT, 'NULL'),
-        NVL(MONEY, -999999),
-        NVL(PRICE, -999999),
-        NVL(TRAF, -999999),
-        NVL(TOTAL_TRAF, -999999),
-        NVL(CBYTE, -999999),
-        NVL(INVOICE_ITEM_ID, -999999),
-        NVL(FLAG, -999999),
-        NVL(RESOURCE_TYPE_ID, -999999),
-        NVL(CLASS_ID, -999999),
-        NVL(CLASS_NAME, 'NULL'),
-        NVL(BLANK, 'NULL'),
-        NVL(COUNTER_ID, -999999),
-        NVL(COUNTER_CF, -999999),
-        NVL(ZONE_ID, -999999),
-        NVL(THRESHOLD, -999999),
-        NVL(SUB_TYPE_ID, -999999),
-        NVL(SUB_PERIOD_ID, -999999),
-        NVL(PMONEY, -999999),
-        NVL(PARTNER_PERCENT, -999999),
-        NVL(CARD_ID, -999999),
-        NVL(SERIAL_ID, -999999),
-        NVL(SUBSCRIPTION_ID, -999999),
-        NVL(IRIFILENUM, -999999)
+    GROUP BY PERIOD_ID, SERVICE_ID, CUSTOMER_ID, VSAT, MONEY, PRICE, TRAF
     HAVING COUNT(*) > 1
     ORDER BY DUPLICATE_COUNT DESC
     """
     try:
-        # Выполняем запрос напрямую, без кэширования pandas
-        cursor = conn.cursor()
-        cursor.execute(query)
-        
-        # Получаем имена колонок из описания курсора
-        column_names = [desc[0] for desc in cursor.description]
-        
-        # Отладочная информация ДО получения данных
-        print(f"DEBUG v2.1: Query executed, cursor.description has {len(cursor.description)} columns")
-        print(f"DEBUG v2.1: Column names from cursor: {column_names[:10]}... (showing first 10)")
-        if len(column_names) != 35:
-            print(f"ERROR v2.1: Expected 35 columns, got {len(column_names)}!")
-            print(f"ERROR v2.1: Full column list: {column_names}")
-        
-        # Получаем данные
-        rows = cursor.fetchall()
-        cursor.close()
-        
-        # Создаем DataFrame вручную
-        import pandas as pd
-        df = pd.DataFrame(rows, columns=column_names)
-        
-        # Отладочная информация ПОСЛЕ создания DataFrame
-        if df is not None and not df.empty:
-            print(f"DEBUG v2.1: get_analytics_duplicates returned {len(df)} rows with {len(df.columns)} columns")
-            print(f"DEBUG v2.1: Expected 35 columns, got {len(df.columns)}")
-            if len(df.columns) != 35:
-                print(f"ERROR v2.1: Column count mismatch! Expected 35, got {len(df.columns)}")
-                print(f"ERROR v2.1: DataFrame columns: {list(df.columns)}")
-                print(f"ERROR v2.1: Missing columns check - ZONE_ID present: {'ZONE_ID' in df.columns}")
-                print(f"ERROR v2.1: Missing columns check - TARIFFEL_ID present: {'TARIFFEL_ID' in df.columns}")
-        elif df is not None and df.empty:
-            print(f"DEBUG v2.1: get_analytics_duplicates returned empty DataFrame (0 rows, {len(df.columns)} columns)")
-            print(f"DEBUG v2.1: This is correct if there are no true duplicates (all fields match)")
-        
-        return df
-    except Exception as e:
-        import traceback
-        print(f"Error in get_analytics_duplicates: {e}")
-        print(traceback.format_exc())
+        return pd.read_sql_query(query, conn)
+    except:
         return None
     finally:
         if conn: conn.close()
 
-def remove_analytics_duplicates(get_connection, period_id=None):
+def remove_analytics_duplicates(get_connection, period_id):
     """
-    Удаление дубликатов из ANALYTICS
-    Оставляет только одну запись с максимальным AID для каждой группы дубликатов
-    
-    Args:
-        get_connection: Функция получения подключения
-        period_id: Опционально - период для удаления дубликатов. Если None - удаляет для всех периодов
-    
-    Returns:
-        tuple: (success: bool, deleted_count: int, message: str)
+    Удаление дубликатов в таблице ANALYTICS за заданный PERIOD_ID.
+    Дубликаты определяются как записи, где совпадают ВСЕ поля, кроме AID.
+    Оставляем запись с максимальным AID в каждой группе.
     """
     conn = get_connection()
     if not conn:
-        return False, 0, "Ошибка подключения к базе данных"
-    
+        return False, 0, "❌ Не удалось подключиться к базе данных"
+
+    cursor = conn.cursor()
     try:
-        cursor = conn.cursor()
-        
-        # Формируем условие WHERE для периода (если указан)
-        period_where = f"WHERE PERIOD_ID = {period_id}" if period_id else ""
-        period_and = f"AND PERIOD_ID = {period_id}" if period_id else ""
-        
-        # SQL для удаления дубликатов используя подзапрос с ROW_NUMBER
-        # Удаляем все записи кроме той, у которой максимальный AID в группе дубликатов
-        # Группируем по ВСЕМ полям таблицы ANALYTICS кроме AID
-        delete_query = f"""
+        delete_sql = """
         DELETE FROM ANALYTICS
         WHERE AID IN (
-            SELECT AID
-            FROM (
-                SELECT 
+            SELECT AID FROM (
+                SELECT
                     AID,
                     ROW_NUMBER() OVER (
-                        PARTITION BY 
+                        PARTITION BY
                             PERIOD_ID,
-                            NVL(DOMAIN_ID, -999999),
-                            NVL(GROUP_ID, -999999),
-                            NVL(SERVICE_ID, -999999),
-                            NVL(CUSTOMER_ID, -999999),
-                            NVL(ACCOUNT_ID, -999999),
-                            NVL(TYPE_ID, -999999),
-                            NVL(TARIFF_ID, -999999),
-                            NVL(TARIFFEL_ID, -999999),
-                            NVL(VSAT, 'NULL'),
-                            NVL(MONEY, -999999),
-                            NVL(PRICE, -999999),
-                            NVL(TRAF, -999999),
-                            NVL(TOTAL_TRAF, -999999),
-                            NVL(CBYTE, -999999),
-                            NVL(INVOICE_ITEM_ID, -999999),
-                            NVL(FLAG, -999999),
-                            NVL(RESOURCE_TYPE_ID, -999999),
-                            NVL(CLASS_ID, -999999),
-                            NVL(CLASS_NAME, 'NULL'),
-                            NVL(BLANK, 'NULL'),
-                            NVL(COUNTER_ID, -999999),
-                            NVL(COUNTER_CF, -999999),
-                            NVL(ZONE_ID, -999999),
-                            NVL(THRESHOLD, -999999),
-                            NVL(SUB_TYPE_ID, -999999),
-                            NVL(SUB_PERIOD_ID, -999999),
-                            NVL(PMONEY, -999999),
-                            NVL(PARTNER_PERCENT, -999999),
-                            NVL(CARD_ID, -999999),
-                            NVL(SERIAL_ID, -999999),
-                            NVL(SUBSCRIPTION_ID, -999999),
-                            NVL(IRIFILENUM, -999999)
+                            DOMAIN_ID,
+                            GROUP_ID,
+                            CUSTOMER_ID,
+                            ACCOUNT_ID,
+                            TYPE_ID,
+                            SERVICE_ID,
+                            ZONE_ID,
+                            PRICE,
+                            TRAF,
+                            MONEY,
+                            VSAT,
+                            BLANK,
+                            COUNTER_CF,
+                            TARIFF_ID,
+                            TARIFFEL_ID,
+                            THRESHOLD,
+                            CLASS_ID,
+                            CLASS_NAME,
+                            CBYTE,
+                            FLAG,
+                            COUNTER_ID,
+                            RESOURCE_TYPE_ID,
+                            SUB_TYPE_ID,
+                            SUB_PERIOD_ID,
+                            INVOICE_ITEM_ID,
+                            CARD_ID,
+                            SERIAL_ID,
+                            SUBSCRIPTION_ID,
+                            TOTAL_TRAF,
+                            PMONEY,
+                            IRIFILENUM,
+                            PARTNER_PERCENT
                         ORDER BY AID DESC
-                    ) AS rn
+                    ) AS RN
                 FROM ANALYTICS
-                {period_where}
+                WHERE PERIOD_ID = :period_id
             )
-            WHERE rn > 1  -- Удаляем все кроме первой записи (с максимальным AID)
+            WHERE RN > 1
         )
         """
-        
-        cursor.execute(delete_query)
-        deleted_count = cursor.rowcount
+
+        cursor.execute(delete_sql, period_id=period_id)
+        deleted_count = cursor.rowcount if cursor.rowcount is not None else 0
         conn.commit()
-        cursor.close()
-        
-        period_msg = f" для периода {period_id}" if period_id else " для всех периодов"
-        return True, deleted_count, f"✅ Удалено {deleted_count} дубликатов{period_msg}"
-        
+        return True, deleted_count, f"✅ Удалено дубликатов: {deleted_count}"
     except Exception as e:
-        conn.rollback()
-        return False, 0, f"❌ Ошибка при удалении дубликатов: {str(e)}"
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        return False, 0, f"❌ Ошибка удаления дубликатов: {e}"
     finally:
-        if conn:
-            conn.close()
+        try:
+            cursor.close()
+        except Exception:
+            pass
+        conn.close()
 
 def get_analytics_invoice_period_report(get_connection, period_filter=None, contract_id_filter=None, imei_filter=None, customer_name_filter=None, code_1c_filter=None, tariff_filter=None, zone_filter=None):
     """Получение отчета по счетам из ANALYTICS"""
@@ -544,112 +389,74 @@ def get_analytics_invoice_period_report(get_connection, period_filter=None, cont
         if conn: conn.close()
 
 def get_lbs_services_report(get_connection, contract_id_filter=None, imei_filter=None, customer_name_filter=None, code_1c_filter=None):
-    """
-    Получение отчета по активным SBD IMEI сервисам без расходов за последний месяц
-    
-    Условия:
-    - TYPE_ID = 9002 (SBD)
-    - OPEN_DATE (START_DATE) IS NOT NULL
-    - CLOSE_DATE (STOP_DATE) IS NULL
-    - Отсутствуют в SPNET_TRAFFIC за последний месяц
-    
-    Returns:
-        DataFrame с колонками: IMEI, SERVICE_ID, CUSTOMER_NAME, AGREEMENT_NUMBER, CONTRACT_ID (LOGIN), CODE_1C, OPEN_DATE
-    """
+    """Получение отчета по активным SBD IMEI сервисам без расходов за последний месяц"""
     conn = get_connection()
     if not conn:
         return None
     
+    # Фильтр по CONTRACT_ID
+    contract_condition = ""
+    if contract_id_filter and contract_id_filter.strip():
+        contract_value = contract_id_filter.strip().replace("'", "''")
+        contract_condition = f"AND vi.CONTRACT_ID LIKE '%{contract_value}%'"
+    
+    # Фильтр по IMEI
+    imei_condition = ""
+    if imei_filter and imei_filter.strip():
+        imei_value = imei_filter.strip().replace("'", "''")
+        imei_condition = f"AND vi.IMEI = '{imei_value}'"
+    
+    # Фильтр по названию клиента
+    customer_condition = ""
+    if customer_name_filter and customer_name_filter.strip():
+        customer_value = customer_name_filter.strip().replace("'", "''")
+        customer_condition = f"AND UPPER(vi.CUSTOMER_NAME) LIKE UPPER('%{customer_value}%')"
+    
+    # Фильтр по коду 1С
+    code_1c_condition = ""
+    if code_1c_filter and code_1c_filter.strip():
+        code_1c_value = code_1c_filter.strip().replace("'", "''")
+        code_1c_condition = f"AND vi.CODE_1C LIKE '%{code_1c_value}%'"
+    
+    # Определяем последний месяц для проверки расходов
+    # Используем период, который соответствует последнему месяцу с данными
+    last_month_condition = f"""
+        AND NOT EXISTS (
+            SELECT 1 
+            FROM STECCOM_EXPENSES se 
+            WHERE se.CONTRACT_ID = vi.CONTRACT_ID
+              AND se.ICC_ID_IMEI = vi.IMEI
+              AND TO_CHAR(se.INVOICE_DATE, 'YYYY-MM') = TO_CHAR(ADD_MONTHS(TRUNC(SYSDATE, 'MM'), -1), 'YYYY-MM')
+        )
+    """
+    
+    query = f"""
+    SELECT 
+        vi.IMEI,
+        vi.SERVICE_ID,
+        vi.CUSTOMER_NAME,
+        vi.AGREEMENT_NUMBER,
+        vi.CONTRACT_ID AS SUB_IRIDIUM,
+        vi.CODE_1C,
+        vi.START_DATE AS OPEN_DATE
+    FROM V_IRIDIUM_SERVICES_INFO vi
+    JOIN SERVICES s ON vi.SERVICE_ID = s.SERVICE_ID
+    WHERE s.TYPE_ID = 9002
+      AND vi.START_DATE IS NOT NULL
+      AND (s.CLOSE_DATE IS NULL OR s.CLOSE_DATE >= ADD_MONTHS(SYSDATE, -24))
+      AND (vi.STOP_DATE IS NULL OR vi.STOP_DATE >= ADD_MONTHS(SYSDATE, -24))
+      {contract_condition}
+      {imei_condition}
+      {customer_condition}
+      {code_1c_condition}
+      {last_month_condition}
+    ORDER BY vi.CUSTOMER_NAME, vi.CONTRACT_ID, vi.IMEI
+    """
+    
     try:
-        cursor = conn.cursor()
-        
-        # Получаем последний месяц из SPNET_TRAFFIC
-        cursor.execute("""
-            SELECT MAX(BILL_MONTH) AS LAST_MONTH
-            FROM SPNET_TRAFFIC
-            WHERE BILL_MONTH IS NOT NULL
-        """)
-        last_month_result = cursor.fetchone()
-        last_month = last_month_result[0] if last_month_result and last_month_result[0] else None
-        
-        # Формируем условия фильтрации
-        conditions = []
-        
-        # Основные условия для активных SBD сервисов
-        conditions.append("s.TYPE_ID = 9002")  # SBD сервисы
-        conditions.append("s.START_DATE IS NOT NULL")  # open_date не пустая
-        conditions.append("s.STOP_DATE IS NULL")  # close_date пустая
-        conditions.append("s.LOGIN LIKE 'SUB-%'")  # LOGIN должен начинаться с SUB-
-        
-        # Исключаем сервисы, которые есть в расходах за последний месяц
-        if last_month:
-            conditions.append(f"""
-                NOT EXISTS (
-                    SELECT 1 
-                    FROM SPNET_TRAFFIC st 
-                    WHERE (st.IMEI = s.VSAT OR st.CONTRACT_ID = s.LOGIN)
-                      AND st.BILL_MONTH = {last_month}
-                )
-            """)
-        
-        # Фильтры от пользователя
-        if contract_id_filter and contract_id_filter.strip():
-            val = contract_id_filter.strip().replace("'", "''")
-            conditions.append(f"s.LOGIN LIKE '%{val}%'")
-        
-        if imei_filter and imei_filter.strip():
-            val = imei_filter.strip().replace("'", "''")
-            conditions.append(f"s.VSAT = '{val}'")
-        
-        if customer_name_filter and customer_name_filter.strip():
-            val = customer_name_filter.strip().replace("'", "''")
-            conditions.append(f"""
-                EXISTS (
-                    SELECT 1 
-                    FROM V_IRIDIUM_SERVICES_INFO v 
-                    WHERE v.SERVICE_ID = s.SERVICE_ID 
-                      AND UPPER(COALESCE(v.CUSTOMER_NAME, '')) LIKE UPPER('%{val}%')
-                )
-            """)
-        
-        if code_1c_filter and code_1c_filter.strip():
-            val = code_1c_filter.strip().replace("'", "''")
-            conditions.append(f"""
-                EXISTS (
-                    SELECT 1 
-                    FROM V_IRIDIUM_SERVICES_INFO v 
-                    WHERE v.SERVICE_ID = s.SERVICE_ID 
-                      AND v.CODE_1C LIKE '%{val}%'
-                )
-            """)
-        
-        where_clause = " AND ".join(conditions)
-        
-        # Основной запрос
-        query = f"""
-            SELECT 
-                v.IMEI,
-                v.SERVICE_ID,
-                v.CUSTOMER_NAME,
-                v.AGREEMENT_NUMBER,
-                v.CONTRACT_ID AS SUB_IRIDIUM,
-                v.CODE_1C,
-                v.START_DATE AS OPEN_DATE
-            FROM SERVICES s
-            JOIN V_IRIDIUM_SERVICES_INFO v ON s.SERVICE_ID = v.SERVICE_ID
-            WHERE {where_clause}
-            ORDER BY v.CUSTOMER_NAME, v.IMEI, v.START_DATE
-        """
-        
-        df = pd.read_sql_query(query, conn)
-        cursor.close()
-        
-        return df
-        
+        return pd.read_sql_query(query, conn)
     except Exception as e:
-        import traceback
-        print(f"Error in get_lbs_services_report: {e}")
-        print(traceback.format_exc())
+        st.error(f"Ошибка получения отчета LBS: {e}")
         return None
     finally:
         if conn:
