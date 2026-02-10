@@ -17,7 +17,6 @@ project_root = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(project_root))
 
 from kb_billing.rag.rag_assistant import RAGAssistant
-from kb_billing.rag.voice_transcription import transcribe_audio, validate_audio_file
 import pandas as pd
 import re
 import cx_Oracle
@@ -54,10 +53,11 @@ def show_assistant_tab():
     Ассистент поможет вам:
     - 📊 Генерировать SQL запросы для аналитических отчетов
     - 🔍 Искать информацию по SBD услугам
-    - 🎤 Задавать вопросы голосом
     """)
     
-    # Инициализация session_state (ДО всего остального, чтобы переключатель всегда был виден)
+    st.markdown("---")
+    
+    # Инициализация session_state
     if "assistant_question" not in st.session_state:
         st.session_state.assistant_question = ""
     if "assistant_action" not in st.session_state:
@@ -66,37 +66,46 @@ def show_assistant_tab():
         st.session_state.last_generated_question = ""
     if "last_generated_sql" not in st.session_state:
         st.session_state.last_generated_sql = None
-    if "input_mode" not in st.session_state:
-        st.session_state.input_mode = "text"  # "text" или "voice"
-    if "transcription_text" not in st.session_state:
-        st.session_state.transcription_text = ""
-    if "transcribe_clicked" not in st.session_state:
-        st.session_state.transcribe_clicked = False
     
-    st.markdown("---")
+    st.subheader("💬 Ваш вопрос")
     
-    # Переключатель режима ввода - ОЧЕНЬ ЗАМЕТНЫЙ, сразу после заголовка
-    st.markdown("#### 💬 Режим ввода вопроса")
+    # Поле ввода вопроса (без формы, чтобы не отправлялось при Enter)
+    question_input = st.text_area(
+        "Введите ваш вопрос на русском языке:",
+        height=150,
+        placeholder="Например: Покажи превышение трафика за октябрь 2025",
+        value=st.session_state.get("assistant_question", ""),
+        key="assistant_question_input"
+    )
     
-    # Используем колонки для лучшей видимости
-    col_mode1, col_mode2 = st.columns([1, 2])
+    # Сохраняем введенный текст в session_state
+    if question_input:
+        st.session_state.assistant_question = question_input
     
-    with col_mode1:
-        input_mode = st.radio(
-            "",
-            ["text", "voice"],
-            format_func=lambda x: "📝 Текст" if x == "text" else "🎤 Голос",
-            key="input_mode_radio",
-            horizontal=True,
-            index=0 if st.session_state.get("input_mode", "text") == "text" else 1
-        )
-        st.session_state.input_mode = input_mode
+    # Кнопка генерации SQL (отдельно от формы)
+    col1, col2 = st.columns([3, 1])
+    with col1:
+        st.write("")  # Пустое место для выравнивания
+    with col2:
+        generate_button = st.button("📊 Сгенерировать SQL", type="primary", use_container_width=True, key="generate_sql_button")
     
-    with col_mode2:
-        if input_mode == "voice":
-            st.success("🎤 **Голосовой режим активен** - используйте микрофон для записи вопроса")
+    # Обработка нажатия кнопки
+    if generate_button:
+        question_clean = question_input.strip() if question_input else ""
+        # Проверка минимальной длины вопроса
+        if len(question_clean) < 10:
+            st.warning("⚠️ Вопрос слишком короткий. Введите более подробный вопрос (минимум 10 символов).")
+            st.session_state.assistant_action = None
         else:
-            st.info("📝 **Текстовый режим** - введите вопрос вручную")
+            st.session_state.assistant_action = "generate"
+            st.session_state.assistant_question = question_clean
+            # Очищаем предыдущие результаты при новой генерации
+            st.session_state.last_generated_question = ""
+            st.session_state.last_generated_sql = None
+            st.rerun()
+    
+    # Используем сохраненное значение вопроса
+    question = st.session_state.assistant_question
     
     st.markdown("---")
     
@@ -105,71 +114,68 @@ def show_assistant_tab():
     if not assistant:
         st.error("⚠️ Ассистент не инициализирован. Проверьте подключение к Qdrant.")
         st.info("💡 Убедитесь, что Qdrant запущен: `docker run -p 6333:6333 qdrant/qdrant`")
-        # Показываем форму даже если ассистент не инициализирован, чтобы пользователь мог попробовать
-        assistant = None
+        return
     
-    # Используем значение из session_state для надежности
-    current_mode = st.session_state.get("input_mode", "text")
-    
-    # ========== ГОЛОСОВОЙ РЕЖИМ - МИКРОФОН ВНЕ ФОРМЫ ==========
-    if current_mode == "voice":
+    # Генерация SQL
+    # Дополнительная проверка длины вопроса перед генерацией
+    if st.session_state.assistant_action == "generate" and question and len(question.strip()) >= 10:
         st.markdown("**🎤 Запишите голос или загрузите аудиофайл:**")
         
         # Инициализируем переменные
         audio_data = None
         uploaded_file = None
         
-        # Проверяем наличие библиотеки заранее
+        # Проверяем версию Streamlit для использования st.audio_input
         try:
-            from streamlit_audio_recorder import audio_recorder
-            audio_recorder_available = True
-        except ImportError:
-            audio_recorder_available = False
-            st.warning("⚠️ **Библиотека для записи голоса не установлена**")
-            st.info("💡 Для записи голоса установите на сервере: `pip install streamlit-audio-recorder`")
+            import streamlit as st_module
+            streamlit_version = st_module.__version__
+            version_parts = [int(x) for x in streamlit_version.split('.')[:2]]
+            has_audio_input = version_parts >= [1, 52]  # st.audio_input доступен с версии 1.52.0
+        except:
+            has_audio_input = False
+            streamlit_version = "неизвестна"
         
         # Отображаем микрофон и загрузку файла
         col1, col2 = st.columns([1, 1])
         
         with col1:
             st.markdown("**🎤 Запись голоса:**")
-            if audio_recorder_available:
-                st.caption("Нажмите кнопку микрофона для начала записи")
+            
+            if has_audio_input:
+                st.caption("Используйте встроенный микрофон Streamlit для записи голоса")
                 
-                # Индикатор состояния записи
-                recording_status = st.empty()
-                
+                # Используем встроенный st.audio_input (Streamlit 1.52.0+)
+                # sample_rate=16000 оптимален для распознавания речи
                 try:
-                    audio_bytes = audio_recorder(
-                        text="🎤 Нажмите для записи",
-                        recording_text="🔴 Идет запись... (остановится автоматически через 2 сек тишины)",
-                        neutral_color="#6c757d",
-                        recording_color="#e74c3c",
-                        icon_name="microphone",
-                        icon_size="2x",
-                        pause_threshold=2.0,
-                        sample_rate=44100
+                    audio_input = st.audio_input(
+                        "🎤 Записать голос",
+                        sample_rate=16000,
+                        key="voice_audio_input",
+                        help="Нажмите кнопку микрофона для начала записи. Запись остановится автоматически или при повторном нажатии."
                     )
                     
-                    # Определяем состояние записи по наличию аудио
-                    if audio_bytes:
-                        recording_status.success("✅ Запись завершена!")
-                        st.audio(audio_bytes, format="audio/wav")
-                        audio_data = audio_bytes
-                    else:
-                        recording_status.info("💡 Нажмите кнопку микрофона выше для начала записи")
-                except Exception as e:
-                    st.error(f"❌ Ошибка при записи: {str(e)}")
-                    recording_status.error("❌ Ошибка при записи голоса")
+                    # Обрабатываем записанное аудио
+                    if audio_input is not None:
+                        st.success("✅ Запись получена! Аудио готово к транскрибации.")
+                        st.audio(audio_input, format="audio/wav")
+                        # Сохраняем в session_state
+                        st.session_state.recorded_audio_bytes = audio_input.read()
+                        audio_data = st.session_state.recorded_audio_bytes
+                except AttributeError:
+                    # Если st.audio_input не доступен (старая версия)
+                    has_audio_input = False
+                    st.warning("⚠️ `st.audio_input` недоступен. Используйте загрузку файла.")
             else:
-                st.info("💡 Установите библиотеку для записи голоса")
+                st.info(f"💡 Для записи голоса напрямую обновите Streamlit до версии 1.52.0+ (требует Python 3.10+).")
+                st.caption(f"Текущая версия: {streamlit_version}")
+                st.caption("Пока используйте загрузку файла справа →")
                     
         with col2:
-            st.markdown("**📁 Или загрузите файл:**")
+            st.markdown("**📁 Загрузка аудиофайла:**")
             uploaded_file = st.file_uploader(
                 "Загрузить аудиофайл",
                 type=["wav", "mp3", "m4a", "webm", "ogg"],
-                help="Поддерживаемые форматы: WAV, MP3, M4A, WebM, OGG (максимум 25 МБ)",
+                help="Поддерживаемые форматы: WAV, MP3, M4A, WebM, OGG (максимум 25 МБ). Вы можете записать голос в любом приложении и загрузить файл.",
                 key="audio_upload_voice",
                 label_visibility="visible"
             )
@@ -179,11 +185,15 @@ def show_assistant_tab():
                 if audio_data is None:
                     audio_data = uploaded_file.read()
             elif audio_data is None:
-                st.info("💡 Или загрузите аудиофайл с компьютера")
+                st.info("💡 Запишите голос в любом приложении (диктофон, онлайн-запись) и загрузите файл")
         
         # Финальная проверка: используем запись, если есть, иначе загруженный файл
         if audio_data is None and uploaded_file is not None:
             audio_data = uploaded_file.read()
+        
+        # Используем сохраненную запись из session_state, если есть
+        if audio_data is None and st.session_state.get("recorded_audio_bytes") is not None:
+            audio_data = st.session_state.recorded_audio_bytes
         
         # Сохраняем аудио в session_state
         if audio_data:

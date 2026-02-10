@@ -200,9 +200,9 @@ def show_tab(get_connection, get_analytics_invoice_period_report, get_analytics_
     # ========== SUB TAB: ПРОВЕРКА ДУБЛИКАТОВ ==========
     with sub_tab_duplicates:
         st.header("🔍 Проверка дубликатов в ANALYTICS")
-        st.markdown("Поиск записей, где **ВСЕ поля совпадают**, кроме AID (первичного ключа).")
+        st.markdown("Поиск записей, где **все ключевые поля совпадают**, кроме AID (первичного ключа).")
         st.info("💡 Дубликаты могут возникать при повторной загрузке данных или ошибках в процессе формирования ANALYTICS.")
-        st.warning("⚠️ **Важно**: Дубликаты определяются по ВСЕМ полям таблицы ANALYTICS (включая ZONE_ID, TARIFFEL_ID и др.). Если записи различаются хотя бы одним полем, они НЕ считаются дубликатами.")
+        st.warning("⚠️ **Важно**: Дубликаты определяются по всем бизнес-полям таблицы ANALYTICS (включая ZONE_ID, TARIFFEL_ID, COUNTER_CF и др.). Если записи различаются хотя бы одним полем, они НЕ считаются дубликатами.")
         
         conn = get_connection()
         if conn:
@@ -251,18 +251,6 @@ def show_tab(get_connection, get_analytics_invoice_period_report, get_analytics_
                                     duplicates_df = get_analytics_duplicates(get_connection, period_id)
                                     
                                     if duplicates_df is not None and not duplicates_df.empty:
-                                        # Отладочная информация
-                                        st.write(f"🔍 DEBUG v2.1: Получено {len(duplicates_df)} строк, {len(duplicates_df.columns)} колонок")
-                                        st.write(f"🔍 DEBUG v2.1: Ожидается 35 колонок")
-                                        st.write(f"🔍 DEBUG v2.1: Первые 15 колонок: {', '.join(duplicates_df.columns.tolist()[:15])}")
-                                        
-                                        if len(duplicates_df.columns) != 35:
-                                            st.error(f"⚠️ ПРОБЛЕМА: Возвращается {len(duplicates_df.columns)} колонок вместо 35!")
-                                            st.write(f"🔍 Все колонки: {', '.join(duplicates_df.columns.tolist())}")
-                                            st.write(f"🔍 Проверьте логи Streamlit: tail -f /usr/local/projects/ai_report/streamlit_8504.log")
-                                        else:
-                                            st.success(f"✅ Правильное количество колонок: {len(duplicates_df.columns)}")
-                                        
                                         st.session_state.duplicates_found = True
                                         st.session_state.duplicates_df = duplicates_df
                                         st.session_state.duplicates_period_id = period_id
@@ -322,11 +310,8 @@ def show_tab(get_connection, get_analytics_invoice_period_report, get_analytics_
                                 # Дополнительная информация для отладки
                                 with st.expander("🔍 Отладочная информация"):
                                     st.write(f"**Количество колонок в DataFrame:** {len(display_df.columns)}")
-                                    st.write(f"**Ожидаемое количество:** 35 (DUPLICATE_COUNT + AID_LIST + 33 поля)")
                                     st.write(f"**Первые 10 колонок:** {', '.join(display_df.columns.tolist()[:10])}")
-                                    if len(display_df.columns) < 35:
-                                        st.warning("⚠️ ВНИМАНИЕ: Возвращается меньше колонок, чем ожидается! Возможно, используется старая версия функции.")
-                                
+                                    
                                 # Показываем список всех колонок
                                 with st.expander("📋 Список всех полей в отчете"):
                                     cols_list = duplicates_df.columns.tolist()

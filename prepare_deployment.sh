@@ -23,6 +23,7 @@ mkdir -p "$DEPLOY_DIR/oracle/views"
 mkdir -p "$DEPLOY_DIR/oracle/functions"
 mkdir -p "$DEPLOY_DIR/oracle/data"
 mkdir -p "$DEPLOY_DIR/python"
+mkdir -p "$DEPLOY_DIR/tabs"
 mkdir -p "$DEPLOY_DIR/kb_billing/tables"
 mkdir -p "$DEPLOY_DIR/kb_billing/views"
 mkdir -p "$DEPLOY_DIR/kb_billing/training_data"
@@ -47,8 +48,15 @@ cp streamlit_report_oracle_backup.py "$DEPLOY_DIR/"
 cp streamlit_data_loader.py "$DEPLOY_DIR/"
 cp db_connection.py "$DEPLOY_DIR/"
 cp auth_db.py "$DEPLOY_DIR/"
+cp auth_db_v2.py "$DEPLOY_DIR/" 2>/dev/null || true
+cp queries.py "$DEPLOY_DIR/"
 cp create_user.py "$DEPLOY_DIR/"
+cp create_user_v2.py "$DEPLOY_DIR/" 2>/dev/null || true
 cp python/*.py "$DEPLOY_DIR/python/" 2>/dev/null || true
+
+# 2.1. Закладки (tabs)
+echo "  → Закладки (tabs)..."
+cp tabs/*.py "$DEPLOY_DIR/tabs/" 2>/dev/null || true
 
 # 3. Конфигурация
 echo "  → Конфигурация..."

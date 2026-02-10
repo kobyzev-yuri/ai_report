@@ -254,27 +254,77 @@ def get_revenue_report(get_connection, period_filter=None, contract_id_filter=No
         if conn: conn.close()
 
 def get_analytics_duplicates(get_connection, period_id):
-    """Поиск дубликатов в ANALYTICS"""
-    conn = get_connection()
-    if not conn: return None
-    
-    query = f"""
-    SELECT 
-        COUNT(*) AS DUPLICATE_COUNT,
-        LISTAGG(AID, ', ') WITHIN GROUP (ORDER BY AID) AS AID_LIST,
-        PERIOD_ID, SERVICE_ID, CUSTOMER_ID, VSAT, MONEY, PRICE, TRAF
-    FROM ANALYTICS
-    WHERE PERIOD_ID = {period_id}
-    GROUP BY PERIOD_ID, SERVICE_ID, CUSTOMER_ID, VSAT, MONEY, PRICE, TRAF
-    HAVING COUNT(*) > 1
-    ORDER BY DUPLICATE_COUNT DESC
     """
+    Поиск дубликатов в ANALYTICS.
+    
+    ВАЖНО: дубликаты определяются по **всем полям (ключевой состав как в remove_analytics_duplicates), кроме AID**.
+    Здесь используется тот же набор полей в PARTITION BY, что и в remove_analytics_duplicates.
+    """
+    conn = get_connection()
+    if not conn:
+        return None
+
+    query = """
+    SELECT
+        a.*,
+        COUNT(*) OVER (
+            PARTITION BY
+                a.PERIOD_ID,
+                a.DOMAIN_ID,
+                a.GROUP_ID,
+                a.CUSTOMER_ID,
+                a.ACCOUNT_ID,
+                a.TYPE_ID,
+                a.SERVICE_ID,
+                a.ZONE_ID,
+                a.PRICE,
+                a.TRAF,
+                a.MONEY,
+                a.VSAT,
+                a.BLANK,
+                a.COUNTER_CF,
+                a.TARIFF_ID,
+                a.TARIFFEL_ID,
+                a.THRESHOLD,
+                a.CLASS_ID,
+                a.CLASS_NAME,
+                a.CBYTE,
+                a.FLAG,
+                a.COUNTER_ID,
+                a.RESOURCE_TYPE_ID,
+                a.SUB_TYPE_ID,
+                a.SUB_PERIOD_ID,
+                a.INVOICE_ITEM_ID,
+                a.CARD_ID,
+                a.SERIAL_ID,
+                a.SUBSCRIPTION_ID,
+                a.TOTAL_TRAF,
+                a.PMONEY,
+                a.IRIFILENUM,
+                a.PARTNER_PERCENT
+        ) AS DUPLICATE_COUNT
+    FROM ANALYTICS a
+    WHERE a.PERIOD_ID = :period_id
+    """
+
+    outer_query = """
+    SELECT *
+    FROM (
+        {inner_sql}
+    )
+    WHERE DUPLICATE_COUNT > 1
+    ORDER BY DUPLICATE_COUNT DESC, AID DESC
+    """.format(inner_sql=query)
+
     try:
-        return pd.read_sql_query(query, conn)
-    except:
+        # Возвращаем все строки-дубликаты с полями ANALYTICS и колонкой DUPLICATE_COUNT
+        return pd.read_sql_query(outer_query, conn, params={"period_id": period_id})
+    except Exception as e:
+        st.error(f"Ошибка при поиске дубликатов ANALYTICS: {e}")
         return None
     finally:
-        if conn: conn.close()
+        if conn:
+            conn.close()
 
 def remove_analytics_duplicates(get_connection, period_id):
     """
@@ -309,7 +359,6 @@ def remove_analytics_duplicates(get_connection, period_id):
                             MONEY,
                             VSAT,
                             BLANK,
-                            COUNTER_CF,
                             TARIFF_ID,
                             TARIFFEL_ID,
                             THRESHOLD,
