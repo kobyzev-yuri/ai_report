@@ -278,7 +278,20 @@ def _send_email_campaign(
                     attachment_filename = None
         
         # Формируем тело письма с приветствием (простой текст)
+        # Убираем возможное дублирование текста (если текст повторяется дважды подряд)
         email_body_text = greeting or 'Здравствуйте!'
+        
+        # Проверяем и убираем дублирование текста
+        # Если текст повторяется дважды (например, из-за ошибки при сохранении)
+        text_length = len(email_body_text)
+        if text_length > 0:
+            half_length = text_length // 2
+            first_half = email_body_text[:half_length]
+            second_half = email_body_text[half_length:]
+            # Если вторая половина точно совпадает с первой, убираем дублирование
+            if first_half == second_half:
+                email_body_text = first_half
+                logging.warning(f"Обнаружено дублирование текста в greeting, исправлено")
         
         # HTML версия для совместимости
         # Конвертируем переносы строк в HTML <br>, экранируем HTML символы
