@@ -328,6 +328,25 @@ def _send_email_campaign(
             text_length = len(email_body_text)
             if text_length > 20:  # Минимальная длина для проверки
                 # Метод 1: Проверяем точное дублирование (текст повторяется дважды)
+                # Ищем точку, где текст начинает повторяться
+                # Берем первые 200 символов и ищем их повторение в тексте
+                if text_length > 400:
+                    # Ищем повторение первых 200 символов
+                    first_200 = email_body_text[:200].strip()
+                    # Ищем повторение, начиная с позиции 100 (чтобы не найти само начало)
+                    repeat_pos = email_body_text.find(first_200, 100)
+                    if repeat_pos > 0 and repeat_pos < text_length * 0.7:
+                        # Проверяем, совпадает ли текст от начала до repeat_pos с текстом от repeat_pos до конца
+                        first_part = email_body_text[:repeat_pos].strip()
+                        second_part = email_body_text[repeat_pos:].strip()
+                        # Сравниваем первые части (учитываем возможные различия в начале второго раза)
+                        if len(second_part) >= len(first_part) * 0.9:  # Вторая часть должна быть примерно такой же длины
+                            # Сравниваем основную часть (пропускаем первые 50 символов на случай различий)
+                            if first_part[50:] == second_part[50:len(first_part)-50+50] or first_part == second_part[:len(first_part)]:
+                                email_body_text = first_part
+                                logging.warning(f"Обнаружено дублирование текста (позиция повтора: {repeat_pos}, было {text_length} -> стало {len(first_part)}), исправлено")
+                
+                # Метод 2: Проверяем точное дублирование пополам
                 half_length = text_length // 2
                 first_half = email_body_text[:half_length].strip()
                 second_half = email_body_text[half_length:].strip()
@@ -335,27 +354,24 @@ def _send_email_campaign(
                 # Если вторая половина точно совпадает с первой, убираем дублирование
                 if first_half == second_half and len(first_half) > 10:
                     email_body_text = first_half
-                    logging.warning(f"Обнаружено точное дублирование текста в greeting (длина: {text_length} -> {len(first_half)}), исправлено")
-                else:
-                    # Метод 2: Проверяем дублирование по первым словам/предложениям
-                    # Ищем повторение первых 100 символов в тексте
-                    if text_length > 200:
-                        first_100 = email_body_text[:100].strip()
-                        # Ищем, где начинается повторение
-                        repeat_pos = email_body_text.find(first_100, 50)  # Ищем начиная с позиции 50
-                        if repeat_pos > 50 and repeat_pos < text_length * 0.6:  # Повторение найдено в первой половине текста
-                            # Проверяем, совпадает ли текст от начала до repeat_pos с текстом от repeat_pos
-                            first_part = email_body_text[:repeat_pos].strip()
-                            second_part = email_body_text[repeat_pos:].strip()
-                            if first_part == second_part[:len(first_part)]:
-                                email_body_text = first_part
-                                logging.warning(f"Обнаружено дублирование по началу текста (позиция: {repeat_pos}), исправлено")
+                    logging.warning(f"Обнаружено точное дублирование текста пополам (длина: {text_length} -> {len(first_half)}), исправлено")
+                elif len(second_half) > len(first_half) * 0.9:
+                    # Проверяем, не начинается ли вторая половина с того же текста (с небольшими различиями)
+                    # Сравниваем первые 100 символов
+                    if len(first_half) > 100 and len(second_half) > 100:
+                        first_100 = first_half[:100]
+                        second_100 = second_half[:100]
+                        # Если первые 100 символов совпадают на 90% или больше
+                        matches = sum(1 for a, b in zip(first_100, second_100) if a == b)
+                        if matches > 90:
+                            # Проверяем полное совпадение основной части
+                            if first_half == second_half[:len(first_half)]:
+                                email_body_text = first_half
+                                logging.warning(f"Обнаружено дублирование с небольшими различиями (длина: {text_length} -> {len(first_half)}), исправлено")
                     
-                    # Метод 3: Проверяем частичное дублирование - ищем повторяющиеся фрагменты
-                    # Разбиваем текст на предложения и проверяем, не повторяются ли они
+                    # Метод 3: Проверяем дублирование по предложениям
                     sentences = email_body_text.split('\n\n')
                     if len(sentences) >= 4:
-                        # Проверяем, не повторяются ли первые предложения в конце
                         mid_point = len(sentences) // 2
                         first_part = '\n\n'.join(sentences[:mid_point]).strip()
                         second_part = '\n\n'.join(sentences[mid_point:]).strip()
@@ -391,16 +407,8 @@ def _send_email_campaign(
         failed_count = 0
         error_messages = []
         
-        # Подготавливаем список вложений
-        attachments = []
-        if attachment_content and attachment_filename:
-            # Сохраняем временный файл для использования в send_email_safely
-            import tempfile
-            import os
-            temp_file = tempfile.NamedTemporaryFile(delete=False, suffix='.pdf')
-            temp_file.write(attachment_content)
-            temp_file.close()
-            attachments.append(temp_file.name)
+        # Вложения не используются в текущей реализации - отправляем напрямую через SMTP
+        # Убрано создание временных файлов для избежания проблем с Untitled.bin
         
         # Отправляем письма с задержками для избежания блокировки как спам
         # Используем старую логику с добавленными задержками (работает без пароля)
@@ -518,13 +526,7 @@ def _send_email_campaign(
             
             server.quit()
             
-            # Удаляем временный файл вложений, если был создан
-            if attachments:
-                try:
-                    import os
-                    os.unlink(attachments[0])
-                except:
-                    pass
+            # Временные файлы больше не создаются - вложения отправляются напрямую
         except Exception as e:
             return 0, len(email_list), f"Ошибка SMTP подключения: {e}"
         
