@@ -627,6 +627,17 @@ def show_tab():
                 help="Текст письма (может быть извлечен из DOCX файла автоматически)",
                 key="greeting_input"
             )
+            
+            # Проверяем дублирование текста в интерфейсе
+            if greeting and len(greeting) > 20:
+                greeting_stripped = greeting.strip()
+                text_length = len(greeting_stripped)
+                half_length = text_length // 2
+                first_half = greeting_stripped[:half_length].strip()
+                second_half = greeting_stripped[half_length:].strip()
+                if first_half == second_half and len(first_half) > 10:
+                    st.warning("⚠️ **Обнаружено дублирование текста!** Текст повторяется дважды. Дублирование будет автоматически удалено при отправке.")
+                    st.info(f"Первая часть текста (будет использована):\n\n{first_half[:200]}...")
         
         with col2:
             from_email = st.text_input(
