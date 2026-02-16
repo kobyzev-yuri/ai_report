@@ -272,22 +272,46 @@ def _send_email_campaign(
         # Читаем BLOB вложения (PDF) из Oracle, если есть
         attachment_content = None
         attachment_filename = None
-        if docx_content:
-            # Читаем BLOB из Oracle
-            if hasattr(docx_content, 'read'):
-                attachment_bytes = docx_content.read()
-            else:
-                attachment_bytes = docx_content
-            
-            # Определяем тип файла по расширению
-            if docx_filename:
-                if docx_filename.lower().endswith('.pdf'):
-                    attachment_content = attachment_bytes
-                    attachment_filename = docx_filename
-                elif docx_filename.lower().endswith('.docx'):
+        
+        # ВАЖНО: В БД PDF сохраняется в поле DOCX_CONTENT, а имя в DOCX_FILENAME
+        if docx_content and docx_filename:
+            try:
+                # Читаем BLOB из Oracle
+                if hasattr(docx_content, 'read'):
+                    attachment_bytes = docx_content.read()
+                else:
+                    attachment_bytes = bytes(docx_content) if not isinstance(docx_content, bytes) else docx_content
+                
+                # Определяем тип файла по расширению имени файла
+                filename_lower = docx_filename.lower()
+                if filename_lower.endswith('.pdf'):
+                    # Проверяем сигнатуру PDF
+                    if len(attachment_bytes) >= 4 and attachment_bytes[:4] == b'%PDF':
+                        attachment_content = attachment_bytes
+                        attachment_filename = docx_filename
+                        logging.info(f"Загружен PDF файл из БД: {attachment_filename}, размер: {len(attachment_bytes)} байт")
+                    else:
+                        logging.warning(f"Файл {docx_filename} имеет расширение .pdf, но не является PDF (сигнатура: {attachment_bytes[:4]})")
+                        attachment_content = None
+                        attachment_filename = None
+                elif filename_lower.endswith('.docx'):
                     # DOCX используется только для извлечения текста, не как вложение
                     attachment_content = None
                     attachment_filename = None
+                else:
+                    # Если расширение неизвестно, проверяем по сигнатуре файла
+                    if len(attachment_bytes) >= 4 and attachment_bytes[:4] == b'%PDF':
+                        # Это PDF файл по сигнатуре
+                        attachment_content = attachment_bytes
+                        attachment_filename = docx_filename if docx_filename.endswith('.pdf') else docx_filename + '.pdf'
+                        logging.info(f"Определен PDF файл по сигнатуре: {attachment_filename}")
+                    else:
+                        attachment_content = None
+                        attachment_filename = None
+            except Exception as e:
+                logging.error(f"Ошибка при чтении вложения из БД: {e}")
+                attachment_content = None
+                attachment_filename = None
         
         # Формируем тело письма с приветствием (простой текст)
         email_body_text = greeting or 'Здравствуйте!'
@@ -433,38 +457,48 @@ def _send_email_campaign(
                     msg.attach(html_part)
                     
                     # Добавляем вложение (PDF)
-                    attachment_part = MIMEBase('application', 'octet-stream')
-                    attachment_part.set_payload(attachment_content)
-                    encoders.encode_base64(attachment_part)
-                    
-                    # Правильное формирование имени файла для вложения
-                    # Используем RFC 2231 для поддержки кириллицы в именах файлов
-                    from email.header import Header
-                    from email.utils import encode_rfc2231
-                    
-                    # Кодируем имя файла для поддержки кириллицы
-                    if attachment_filename:
-                        # Проверяем, есть ли кириллица в имени файла
-                        try:
-                            attachment_filename.encode('ascii')
-                            # Нет кириллицы, используем простое имя
-                            filename_header = attachment_filename
-                        except UnicodeEncodeError:
-                            # Есть кириллица, используем RFC 2231 кодирование
-                            filename_header = encode_rfc2231(attachment_filename, 'utf-8')
+                    if attachment_content and len(attachment_content) > 0:
+                        # Проверяем, что это действительно PDF (по сигнатуре)
+                        if attachment_content[:4] != b'%PDF':
+                            logging.warning(f"Вложение не является PDF файлом (сигнатура: {attachment_content[:4]})")
+                        
+                        attachment_part = MIMEBase('application', 'pdf')
+                        attachment_part.set_payload(attachment_content)
+                        encoders.encode_base64(attachment_part)
+                        
+                        # Правильное формирование имени файла для вложения
+                        from email.header import Header
+                        from email.utils import encode_rfc2231
+                        
+                        # Кодируем имя файла для поддержки кириллицы
+                        if attachment_filename:
+                            # Убираем путь, оставляем только имя файла
+                            safe_filename = attachment_filename.split('/')[-1].split('\\')[-1]
+                            
+                            # Проверяем, есть ли кириллица в имени файла
+                            try:
+                                safe_filename.encode('ascii')
+                                # Нет кириллицы, используем простое имя
+                                filename_header = safe_filename
+                            except UnicodeEncodeError:
+                                # Есть кириллица, используем RFC 2231 кодирование
+                                filename_header = encode_rfc2231(safe_filename, 'utf-8')
                         else:
-                            filename_header = attachment_filename
+                            filename_header = "attachment.pdf"
+                        
+                        # Устанавливаем заголовки правильно
+                        attachment_part.add_header(
+                            'Content-Disposition',
+                            'attachment',
+                            filename=filename_header
+                        )
+                        attachment_part.add_header('Content-Type', 'application/pdf')
+                        attachment_part.add_header('Content-Transfer-Encoding', 'base64')
+                        
+                        msg.attach(attachment_part)
+                        logging.info(f"Добавлено вложение PDF: {filename_header}, размер: {len(attachment_content)} байт")
                     else:
-                        filename_header = "attachment.pdf"
-                    
-                    attachment_part.add_header(
-                        'Content-Disposition',
-                        'attachment',
-                        filename=filename_header
-                    )
-                    # Также добавляем Content-Type для PDF
-                    attachment_part.add_header('Content-Type', 'application/pdf')
-                    msg.attach(attachment_part)
+                        logging.warning("Вложение PDF пустое или отсутствует")
                     
                     # Отправляем
                     server.sendmail(from_email, [email], msg.as_string())
@@ -926,14 +960,37 @@ def show_tab():
                     
                     # Автоматически извлекаем subject и greeting при загрузке нового файла
                     if uploaded_docx_file and not use_default_files:
-                        docx_bytes = uploaded_docx_file.getvalue() if hasattr(uploaded_docx_file, "getvalue") else uploaded_docx_file.read()
-                        extracted_subject, extracted_greeting = _extract_subject_and_greeting_from_docx(docx_bytes)
-                        if extracted_subject:
-                            st.session_state['auto_subject'] = extracted_subject
-                            st.info(f"📝 Извлечена тема: {extracted_subject[:50]}...")
-                        if extracted_greeting:
-                            st.session_state['auto_greeting'] = extracted_greeting
-                            st.info(f"📝 Извлечен текст письма ({len(extracted_greeting)} символов)")
+                        try:
+                            docx_bytes = uploaded_docx_file.getvalue() if hasattr(uploaded_docx_file, "getvalue") else uploaded_docx_file.read()
+                            extracted_subject, extracted_greeting = _extract_subject_and_greeting_from_docx(docx_bytes)
+                            if extracted_subject:
+                                st.session_state['auto_subject'] = extracted_subject
+                                st.session_state['subject_set'] = False  # Разрешаем обновление
+                                st.info(f"📝 Извлечена тема: {extracted_subject[:50]}...")
+                            if extracted_greeting:
+                                # Проверяем на дублирование перед сохранением
+                                greeting_clean = extracted_greeting.strip()
+                                original_len = len(greeting_clean)
+                                
+                                if len(greeting_clean) > 20:
+                                    # Проверка точного дублирования
+                                    half_len = len(greeting_clean) // 2
+                                    first_half = greeting_clean[:half_len].strip()
+                                    second_half = greeting_clean[half_len:].strip()
+                                    if first_half == second_half and len(first_half) > 10:
+                                        greeting_clean = first_half
+                                        st.warning(f"⚠️ Обнаружено дублирование в тексте из DOCX (было {original_len} символов, стало {len(greeting_clean)}), исправлено автоматически")
+                                
+                                st.session_state['auto_greeting'] = greeting_clean
+                                st.session_state['greeting_set'] = False  # Разрешаем обновление
+                                st.info(f"📝 Извлечен текст письма ({len(greeting_clean)} символов)")
+                                
+                                # Обновляем страницу для применения изменений в полях
+                                if 'docx_extracted_once' not in st.session_state:
+                                    st.session_state['docx_extracted_once'] = True
+                                    st.rerun()
+                        except Exception as e:
+                            st.error(f"❌ Ошибка при извлечении текста из DOCX: {e}")
                 except Exception as e:
                     st.warning(f"⚠️ Не удалось определить размер файла: {e}")
         
