@@ -519,9 +519,14 @@ def _send_email_campaign(
                         from email.utils import encode_rfc2231
                         
                         # Кодируем имя файла для поддержки кириллицы
-                        if attachment_filename:
+                        if attachment_filename and attachment_filename != "Untitled.bin" and attachment_filename != "attachment.pdf":
                             # Убираем путь, оставляем только имя файла
                             safe_filename = attachment_filename.split('/')[-1].split('\\')[-1]
+                            
+                            # Убираем расширение .bin если есть
+                            if safe_filename.lower().endswith('.bin'):
+                                # Пытаемся восстановить имя из оригинального файла или используем дефолтное
+                                safe_filename = "MVSAT_СТЭККОМ_26.pdf" if "MVSAT" in str(attachment_filename) else "attachment.pdf"
                             
                             # Проверяем, есть ли кириллица в имени файла
                             try:
@@ -532,7 +537,9 @@ def _send_email_campaign(
                                 # Есть кириллица, используем RFC 2231 кодирование
                                 filename_header = encode_rfc2231(safe_filename, 'utf-8')
                         else:
-                            filename_header = "attachment.pdf"
+                            # Если имя файла не указано или это Untitled.bin, используем дефолтное имя
+                            filename_header = "MVSAT_СТЭККОМ_26.pdf"  # Дефолтное имя для MVSAT рассылки
+                            logging.warning(f"Имя файла не указано или некорректно ({attachment_filename}), используется дефолтное: {filename_header}")
                         
                         # Устанавливаем заголовки правильно
                         attachment_part.add_header(
@@ -544,7 +551,7 @@ def _send_email_campaign(
                         attachment_part.add_header('Content-Transfer-Encoding', 'base64')
                         
                         msg.attach(attachment_part)
-                        logging.info(f"Добавлено вложение PDF: {filename_header}, размер: {len(attachment_content)} байт")
+                        logging.info(f"Добавлено вложение PDF: {filename_header}, размер: {len(attachment_content)} байт, оригинальное имя в БД: {attachment_filename}")
                     else:
                         logging.warning("Вложение PDF пустое или отсутствует")
                     
