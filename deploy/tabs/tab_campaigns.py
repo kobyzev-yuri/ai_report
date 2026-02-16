@@ -294,6 +294,8 @@ def _send_email_campaign(
         
         # Проверяем и убираем дублирование текста
         # Ищем повторяющиеся фрагменты текста
+        original_length = len(email_body_text) if email_body_text else 0
+        
         if email_body_text and len(email_body_text) > 10:
             # Убираем лишние пробелы и переносы строк в начале и конце
             email_body_text = email_body_text.strip()
@@ -301,7 +303,7 @@ def _send_email_campaign(
             # Проверяем, не повторяется ли текст дважды подряд
             text_length = len(email_body_text)
             if text_length > 20:  # Минимальная длина для проверки
-                # Проверяем точное дублирование (текст повторяется дважды)
+                # Метод 1: Проверяем точное дублирование (текст повторяется дважды)
                 half_length = text_length // 2
                 first_half = email_body_text[:half_length].strip()
                 second_half = email_body_text[half_length:].strip()
@@ -309,18 +311,37 @@ def _send_email_campaign(
                 # Если вторая половина точно совпадает с первой, убираем дублирование
                 if first_half == second_half and len(first_half) > 10:
                     email_body_text = first_half
-                    logging.warning(f"Обнаружено точное дублирование текста в greeting (длина: {text_length}), исправлено")
+                    logging.warning(f"Обнаружено точное дублирование текста в greeting (длина: {text_length} -> {len(first_half)}), исправлено")
                 else:
-                    # Проверяем частичное дублирование - ищем повторяющиеся фрагменты
+                    # Метод 2: Проверяем дублирование по первым словам/предложениям
+                    # Ищем повторение первых 100 символов в тексте
+                    if text_length > 200:
+                        first_100 = email_body_text[:100].strip()
+                        # Ищем, где начинается повторение
+                        repeat_pos = email_body_text.find(first_100, 50)  # Ищем начиная с позиции 50
+                        if repeat_pos > 50 and repeat_pos < text_length * 0.6:  # Повторение найдено в первой половине текста
+                            # Проверяем, совпадает ли текст от начала до repeat_pos с текстом от repeat_pos
+                            first_part = email_body_text[:repeat_pos].strip()
+                            second_part = email_body_text[repeat_pos:].strip()
+                            if first_part == second_part[:len(first_part)]:
+                                email_body_text = first_part
+                                logging.warning(f"Обнаружено дублирование по началу текста (позиция: {repeat_pos}), исправлено")
+                    
+                    # Метод 3: Проверяем частичное дублирование - ищем повторяющиеся фрагменты
                     # Разбиваем текст на предложения и проверяем, не повторяются ли они
                     sentences = email_body_text.split('\n\n')
                     if len(sentences) >= 4:
                         # Проверяем, не повторяются ли первые предложения в конце
-                        first_part = '\n\n'.join(sentences[:len(sentences)//2])
-                        second_part = '\n\n'.join(sentences[len(sentences)//2:])
-                        if first_part.strip() == second_part.strip() and len(first_part.strip()) > 20:
-                            email_body_text = first_part.strip()
+                        mid_point = len(sentences) // 2
+                        first_part = '\n\n'.join(sentences[:mid_point]).strip()
+                        second_part = '\n\n'.join(sentences[mid_point:]).strip()
+                        if first_part == second_part and len(first_part) > 20:
+                            email_body_text = first_part
                             logging.warning(f"Обнаружено дублирование по предложениям в greeting, исправлено")
+        
+        # Логируем, если текст был изменен
+        if original_length > 0 and len(email_body_text) < original_length * 0.6:
+            logging.info(f"Текст greeting был сокращен с {original_length} до {len(email_body_text)} символов (удалено дублирование)")
         
         # HTML версия для совместимости
         # Конвертируем переносы строк в HTML <br>, экранируем HTML символы
@@ -415,10 +436,34 @@ def _send_email_campaign(
                     attachment_part = MIMEBase('application', 'octet-stream')
                     attachment_part.set_payload(attachment_content)
                     encoders.encode_base64(attachment_part)
+                    
+                    # Правильное формирование имени файла для вложения
+                    # Используем RFC 2231 для поддержки кириллицы в именах файлов
+                    from email.header import Header
+                    from email.utils import encode_rfc2231
+                    
+                    # Кодируем имя файла для поддержки кириллицы
+                    if attachment_filename:
+                        # Проверяем, есть ли кириллица в имени файла
+                        try:
+                            attachment_filename.encode('ascii')
+                            # Нет кириллицы, используем простое имя
+                            filename_header = attachment_filename
+                        except UnicodeEncodeError:
+                            # Есть кириллица, используем RFC 2231 кодирование
+                            filename_header = encode_rfc2231(attachment_filename, 'utf-8')
+                        else:
+                            filename_header = attachment_filename
+                    else:
+                        filename_header = "attachment.pdf"
+                    
                     attachment_part.add_header(
                         'Content-Disposition',
-                        f'attachment; filename= {attachment_filename}'
+                        'attachment',
+                        filename=filename_header
                     )
+                    # Также добавляем Content-Type для PDF
+                    attachment_part.add_header('Content-Type', 'application/pdf')
                     msg.attach(attachment_part)
                     
                     # Отправляем
