@@ -337,39 +337,47 @@ def _send_email_campaign(
             for idx, email in enumerate(email_list):
                 try:
                     # Создаем основное сообщение
-                    # Если есть вложения, используем 'mixed', иначе 'alternative'
+                    # Если есть вложения, используем 'mixed', иначе просто HTML сообщение
                     if attachment_content and attachment_filename:
                         msg = MIMEMultipart('mixed')
                     else:
-                        msg = MIMEMultipart('alternative')
+                        # Для простого HTML письма без вложений используем MIMEText напрямую
+                        msg = MIMEText(full_html, 'html', 'utf-8')
+                        msg['From'] = from_email
+                        msg['To'] = email
+                        msg['Subject'] = subject
+                        # Отправляем сразу, без дополнительных attach
+                        server.sendmail(from_email, [email], msg.as_string())
+                        sent_count += 1
+                        
+                        # Задержка между письмами
+                        if idx < len(email_list) - 1:
+                            time.sleep(delay_between_emails)
+                        
+                        # Дополнительная задержка после каждой партии
+                        if (idx + 1) % batch_size == 0 and idx < len(email_list) - 1:
+                            logging.info(f"Отправлено {idx + 1}/{len(email_list)} писем. Пауза {delay_after_batch} сек...")
+                            time.sleep(delay_after_batch)
+                        continue
                     
+                    # Если есть вложения, создаем multipart сообщение
                     msg['From'] = from_email
                     msg['To'] = email
                     msg['Subject'] = subject
                     
-                    # Создаем альтернативные версии (текст и HTML)
-                    # ВАЖНО: Сначала текст, потом HTML - почтовые клиенты выберут лучшую версию
-                    # Если есть вложения, оборачиваем в отдельную часть
-                    if attachment_content and attachment_filename:
-                        # Если есть вложения, используем только HTML версию для избежания дублирования
-                        html_part = MIMEText(full_html, 'html', 'utf-8')
-                        msg.attach(html_part)
-                        
-                        # Добавляем вложение (PDF)
-                        attachment_part = MIMEBase('application', 'octet-stream')
-                        attachment_part.set_payload(attachment_content)
-                        encoders.encode_base64(attachment_part)
-                        attachment_part.add_header(
-                            'Content-Disposition',
-                            f'attachment; filename= {attachment_filename}'
-                        )
-                        msg.attach(attachment_part)
-                    else:
-                        # Если нет вложений, используем только HTML версию для избежания дублирования
-                        # Некоторые почтовые клиенты показывают обе версии (текст и HTML) одновременно
-                        # Поэтому используем только HTML версию
-                        html_part = MIMEText(full_html, 'html', 'utf-8')
-                        msg.attach(html_part)
+                    # Добавляем HTML версию
+                    html_part = MIMEText(full_html, 'html', 'utf-8')
+                    msg.attach(html_part)
+                    
+                    # Добавляем вложение (PDF)
+                    attachment_part = MIMEBase('application', 'octet-stream')
+                    attachment_part.set_payload(attachment_content)
+                    encoders.encode_base64(attachment_part)
+                    attachment_part.add_header(
+                        'Content-Disposition',
+                        f'attachment; filename= {attachment_filename}'
+                    )
+                    msg.attach(attachment_part)
                     
                     # Отправляем
                     server.sendmail(from_email, [email], msg.as_string())
