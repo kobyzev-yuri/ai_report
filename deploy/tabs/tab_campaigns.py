@@ -327,24 +327,64 @@ def _send_email_campaign(
             # Проверяем, не повторяется ли текст дважды подряд
             text_length = len(email_body_text)
             if text_length > 20:  # Минимальная длина для проверки
-                # Метод 1: Проверяем точное дублирование (текст повторяется дважды)
-                # Ищем точку, где текст начинает повторяться
-                # Берем первые 200 символов и ищем их повторение в тексте
-                if text_length > 400:
-                    # Ищем повторение первых 200 символов
-                    first_200 = email_body_text[:200].strip()
-                    # Ищем повторение, начиная с позиции 100 (чтобы не найти само начало)
-                    repeat_pos = email_body_text.find(first_200, 100)
-                    if repeat_pos > 0 and repeat_pos < text_length * 0.7:
-                        # Проверяем, совпадает ли текст от начала до repeat_pos с текстом от repeat_pos до конца
-                        first_part = email_body_text[:repeat_pos].strip()
-                        second_part = email_body_text[repeat_pos:].strip()
-                        # Сравниваем первые части (учитываем возможные различия в начале второго раза)
-                        if len(second_part) >= len(first_part) * 0.9:  # Вторая часть должна быть примерно такой же длины
-                            # Сравниваем основную часть (пропускаем первые 50 символов на случай различий)
-                            if first_part[50:] == second_part[50:len(first_part)-50+50] or first_part == second_part[:len(first_part)]:
+                # Метод 1: Ищем повторение по характерным фразам
+                # Ищем фразу "Уважаемые коллеги" и проверяем, не повторяется ли текст после неё
+                marker_phrase = "Уважаемые коллеги"
+                if marker_phrase in email_body_text:
+                    # Находим все вхождения маркера
+                    positions = []
+                    start = 0
+                    while True:
+                        pos = email_body_text.find(marker_phrase, start)
+                        if pos == -1:
+                            break
+                        positions.append(pos)
+                        start = pos + 1
+                    
+                    # Если маркер встречается дважды или больше, вероятно есть дублирование
+                    if len(positions) >= 2:
+                        # Берем текст от первого вхождения маркера до второго
+                        first_occurrence = positions[0]
+                        second_occurrence = positions[1]
+                        first_part = email_body_text[:second_occurrence].strip()
+                        second_part = email_body_text[second_occurrence:].strip()
+                        
+                        # Сравниваем, игнорируя возможные различия в начале (например, "Тест")
+                        # Сравниваем основную часть после маркера
+                        marker_len = len(marker_phrase)
+                        first_after_marker = first_part[first_occurrence + marker_len:].strip()
+                        second_after_marker = second_part[marker_len:].strip() if len(second_part) > marker_len else second_part.strip()
+                        
+                        # Если основная часть совпадает на 90% или больше
+                        if len(first_after_marker) > 50 and len(second_after_marker) > 50:
+                            min_len = min(len(first_after_marker), len(second_after_marker))
+                            matches = sum(1 for a, b in zip(first_after_marker[:min_len], second_after_marker[:min_len]) if a == b)
+                            if matches > min_len * 0.9:  # 90% совпадение
                                 email_body_text = first_part
-                                logging.warning(f"Обнаружено дублирование текста (позиция повтора: {repeat_pos}, было {text_length} -> стало {len(first_part)}), исправлено")
+                                logging.warning(f"Обнаружено дублирование по маркеру '{marker_phrase}' (было {text_length} -> стало {len(email_body_text)}), исправлено")
+                
+                # Метод 2: Проверяем точное дублирование пополам
+                if len(email_body_text) == text_length:  # Если еще не исправлено
+                    half_length = text_length // 2
+                    first_half = email_body_text[:half_length].strip()
+                    second_half = email_body_text[half_length:].strip()
+                    
+                    # Если вторая половина точно совпадает с первой, убираем дублирование
+                    if first_half == second_half and len(first_half) > 10:
+                        email_body_text = first_half
+                        logging.warning(f"Обнаружено точное дублирование текста пополам (длина: {text_length} -> {len(first_half)}), исправлено")
+                    elif len(second_half) > len(first_half) * 0.8:
+                        # Проверяем, не начинается ли вторая половина с похожего текста
+                        # Сравниваем основную часть (пропускаем первые 100 символов на случай различий типа "Тест")
+                        if len(first_half) > 100:
+                            first_compare = first_half[100:]
+                            second_compare = second_half[100:] if len(second_half) > 100 else second_half
+                            if len(second_compare) >= len(first_compare) * 0.9:
+                                min_len = min(len(first_compare), len(second_compare))
+                                matches = sum(1 for a, b in zip(first_compare[:min_len], second_compare[:min_len]) if a == b)
+                                if matches > min_len * 0.95:  # 95% совпадение
+                                    email_body_text = first_half
+                                    logging.warning(f"Обнаружено дублирование с различиями в начале (длина: {text_length} -> {len(first_half)}), исправлено")
                 
                 # Метод 2: Проверяем точное дублирование пополам
                 half_length = text_length // 2
