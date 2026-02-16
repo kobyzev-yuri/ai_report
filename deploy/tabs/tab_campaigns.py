@@ -329,21 +329,35 @@ def _send_email_campaign(
             
             for idx, email in enumerate(email_list):
                 try:
-                    msg = MIMEMultipart('mixed')  # 'mixed' для поддержки вложений
+                    # Создаем основное сообщение
+                    # Если есть вложения, используем 'mixed', иначе 'alternative'
+                    if attachment_content and attachment_filename:
+                        msg = MIMEMultipart('mixed')
+                    else:
+                        msg = MIMEMultipart('alternative')
+                    
                     msg['From'] = from_email
                     msg['To'] = email
                     msg['Subject'] = subject
                     
-                    # Добавляем текстовую версию
-                    text_part = MIMEText(email_body_text, 'plain', 'utf-8')
-                    msg.attach(text_part)
-                    
-                    # Добавляем HTML версию
-                    html_part = MIMEText(full_html, 'html', 'utf-8')
-                    msg.attach(html_part)
-                    
-                    # Добавляем вложение (PDF), если есть
+                    # Создаем альтернативные версии (текст и HTML)
+                    # Если есть вложения, оборачиваем в отдельную часть
                     if attachment_content and attachment_filename:
+                        # Создаем альтернативную часть для текста и HTML
+                        alt_part = MIMEMultipart('alternative')
+                        
+                        # Добавляем текстовую версию
+                        text_part = MIMEText(email_body_text, 'plain', 'utf-8')
+                        alt_part.attach(text_part)
+                        
+                        # Добавляем HTML версию
+                        html_part = MIMEText(full_html, 'html', 'utf-8')
+                        alt_part.attach(html_part)
+                        
+                        # Прикрепляем альтернативную часть к основному сообщению
+                        msg.attach(alt_part)
+                        
+                        # Добавляем вложение (PDF)
                         attachment_part = MIMEBase('application', 'octet-stream')
                         attachment_part.set_payload(attachment_content)
                         encoders.encode_base64(attachment_part)
@@ -352,6 +366,13 @@ def _send_email_campaign(
                             f'attachment; filename= {attachment_filename}'
                         )
                         msg.attach(attachment_part)
+                    else:
+                        # Если нет вложений, просто добавляем альтернативные версии
+                        text_part = MIMEText(email_body_text, 'plain', 'utf-8')
+                        msg.attach(text_part)
+                        
+                        html_part = MIMEText(full_html, 'html', 'utf-8')
+                        msg.attach(html_part)
                     
                     # Отправляем
                     server.sendmail(from_email, [email], msg.as_string())
