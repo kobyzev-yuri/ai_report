@@ -351,19 +351,9 @@ def _send_email_campaign(
                     # ВАЖНО: Сначала текст, потом HTML - почтовые клиенты выберут лучшую версию
                     # Если есть вложения, оборачиваем в отдельную часть
                     if attachment_content and attachment_filename:
-                        # Создаем альтернативную часть для текста и HTML
-                        alt_part = MIMEMultipart('alternative')
-                        
-                        # Добавляем текстовую версию ПЕРВОЙ (для старых клиентов)
-                        text_part = MIMEText(email_body_text, 'plain', 'utf-8')
-                        alt_part.attach(text_part)
-                        
-                        # Добавляем HTML версию ВТОРОЙ (почтовые клиенты выберут HTML если поддерживают)
+                        # Если есть вложения, используем только HTML версию для избежания дублирования
                         html_part = MIMEText(full_html, 'html', 'utf-8')
-                        alt_part.attach(html_part)
-                        
-                        # Прикрепляем альтернативную часть к основному сообщению
-                        msg.attach(alt_part)
+                        msg.attach(html_part)
                         
                         # Добавляем вложение (PDF)
                         attachment_part = MIMEBase('application', 'octet-stream')
