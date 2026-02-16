@@ -1,0 +1,97 @@
+{
+  "table_name": "SERVICES_EXT",
+  "schema": "billing",
+  "description": "Расширенные атрибуты услуг. Содержит дополнительные параметры и флаги для услуг, которые не хранятся в основной таблице SERVICES. Используется для хранения прав доступа, настроек и других расширенных параметров услуг. Особенно важно для услуг типа 30 (личный кабинет), где хранятся флаги прав пользователя (например, allow_suspend - право на приостановку/возобновление услуги).",
+  "database": "Oracle (production)",
+  "ddl": "CREATE TABLE SERVICES_EXT (\n    SERVICES_EXT_ID NUMBER,\n    SERVICE_ID NUMBER,\n    DICT_ID NUMBER,\n    VALUE VARCHAR2(4000),\n    DATE_BEG DATE,\n    DATE_END DATE,\n    SUBSCRIPTION_ID NUMBER,\n    VALUE2 VARCHAR2(4000)\n);",
+  "key_columns": {
+    "SERVICES_EXT_ID": "Уникальный идентификатор записи расширенного атрибута (PRIMARY KEY)",
+    "SERVICE_ID": "ID услуги из SERVICES.SERVICE_ID. Связь с SERVICES.SERVICE_ID",
+    "DICT_ID": "ID атрибута из DICT.DICT_ID. Определяет тип расширенного атрибута (связь с DICT.DICT_ID)",
+    "VALUE": "Значение атрибута (например, '1' для флага allow_suspend означает наличие права)",
+    "DATE_BEG": "Дата начала действия атрибута",
+    "DATE_END": "Дата окончания действия атрибута (NULL если действует сейчас)",
+    "SUBSCRIPTION_ID": "ID подписки, если атрибут связан с подпиской (связь с BM_SUBSCRIPTION.SUBSCRIPTION_ID)",
+    "VALUE2": "Дополнительное значение атрибута (резервное поле)"
+  },
+  "business_rules": [
+    "SERVICES_EXT содержит расширенные атрибуты услуг, не хранящиеся в SERVICES",
+    "Для активных атрибутов: DATE_END IS NULL",
+    "DICT_ID определяет тип атрибута через справочник DICT",
+    "VALUE содержит значение атрибута (часто '1' для флагов прав доступа)",
+    "Для услуг типа 30 (личный кабинет): SERVICES_EXT хранит флаги прав пользователя",
+    "DICT_ID = 283 (ATTRIBUTE = 'allow_suspend'): право на SUSPEND/UNSUSPEND услуги",
+    "VALUE = '1' для allow_suspend означает, что пользователь имеет право приостанавливать/возобновлять услугу",
+    "VALUE = '0' или NULL означает отсутствие права",
+    "SERVICES_EXT может иметь несколько записей для одной услуги (разные DICT_ID)",
+    "SUBSCRIPTION_ID используется, если атрибут связан с конкретной подпиской (для SSG услуг)"
+  ],
+  "relationships": [
+    {
+      "table": "SERVICES",
+      "type": "JOIN",
+      "on": "SERVICES_EXT.SERVICE_ID = SERVICES.SERVICE_ID",
+      "note": "Связь с основной таблицей услуг"
+    },
+    {
+      "table": "DICT",
+      "type": "JOIN",
+      "on": "SERVICES_EXT.DICT_ID = DICT.DICT_ID",
+      "note": "Расшифровка типа атрибута (ATTRIBUTE, DESCRIPTION)"
+    },
+    {
+      "table": "BM_SUBSCRIPTION",
+      "type": "LEFT JOIN",
+      "on": "SERVICES_EXT.SUBSCRIPTION_ID = BM_SUBSCRIPTION.SUBSCRIPTION_ID",
+      "note": "Связь с подпиской, если атрибут связан с подпиской"
+    }
+  ],
+  "usage_notes": [
+    "Используется для хранения расширенных параметров услуг",
+    "Для услуг типа 30 (личный кабинет) хранит флаги прав пользователя",
+    "Для поиска активных атрибутов: WHERE DATE_END IS NULL",
+    "Для поиска прав пользователя на приостановку: WHERE DICT_ID = 283 AND VALUE = '1' AND DATE_END IS NULL",
+    "Пример: найти все услуги типа 30 с правом на приостановку:",
+    "  SELECT s.*, se.VALUE AS ALLOW_SUSPEND",
+    "  FROM SERVICES s",
+    "  JOIN SERVICES_EXT se ON s.SERVICE_ID = se.SERVICE_ID",
+    "  WHERE s.TYPE_ID = 30",
+    "    AND se.DICT_ID = 283",
+    "    AND se.VALUE = '1'",
+    "    AND se.DATE_END IS NULL",
+    "Для услуг типа 30: SERVICES_EXT связана с ACCOUNT_ID через SERVICES.ACCOUNT_ID",
+    "Услуга типа 30 позволяет абоненту входить в личный кабинет по логину и паролю услуги",
+    "Флаги в SERVICES_EXT определяют права пользователя в личном кабинете"
+  ],
+  "examples": {
+    "common_queries": [
+      {
+        "description": "Найти все активные расширенные атрибуты для услуги",
+        "sql": "SELECT se.*, d.ATTRIBUTE, d.DESCRIPTION FROM SERVICES_EXT se LEFT JOIN DICT d ON se.DICT_ID = d.DICT_ID WHERE se.SERVICE_ID = :service_id AND se.DATE_END IS NULL ORDER BY d.ATTRIBUTE"
+      },
+      {
+        "description": "Найти услуги типа 30 с правом на приостановку",
+        "sql": "SELECT s.*, se.VALUE AS ALLOW_SUSPEND FROM SERVICES s JOIN SERVICES_EXT se ON s.SERVICE_ID = se.SERVICE_ID WHERE s.TYPE_ID = 30 AND se.DICT_ID = 283 AND se.VALUE = '1' AND se.DATE_END IS NULL"
+      },
+      {
+        "description": "Найти все расширенные атрибуты для услуг типа 30 в рамках одного ACCOUNT_ID",
+        "sql": "SELECT se.*, d.ATTRIBUTE, d.DESCRIPTION FROM SERVICES_EXT se JOIN SERVICES s ON se.SERVICE_ID = s.SERVICE_ID LEFT JOIN DICT d ON se.DICT_ID = d.DICT_ID WHERE s.TYPE_ID = 30 AND s.ACCOUNT_ID IN (SELECT ACCOUNT_ID FROM SERVICES WHERE SERVICE_ID = :service_id) AND se.DATE_END IS NULL"
+      }
+    ],
+    "real_example": {
+      "description": "Услуга типа 30 с правом на приостановку",
+      "query": "SELECT * FROM SERVICES_EXT WHERE SERVICE_ID IN (SELECT SERVICE_ID FROM SERVICES WHERE TYPE_ID = 30 AND ACCOUNT_ID IN (SELECT ACCOUNT_ID FROM SERVICES WHERE SERVICE_ID = 460938)) AND DATE_END IS NULL",
+      "result": {
+        "SERVICES_EXT_ID": 320954,
+        "SERVICE_ID": 370921,
+        "DICT_ID": 283,
+        "VALUE": "1",
+        "DATE_BEG": "2025-09-01 06:47:21",
+        "DATE_END": null,
+        "SUBSCRIPTION_ID": null,
+        "VALUE2": null,
+        "note": "DICT_ID = 283 означает ATTRIBUTE = 'allow_suspend' (право на SUSPEND/UNSUSPEND), VALUE = '1' означает наличие права"
+      }
+    }
+  }
+}

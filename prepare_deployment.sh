@@ -31,6 +31,7 @@ mkdir -p "$DEPLOY_DIR/kb_billing/rag"
 mkdir -p "$DEPLOY_DIR/docs"
 mkdir -p "$DEPLOY_DIR/data/SPNet reports"
 mkdir -p "$DEPLOY_DIR/data/STECCOMLLCRussiaSBD.AccessFees_reports"
+mkdir -p "$DEPLOY_DIR/data"
 
 echo "📋 Копирование файлов..."
 
@@ -96,6 +97,11 @@ cp -r kb_billing/*.md "$DEPLOY_DIR/kb_billing/" 2>/dev/null || true
 cp -r kb_billing/tables/*.json "$DEPLOY_DIR/kb_billing/tables/" 2>/dev/null || true
 cp -r kb_billing/views/*.json "$DEPLOY_DIR/kb_billing/views/" 2>/dev/null || true
 cp -r kb_billing/training_data/*.json "$DEPLOY_DIR/kb_billing/training_data/" 2>/dev/null || true
+
+# 5.1. Файлы для email кампаний (MVSAT)
+echo "  → Файлы для email кампаний..."
+cp data/письмо_MVSAT.docx "$DEPLOY_DIR/data/" 2>/dev/null || true
+cp "data/почты для рассылки MVSAT.txt" "$DEPLOY_DIR/data/" 2>/dev/null || true
 
 # 5.1. RAG модули
 echo "  → RAG модули..."

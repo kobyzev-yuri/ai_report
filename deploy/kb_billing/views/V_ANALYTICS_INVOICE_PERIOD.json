@@ -1,0 +1,110 @@
+{
+  "view_name": "V_ANALYTICS_INVOICE_PERIOD",
+  "schema": "billing",
+  "description": "VIEW \"Счета за период\" на основе ANALYTICS для биллинг-операторов финансового отдела. Иерархия: клиент (CUSTOMERS/OUTER_IDS) -> договор (ACCOUNTS) -> сервис (SERVICES). Даёт деньги по услугам в разрезе тарифов (TARIFF_ID), зон (ZONE_ID) и типов ресурсов (BM_RESOURCE_TYPE). Содержит разделение на абонентскую плату и трафик по MNEMONIC, а также признак попадания в счета-фактуры (INVOICE_ITEM_ID). Используется как источник данных для вкладки \"Счета за период\" в Streamlit-отчёте.",
+  "database": "Oracle (production)",
+  "key_columns": {
+    "CUSTOMER_ID": "ID клиента из CUSTOMERS. Код 1С берётся из OUTER_IDS.EXT_ID, где UPPER(TRIM(TBL)) = 'CUSTOMERS'",
+    "CODE_1C": "Код 1С клиента (OUTER_IDS.EXT_ID). Для фильтрации используются только клиенты с непустым кодом 1С, кроме '521' (СТЭККОМ)",
+    "ACCOUNT_ID": "ID договора из ACCOUNTS. DESCRIPTION в ACCOUNTS используется как человекочитаемое название договора (ACCOUNT_NAME).",
+    "SERVICE_ID": "ID услуги из SERVICES (TYPE_ID IN (9002, 9005, 9008, 9013, 9014) для Iridium). LOGIN = SUB-XXXXX (CONTRACT_ID), VSAT = IMEI.",
+    "CONTRACT_ID": "Логин услуги (SERVICES.LOGIN), обычно SUB-XXXXX. Используется как ключ договора.",
+    "IMEI": "Идентификатор устройства (VSAT из SERVICES, VSAT из ANALYTICS), связь с SPNET_TRAFFIC.IMEI.",
+    "PERIOD_ID": "ID финансового периода из BM_PERIOD. Для отображения используется PERIOD_YYYYMM = TO_CHAR(START_DATE, 'YYYY-MM').",
+    "PERIOD_YYYYMM": "Период в формате YYYY-MM (строка), полученный из BM_PERIOD.START_DATE. Используется для фильтрации по периоду.",
+    "TARIFF_ID": "ID тарифа из BM_TARIFF (NAME как человекочитаемое название тарифа).",
+    "ZONE_ID": "ID зоны из BM_ZONE (DESCRIPTION используется как ZONE_NAME).",
+    "RESOURCE_TYPE_ID": "Тип ресурса из BM_RESOURCE_TYPE. MNEMONIC и NAME используются для расшифровки услуги для бухгалтерии.",
+    "MONEY": "Сумма начисления (NUMBER) из ANALYTICS. Базовое поле дохода по услуге и периоду.",
+    "MONEY_ABON": "Сумма абонентской платы, рассчитанная по RESOURCE_TYPE.MNEMONIC ('fee_sbd', 'abon_payment', 'iridium_sbd_suspend', 'iridium_monitoring', 'abo_gsm_block', 'fee_iridium_msg').",
+    "MONEY_TRAFFIC": "Сумма за трафик по зонам, рассчитанная по RESOURCE_TYPE.MNEMONIC ('IRIDIUM_SBD', 'kb_traffic_pay', 'IRIDIUM_SBD_MBOX', 'sbd_reg', 'woufzwv', 'll_traffic_pay').",
+    "INVOICE_ITEM_ID": "ID позиции счета-фактуры (BM_INVOICE_ITEM.INVOICE_ITEM_ID). Если NULL — начисление пока не попало в счёт.",
+    "IN_INVOICE": "Признак попадания записи в счёт-фактуру: 'Y' если INVOICE_ITEM_ID IS NOT NULL, иначе 'N'."
+  },
+  "business_rules": [
+    "VIEW формируется на основе ANALYTICS (ANALYTICS -> SERVICES -> ACCOUNTS -> BM_TARIFF / BM_ZONE / BM_RESOURCE_TYPE / BM_PERIOD / CUSTOMERS + OUTER_IDS).",
+    "Фильтр commercial_customers выбирает только клиентов, у которых есть код 1С в OUTER_IDS.EXT_ID (где UPPER(TRIM(TBL)) = 'CUSTOMERS'), исключая код '521' (СТЭККОМ-оператор).",
+    "CUSTOMER_NAME/ORGANIZATION_NAME/PERSON_NAME в текущей версии могут быть NULL (в боевой схеме CUSTOMERS не содержит этих колонок). Основная идентификация клиента идёт по CUSTOMER_ID и CODE_1C.",
+    "ACCOUNT_NAME берётся из ACCOUNTS.DESCRIPTION (в боевой базе нет ACCOUNT_NAME).",
+    "Для BM_TARIFF используется колонка NAME как TARIFF_NAME (в боевой базе нет TARIFF_NAME).",
+    "Для BM_ZONE используется DESCRIPTION как ZONE_NAME (в боевой базе нет ZONE_NAME).",
+    "Для BM_RESOURCE_TYPE используется NAME как RESOURCE_TYPE_NAME и RESOURCE_TYPE_DESCRIPTION (в боевой базе нет DESCRIPTION).",
+    "Для периодов используется BM_PERIOD (а не BM_PERIODS): START_DATE и STOP_DATE, MONTH как человекочитаемое название периода.",
+    "MONEY_ABON рассчитывается по RESOURCE_TYPE.MNEMONIC для абонплат: ('fee_sbd', 'abon_payment', 'iridium_sbd_suspend', 'iridium_monitoring', 'abo_gsm_block', 'fee_iridium_msg').",
+    "MONEY_TRAFFIC рассчитывается по RESOURCE_TYPE.MNEMONIC для трафика: ('IRIDIUM_SBD', 'kb_traffic_pay', 'IRIDIUM_SBD_MBOX', 'sbd_reg', 'woufzwv', 'll_traffic_pay').",
+    "INVOICE_ITEM_ID используется для связи с BM_INVOICE_ITEM и проверки попадания начислений в счета-фактуры (IN_INVOICE = 'Y'/'N').",
+    "VIEW обновляется автоматически при обновлении ANALYTICS; никаких агрегирующих функций в SELECT нет — каждая строка соответствует записи ANALYTICS с дополнительными справочными полями."
+  ],
+  "relationships": [
+    {
+      "table": "ANALYTICS",
+      "type": "SOURCE",
+      "on": "V_ANALYTICS_INVOICE_PERIOD.AID = ANALYTICS.AID",
+      "note": "Основной источник начислений. ANALYTICS формируется из BM_SERVICE_MONEY и BM_CDR_ACCT."
+    },
+    {
+      "table": "SERVICES",
+      "type": "JOIN",
+      "on": "V_ANALYTICS_INVOICE_PERIOD.SERVICE_ID = SERVICES.SERVICE_ID",
+      "note": "Даёт LOGIN (CONTRACT_ID), VSAT (IMEI), TYPE_ID и привязку к ACCOUNTS/CUSTOMERS."
+    },
+    {
+      "table": "ACCOUNTS",
+      "type": "LEFT JOIN",
+      "on": "V_ANALYTICS_INVOICE_PERIOD.ACCOUNT_ID = ACCOUNTS.ACCOUNT_ID",
+      "note": "Даёт человекочитаемое описание договора (DESCRIPTION как ACCOUNT_NAME)."
+    },
+    {
+      "table": "BM_TARIFF",
+      "type": "LEFT JOIN",
+      "on": "V_ANALYTICS_INVOICE_PERIOD.TARIFF_ID = BM_TARIFF.TARIFF_ID",
+      "note": "Даёт имя тарифа (NAME как TARIFF_NAME) и описание тарифа."
+    },
+    {
+      "table": "BM_ZONE",
+      "type": "LEFT JOIN",
+      "on": "V_ANALYTICS_INVOICE_PERIOD.ZONE_ID = BM_ZONE.ZONE_ID",
+      "note": "Даёт описание тарифной зоны (DESCRIPTION как ZONE_NAME)."
+    },
+    {
+      "table": "BM_RESOURCE_TYPE",
+      "type": "LEFT JOIN",
+      "on": "V_ANALYTICS_INVOICE_PERIOD.RESOURCE_TYPE_ID = BM_RESOURCE_TYPE.RESOURCE_TYPE_ID",
+      "note": "Даёт MNEMONIC и NAME для расшифровки услуги и разделения на абонплату/трафик."
+    },
+    {
+      "table": "BM_PERIOD",
+      "type": "LEFT JOIN",
+      "on": "V_ANALYTICS_INVOICE_PERIOD.PERIOD_ID = BM_PERIOD.PERIOD_ID",
+      "note": "Даёт даты начала/конца периода и человекочитаемое имя периода (MONTH)."
+    },
+    {
+      "table": "BM_INVOICE_ITEM",
+      "type": "LEFT JOIN",
+      "on": "V_ANALYTICS_INVOICE_PERIOD.INVOICE_ITEM_ID = BM_INVOICE_ITEM.INVOICE_ITEM_ID",
+      "note": "Позволяет определить, какие начисления реально попали в счета-фактуры."
+    },
+    {
+      "table": "CUSTOMERS",
+      "type": "JOIN",
+      "on": "V_ANALYTICS_INVOICE_PERIOD.CUSTOMER_ID = CUSTOMERS.CUSTOMER_ID",
+      "note": "Связь с сущностью клиента; код 1С берётся через OUTER_IDS."
+    },
+    {
+      "table": "OUTER_IDS",
+      "type": "JOIN",
+      "on": "OUTER_IDS.ID = CUSTOMERS.CUSTOMER_ID AND UPPER(TRIM(OUTER_IDS.TBL)) = 'CUSTOMERS'",
+      "note": "Источник CODE_1C (EXT_ID) для клиентов."
+    }
+  ],
+  "usage_notes": [
+    "Основной VIEW для вкладки \"Счета за период\" в Streamlit-отчёте. Используется для построения отчёта по клиенту/договору/сервису с детализацией по тарифам и зонам.",
+    "Для фильтрации по периоду используется колонка PERIOD_YYYYMM (формат 'YYYY-MM').",
+    "Для выборки только коммерческих клиентов используйте условие CODE_1C IS NOT NULL AND CODE_1C != '521' (СТЭККОМ-оператор).",
+    "Для получения только записей, попавших в счета-фактуры, фильтруйте по IN_INVOICE = 'Y' или INVOICE_ITEM_ID IS NOT NULL.",
+    "Для анализа абонплаты и трафика в разрезе зон и тарифов используйте агрегирование по TARIFF_ID, ZONE_ID, RESOURCE_TYPE_ID с суммами MONEY_ABON и MONEY_TRAFFIC.",
+    "VIEW не фильтрует тестовые услуги по датам/статусам сервисов — вся фильтрация делается на уровне CODE_1C и INVOICE_ITEM_ID."
+  ]
+}
+
+

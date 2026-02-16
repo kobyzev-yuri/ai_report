@@ -160,6 +160,17 @@ class TariffCalculator:
             tier2_from=25, tier2_to=50, tier2_price=0.20,
             tier3_from=50, tier3_price=0.10
         )
+        
+        # SBD Tiered 350 1K: 1 КБ включено (тот же тариф, что и SBD Tiered 1250 1K, но с базовым тарифом 350)
+        # Превышение: 1-10 КБ: $1.50/КБ, 10-25 КБ: $0.75/КБ, свыше 25 КБ: $0.50/КБ
+        self.tariffs['SBD Tiered 350 1K'] = TariffPlan(
+            plan_name='SBD Tiered 350 1K',
+            plan_code='SBD-1',
+            included_kb=1,
+            tier1_from=1, tier1_to=10, tier1_price=1.50,
+            tier2_from=10, tier2_to=25, tier2_price=0.75,
+            tier3_from=25, tier3_price=0.50
+        )
     
     def add_tariff(self, tariff: TariffPlan):
         """

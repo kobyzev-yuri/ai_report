@@ -27,6 +27,7 @@ from tabs.tab_revenue import show_tab as show_revenue_tab
 from tabs.tab_analytics import show_tab as show_analytics_tab
 from tabs.tab_loader import show_tab as show_loader_tab
 from tabs.tab_bills import show_tab as show_bills_tab
+from tabs.tab_campaigns import show_tab as show_campaigns_tab
 
 # Подавляем предупреждение pandas о cx_Oracle (работает корректно)
 warnings.filterwarnings('ignore', message='pandas only supports SQLAlchemy')
@@ -338,6 +339,8 @@ def main():
                 show_loader_tab(get_connection, count_file_records, get_records_in_db)
             elif tab_key == 'bills':
                 show_bills_tab()
+            elif tab_key == 'campaigns':
+                show_campaigns_tab()
             elif tab_key == 'assistant':
                 try:
                     from kb_billing.rag.streamlit_assistant import show_assistant_tab

@@ -1,7 +1,7 @@
 {
   "table_name": "V_REVENUE_FROM_INVOICES",
   "schema": "billing",
-  "description": "VIEW отчет по доходам из счетов-фактур (BM_INVOICE_ITEM). Группировка по базовому SUB- (без -clone-...) и периоду. Разделение доходов по типам услуг (SBD, SUSPEND, мониторинг, блокировка, сообщения) с разделением на трафик и абонплату. Одна строка на SUB- + период. Сопутствующие услуги (9005, 9008, 9013) связаны с основной услугой 9002 по VSAT=IMEI.",
+  "description": "VIEW отчет по доходам из счетов-фактур (BM_INVOICE_ITEM). Группировка по базовому SUB- (без -clone-...) и периоду. Разделение доходов по типам услуг (SBD, SUSPEND, мониторинг, блокировка, сообщения) с разделением на трафик и абонплату. Трафик превышения SBD разделен по тарифам: REVENUE_SBD_TRAFFIC_SBD1 (SBD-1) и REVENUE_SBD_TRAFFIC_SBD10 (SBD-10). Одна строка на SUB- + период. Сопутствующие услуги (9005, 9008, 9013) связаны с основной услугой 9002 по VSAT=IMEI.",
   "database": "Oracle (production)",
   "key_columns": {
     "SERVICE_ID": "SERVICE_ID главной услуги SBD (TYPE_ID = 9002). ВАЖНО: Это уникальный идентификатор услуги, а не тип услуги. Для фильтрации SBD сервисов используй REVENUE_SBD_TOTAL > 0 или REVENUE_SBD_TRAFFIC > 0 или REVENUE_SBD_ABON > 0. НЕ используй SERVICE_ID = 9002 - это неправильно!",
@@ -11,7 +11,9 @@
     "CODE_1C": "Код 1С клиента",
     "PERIOD_YYYYMM": "Период в формате YYYY-MM (из BM_PERIOD.START_DATE). ВАЖНО: Это СТРОКА формата 'YYYY-MM' (например, '2025-11'), а НЕ дата! Для фильтрации по году используй: PERIOD_YYYYMM LIKE '2025-%' или SUBSTR(PERIOD_YYYYMM, 1, 4) = '2025'. НЕ используй TO_CHAR(PERIOD_YYYYMM, 'YYYY') - это неправильно! Для доходов используется PERIOD_YYYYMM, а не FINANCIAL_PERIOD",
     "CUSTOMER_ID": "ID клиента из CUSTOMERS. Связь с BM_CUSTOMER_CONTACT для получения названия и адреса клиента",
-    "REVENUE_SBD_TRAFFIC": "Доходы от трафика превышения SBD (overage)",
+    "REVENUE_SBD_TRAFFIC": "Доходы от трафика превышения SBD (overage) - ИТОГО для всех тарифов",
+    "REVENUE_SBD_TRAFFIC_SBD1": "Доходы от трафика превышения SBD для тарифа SBD-1 (SBD Tiered 1250 1K). Разделение по тарифным планам",
+    "REVENUE_SBD_TRAFFIC_SBD10": "Доходы от трафика превышения SBD для тарифа SBD-10 (SBD Tiered 1250 10K). Разделение по тарифным планам",
     "REVENUE_SBD_ABON": "Доходы от абонентской платы SBD",
     "REVENUE_SBD_TOTAL": "Итого доходов SBD (трафик + абонплата)",
     "REVENUE_SUSPEND_ABON": "Доходы от приостановления (TYPE_ID=9008)",

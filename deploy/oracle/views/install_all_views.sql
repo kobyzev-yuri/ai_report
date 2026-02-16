@@ -50,10 +50,6 @@ PROMPT Создание V_UNPROFITABLE_CUSTOMERS...
 PROMPT Создание V_ANALYTICS_INVOICE_PERIOD...
 @@07_v_analytics_invoice_period.sql
 
--- 10. V_7206_IFINDEX_REPLACEMENT - VIEW для операторов: замена индексов интерфейсов 7206
-PROMPT Создание V_7206_IFINDEX_REPLACEMENT...
-@@09_v_7206_ifindex_replacement.sql
-
 PROMPT
 PROMPT ========================================
 PROMPT Проверка созданных представлений
@@ -102,12 +98,7 @@ UNION ALL
 SELECT 
     'V_ANALYTICS_INVOICE_PERIOD',
     COUNT(*)
-FROM V_ANALYTICS_INVOICE_PERIOD
-UNION ALL
-SELECT 
-    'V_7206_IFINDEX_REPLACEMENT',
-    COUNT(*)
-FROM V_7206_IFINDEX_REPLACEMENT;
+FROM V_ANALYTICS_INVOICE_PERIOD;
 
 PROMPT
 PROMPT ========================================

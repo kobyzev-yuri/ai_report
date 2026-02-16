@@ -1,0 +1,62 @@
+{
+  "table_name": "CUSTOMERS",
+  "schema": "billing",
+  "description": "Таблица клиентов биллинга. Содержит базовую информацию о клиентах (CUSTOMER_ID). ВАЖНО: В таблице CUSTOMERS НЕТ колонок CODE_1C, ORGANIZATION_NAME, PERSON_NAME. Код 1С клиента хранится в OUTER_IDS.EXT_ID (где TBL='CUSTOMERS'). Название организации/ФИО клиента получается через BM_CUSTOMER_CONTACT (для организаций CONTACT_DICT_ID=23, MNEMONIC='description'; для физлиц CONTACT_DICT_ID=11, MNEMONIC IN ('first_name', 'last_name', 'middle_name')).",
+  "database": "Oracle (production)",
+  "key_columns": {
+    "CUSTOMER_ID": "Уникальный идентификатор клиента (PRIMARY KEY). Используется во всех таблицах для связи с клиентом",
+    "DOMAIN_ID": "ID домена (NUMBER)",
+    "STATUS": "Статус клиента (если есть)",
+    "CREATE_DATE": "Дата создания клиента (если есть)"
+  },
+  "business_rules": [
+    "CUSTOMER_ID - основная связь клиента со всеми таблицами (SERVICES, ACCOUNTS, BM_INVOICE, ANALYTICS)",
+    "ВАЖНО: В таблице CUSTOMERS НЕТ колонки CODE_1C! Код 1С получается через OUTER_IDS: SELECT oi.EXT_ID FROM OUTER_IDS oi WHERE oi.ID = CUSTOMERS.CUSTOMER_ID AND UPPER(TRIM(oi.TBL)) = 'CUSTOMERS'",
+    "ВАЖНО: В таблице CUSTOMERS НЕТ колонок ORGANIZATION_NAME и PERSON_NAME! Название организации получается через BM_CUSTOMER_CONTACT (CONTACT_DICT_ID=23, MNEMONIC='description')",
+    "ФИО физического лица получается через BM_CUSTOMER_CONTACT (CONTACT_DICT_ID=11, MNEMONIC IN ('first_name', 'last_name', 'middle_name'))",
+    "Для получения полной информации о клиенте используйте VIEW V_IRIDIUM_SERVICES_INFO или JOIN с BM_CUSTOMER_CONTACT и OUTER_IDS"
+  ],
+  "relationships": [
+    {
+      "table": "OUTER_IDS",
+      "type": "LEFT JOIN",
+      "on": "OUTER_IDS.ID = CUSTOMERS.CUSTOMER_ID AND UPPER(TRIM(OUTER_IDS.TBL)) = 'CUSTOMERS'",
+      "note": "Связь для получения CODE_1C (OUTER_IDS.EXT_ID). ВАЖНО: TBL должен быть 'CUSTOMERS' (регистр не важен, используется UPPER)"
+    },
+    {
+      "table": "BM_CUSTOMER_CONTACT",
+      "type": "LEFT JOIN",
+      "on": "BM_CUSTOMER_CONTACT.CUSTOMER_ID = CUSTOMERS.CUSTOMER_ID",
+      "note": "Связь для получения названия организации/ФИО клиента. Для организаций: CONTACT_DICT_ID=23, MNEMONIC='description'. Для физлиц: CONTACT_DICT_ID=11, MNEMONIC IN ('first_name', 'last_name', 'middle_name')"
+    },
+    {
+      "table": "ACCOUNTS",
+      "type": "JOIN",
+      "on": "ACCOUNTS.CUSTOMER_ID = CUSTOMERS.CUSTOMER_ID",
+      "note": "Договоры клиента"
+    },
+    {
+      "table": "SERVICES",
+      "type": "JOIN",
+      "on": "SERVICES.CUSTOMER_ID = CUSTOMERS.CUSTOMER_ID",
+      "note": "Услуги клиента"
+    },
+    {
+      "table": "BM_INVOICE",
+      "type": "JOIN",
+      "on": "BM_INVOICE.CUSTOMER_ID = CUSTOMERS.CUSTOMER_ID",
+      "note": "Счета-фактуры клиента"
+    }
+  ],
+  "usage_notes": [
+    "ВАЖНО: Не используйте CUSTOMERS.CODE_1C - такой колонки нет! Используйте OUTER_IDS.EXT_ID",
+    "ВАЖНО: Не используйте CUSTOMERS.ORGANIZATION_NAME или CUSTOMERS.PERSON_NAME - таких колонок нет! Используйте BM_CUSTOMER_CONTACT",
+    "Для получения кода 1С: SELECT oi.EXT_ID AS CODE_1C FROM CUSTOMERS c LEFT JOIN OUTER_IDS oi ON oi.ID = c.CUSTOMER_ID AND UPPER(TRIM(oi.TBL)) = 'CUSTOMERS'",
+    "Для получения названия организации: SELECT MAX(CASE WHEN cd.MNEMONIC = 'description' AND cc.CONTACT_DICT_ID = 23 THEN cc.VALUE END) AS ORGANIZATION_NAME FROM CUSTOMERS c LEFT JOIN BM_CUSTOMER_CONTACT cc ON c.CUSTOMER_ID = cc.CUSTOMER_ID LEFT JOIN BM_CONTACT_DICT cd ON cc.CONTACT_DICT_ID = cd.CONTACT_DICT_ID GROUP BY c.CUSTOMER_ID",
+    "Для получения ФИО: SELECT TRIM(NVL(MAX(CASE WHEN cd.MNEMONIC = 'last_name' AND cc.CONTACT_DICT_ID = 11 THEN cc.VALUE END), '') || ' ' || NVL(MAX(CASE WHEN cd.MNEMONIC = 'first_name' AND cc.CONTACT_DICT_ID = 11 THEN cc.VALUE END), '') || ' ' || NVL(MAX(CASE WHEN cd.MNEMONIC = 'middle_name' AND cc.CONTACT_DICT_ID = 11 THEN cc.VALUE END), '')) AS PERSON_NAME FROM CUSTOMERS c LEFT JOIN BM_CUSTOMER_CONTACT cc ON c.CUSTOMER_ID = cc.CUSTOMER_ID LEFT JOIN BM_CONTACT_DICT cd ON cc.CONTACT_DICT_ID = cd.CONTACT_DICT_ID GROUP BY c.CUSTOMER_ID",
+    "Рекомендуется использовать готовое VIEW V_IRIDIUM_SERVICES_INFO для получения полной информации о клиентах"
+  ]
+}
+
+
+

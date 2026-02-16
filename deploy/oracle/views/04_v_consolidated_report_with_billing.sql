@@ -311,7 +311,7 @@ LEFT JOIN steccom_advance_charge_by_period_for_prev sf_prev
        END
 -- Дополнительные JOIN'ы для получения AGREEMENT_NUMBER по IMEI (для случаев swap IMEI)
 -- JOIN по IMEI через SERVICES_EXT (когда IMEI хранится в SERVICES_EXT.VALUE)
--- ВАЖНО: Если для одного IMEI есть несколько SERVICE_ID, берем активный (DATE_END IS NULL)
+-- ВАЖНО: Если для одного IMEI есть несколько SERVICE_ID, берем активный (DATE_END IS NULL) или с максимальным SERVICE_ID
 LEFT JOIN (
     SELECT 
         se_ranked.VALUE AS IMEI,
@@ -323,27 +323,36 @@ LEFT JOIN (
             ROW_NUMBER() OVER (
                 PARTITION BY se.VALUE 
                 ORDER BY 
-                    CASE WHEN se.DATE_END IS NULL THEN 0 ELSE 1 END,  -- Приоритет активным
-                    se.DATE_BEG DESC NULLS LAST,  -- Затем по дате начала (новее)
-                    se.SERVICE_ID DESC  -- Затем по SERVICE_ID (больший = новее)
+                    CASE WHEN se.DATE_END IS NULL THEN 0 ELSE 1 END,  -- Приоритет активным (DATE_END IS NULL)
+                    se.SERVICE_ID DESC NULLS LAST  -- Затем по SERVICE_ID (максимальный = новее)
             ) AS rn
         FROM SERVICES_EXT se
         JOIN SERVICES s ON se.SERVICE_ID = s.SERVICE_ID
         JOIN ACCOUNTS a ON s.ACCOUNT_ID = a.ACCOUNT_ID
         WHERE se.VALUE IS NOT NULL
     ) se_ranked
-    WHERE se_ranked.rn = 1  -- Берем только первый (самый приоритетный)
+    WHERE se_ranked.rn = 1  -- Берем только первый (самый приоритетный: DATE_END IS NULL или max(SERVICE_ID))
 ) imei_service_ext_info ON TRIM(imei_service_ext_info.IMEI) = TRIM(cor.IMEI)
     AND v.SERVICE_ID IS NULL  -- JOIN только если SERVICE_ID из v отсутствует (триггерная ситуация)
 -- JOIN по IMEI через SERVICES.VSAT (когда IMEI хранится в SERVICES.VSAT)
+-- ВАЖНО: Если для одного IMEI есть несколько SERVICE_ID, берем с максимальным SERVICE_ID
 LEFT JOIN (
     SELECT 
-        s.VSAT AS IMEI,
-        MAX(a.DESCRIPTION) AS AGREEMENT_NUMBER
-    FROM SERVICES s
-    JOIN ACCOUNTS a ON s.ACCOUNT_ID = a.ACCOUNT_ID
-    WHERE s.VSAT IS NOT NULL
-    GROUP BY s.VSAT
+        s_ranked.VSAT AS IMEI,
+        s_ranked.AGREEMENT_NUMBER
+    FROM (
+        SELECT 
+            s.VSAT,
+            a.DESCRIPTION AS AGREEMENT_NUMBER,
+            ROW_NUMBER() OVER (
+                PARTITION BY s.VSAT 
+                ORDER BY s.SERVICE_ID DESC NULLS LAST  -- Берем запись с максимальным SERVICE_ID
+            ) AS rn
+        FROM SERVICES s
+        JOIN ACCOUNTS a ON s.ACCOUNT_ID = a.ACCOUNT_ID
+        WHERE s.VSAT IS NOT NULL
+    ) s_ranked
+    WHERE s_ranked.rn = 1  -- Берем только первый (с максимальным SERVICE_ID)
 ) imei_service_info ON TRIM(imei_service_info.IMEI) = TRIM(cor.IMEI)
     AND v.SERVICE_ID IS NULL  -- JOIN только если SERVICE_ID из v отсутствует (триггерная ситуация)
     AND imei_service_ext_info.AGREEMENT_NUMBER IS NULL  -- И если imei_service_ext_info тоже не дал результат
@@ -448,7 +457,7 @@ LEFT JOIN (
     WHERE v1.rn = 1
 ) v ON RTRIM(sf_prev.CONTRACT_ID) = RTRIM(v.CONTRACT_ID)
 -- Дополнительные JOIN'ы для получения AGREEMENT_NUMBER по IMEI (для случаев swap IMEI) - для второго SELECT
--- ВАЖНО: Если для одного IMEI есть несколько SERVICE_ID, берем активный (DATE_END IS NULL)
+-- ВАЖНО: Если для одного IMEI есть несколько SERVICE_ID, берем активный (DATE_END IS NULL) или с максимальным SERVICE_ID
 LEFT JOIN (
     SELECT 
         se_ranked.VALUE AS IMEI,
@@ -460,36 +469,44 @@ LEFT JOIN (
             ROW_NUMBER() OVER (
                 PARTITION BY se.VALUE 
                 ORDER BY 
-                    CASE WHEN se.DATE_END IS NULL THEN 0 ELSE 1 END,  -- Приоритет активным
-                    se.DATE_BEG DESC NULLS LAST,  -- Затем по дате начала (новее)
-                    se.SERVICE_ID DESC  -- Затем по SERVICE_ID (больший = новее)
+                    CASE WHEN se.DATE_END IS NULL THEN 0 ELSE 1 END,  -- Приоритет активным (DATE_END IS NULL)
+                    se.SERVICE_ID DESC NULLS LAST  -- Затем по SERVICE_ID (максимальный = новее)
             ) AS rn
         FROM SERVICES_EXT se
         JOIN SERVICES s ON se.SERVICE_ID = s.SERVICE_ID
         JOIN ACCOUNTS a ON s.ACCOUNT_ID = a.ACCOUNT_ID
         WHERE se.VALUE IS NOT NULL
     ) se_ranked
-    WHERE se_ranked.rn = 1  -- Берем только первый (самый приоритетный)
+    WHERE se_ranked.rn = 1  -- Берем только первый (самый приоритетный: DATE_END IS NULL или max(SERVICE_ID))
 ) imei_service_ext_info ON TRIM(imei_service_ext_info.IMEI) = TRIM(sf_prev.imei)
     AND v.SERVICE_ID IS NULL  -- JOIN только если SERVICE_ID из v отсутствует (триггерная ситуация)
 LEFT JOIN (
     SELECT 
-        s.VSAT AS IMEI,
-        MAX(a.DESCRIPTION) AS AGREEMENT_NUMBER
-    FROM SERVICES s
-    JOIN ACCOUNTS a ON s.ACCOUNT_ID = a.ACCOUNT_ID
-    WHERE s.VSAT IS NOT NULL
-    GROUP BY s.VSAT
+        s_ranked.VSAT AS IMEI,
+        s_ranked.AGREEMENT_NUMBER
+    FROM (
+        SELECT 
+            s.VSAT,
+            a.DESCRIPTION AS AGREEMENT_NUMBER,
+            ROW_NUMBER() OVER (
+                PARTITION BY s.VSAT 
+                ORDER BY s.SERVICE_ID DESC NULLS LAST  -- Берем запись с максимальным SERVICE_ID
+            ) AS rn
+        FROM SERVICES s
+        JOIN ACCOUNTS a ON s.ACCOUNT_ID = a.ACCOUNT_ID
+        WHERE s.VSAT IS NOT NULL
+    ) s_ranked
+    WHERE s_ranked.rn = 1  -- Берем только первый (с максимальным SERVICE_ID)
 ) imei_service_info ON TRIM(imei_service_info.IMEI) = TRIM(sf_prev.imei)
     AND v.SERVICE_ID IS NULL  -- JOIN только если SERVICE_ID из v отсутствует (триггерная ситуация)
     AND imei_service_ext_info.AGREEMENT_NUMBER IS NULL  -- И если imei_service_ext_info тоже не дал результат
 -- Аванс за следующий месяц (для UNION ALL части)
--- ВАЖНО: Аванс переходит по CONTRACT_ID, а не по IMEI
+-- ВАЖНО: Аванс переходит по CONTRACT_ID и IMEI, чтобы избежать дубликатов при свопе IMEI
+-- Если для одного CONTRACT_ID есть несколько IMEI, берем только тот, который соответствует sf_prev.imei
 LEFT JOIN steccom_fees sf_next
     ON sf_next.bill_month = TO_CHAR(ADD_MONTHS(TO_DATE(sf_prev.bill_month, 'YYYYMM'), 1), 'YYYYMM')
     AND RTRIM(sf_prev.CONTRACT_ID) = RTRIM(sf_next.CONTRACT_ID)
-    -- УБРАНО: AND sf_prev.imei = sf_next.imei
-    -- Причина: при свопе IMEI аванс должен переходить по CONTRACT_ID
+    AND sf_prev.imei = sf_next.imei  -- Добавлено обратно для предотвращения дубликатов
 -- КРИТИЧЕСКИ ВАЖНО: Добавляем строку ТОЛЬКО если:
 -- 1. Есть аванс за предыдущий месяц
 -- 2. НЕТ данных в cor для BILL_MONTH = bill_month + 1 (месяц после аванса)

@@ -26,9 +26,8 @@ from tabs.tab_report import show_tab as show_report_tab
 from tabs.tab_revenue import show_tab as show_revenue_tab
 from tabs.tab_analytics import show_tab as show_analytics_tab
 from tabs.tab_loader import show_tab as show_loader_tab
-from tabs.tab_ifindex import show_tab as show_ifindex_tab
-from tabs.tab_ifindex_mapping import show_tab as show_ifindex_mapping_tab
-from tabs.tab_lbs import show_tab as show_lbs_tab
+from tabs.tab_bills import show_tab as show_bills_tab
+from tabs.tab_campaigns import show_tab as show_campaigns_tab
 
 # Подавляем предупреждение pandas о cx_Oracle (работает корректно)
 warnings.filterwarnings('ignore', message='pandas only supports SQLAlchemy')
@@ -39,7 +38,7 @@ from queries import (
     get_current_period, get_periods, get_plans,
     get_revenue_periods, get_revenue_report,
     get_analytics_duplicates, get_analytics_invoice_period_report,
-    remove_analytics_duplicates, get_lbs_services_report
+    remove_analytics_duplicates
 )
 
 # Конфигурация базы данных
@@ -338,12 +337,10 @@ def main():
                 show_analytics_tab(get_connection, get_analytics_invoice_period_report, get_analytics_duplicates, selected_period, contract_id_filter, imei_filter, customer_name_filter, code_1c_filter, remove_analytics_duplicates)
             elif tab_key == 'loader':
                 show_loader_tab(get_connection, count_file_records, get_records_in_db)
-            elif tab_key == 'ifindex':
-                show_ifindex_tab(get_connection)
-            elif tab_key == 'ifindex_mapping':
-                show_ifindex_mapping_tab(get_connection)
-            elif tab_key == 'lbs':
-                show_lbs_tab(get_connection, get_lbs_services_report)
+            elif tab_key == 'bills':
+                show_bills_tab()
+            elif tab_key == 'campaigns':
+                show_campaigns_tab()
             elif tab_key == 'assistant':
                 try:
                     from kb_billing.rag.streamlit_assistant import show_assistant_tab

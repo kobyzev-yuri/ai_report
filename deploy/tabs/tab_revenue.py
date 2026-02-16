@@ -64,21 +64,51 @@ def show_tab(get_connection, get_revenue_report,
     if df_revenue is not None and not df_revenue.empty and st.session_state.get('revenue_loaded', False):
         st.success(f"✅ Загружено записей: {len(df_revenue):,}")
         
-        # Метрики
+        # Метрики - используем правильные названия колонок из VIEW
+        # VIEW возвращает колонки с префиксом REVENUE_ (английские названия)
         col1, col2, col3, col4 = st.columns(4)
         with col1:
-            st.metric("Всего сумм (руб)", f"{df_revenue['Итого доходов (руб)'].sum():,.2f}")
-            st.metric("SBD Доходы", f"{df_revenue['SBD Всего'].sum():,.2f}")
+            # Итого доходов
+            if 'REVENUE_TOTAL' in df_revenue.columns:
+                st.metric("Итого доходов (руб)", f"{df_revenue['REVENUE_TOTAL'].sum():,.2f}")
+            else:
+                st.metric("Всего записей", f"{len(df_revenue):,}")
+            
+            # SBD Всего (трафик + абонплата)
+            sbd_total = 0
+            if 'REVENUE_SBD_TRAFFIC' in df_revenue.columns:
+                sbd_total += df_revenue['REVENUE_SBD_TRAFFIC'].sum()
+            if 'REVENUE_SBD_ABON' in df_revenue.columns:
+                sbd_total += df_revenue['REVENUE_SBD_ABON'].sum()
+            if sbd_total > 0:
+                st.metric("SBD Всего", f"{sbd_total:,.2f}")
         with col2:
-            st.metric("SBD Трафик превышения", f"{df_revenue['SBD Трафик превышения'].sum():,.2f}")
-            if 'SBD Трафик SBD-1' in df_revenue.columns:
-                st.metric("SBD Трафик SBD-1", f"{df_revenue['SBD Трафик SBD-1'].sum():,.2f}")
+            # SBD Трафик превышения
+            if 'REVENUE_SBD_TRAFFIC' in df_revenue.columns:
+                st.metric("SBD Трафик превышения", f"{df_revenue['REVENUE_SBD_TRAFFIC'].sum():,.2f}")
+            # SBD Трафик SBD-1
+            if 'REVENUE_SBD_TRAFFIC_SBD1' in df_revenue.columns:
+                st.metric("SBD Трафик SBD-1", f"{df_revenue['REVENUE_SBD_TRAFFIC_SBD1'].sum():,.2f}")
         with col3:
-            if 'SBD Трафик SBD-10' in df_revenue.columns:
-                st.metric("SBD Трафик SBD-10", f"{df_revenue['SBD Трафик SBD-10'].sum():,.2f}")
-            st.metric("SBD Абонплата", f"{df_revenue['SBD Абонплата'].sum():,.2f}")
+            # SBD Трафик SBD-10
+            if 'REVENUE_SBD_TRAFFIC_SBD10' in df_revenue.columns:
+                st.metric("SBD Трафик SBD-10", f"{df_revenue['REVENUE_SBD_TRAFFIC_SBD10'].sum():,.2f}")
+            # SBD Абонплата
+            if 'REVENUE_SBD_ABON' in df_revenue.columns:
+                st.metric("SBD Абонплата", f"{df_revenue['REVENUE_SBD_ABON'].sum():,.2f}")
         with col4:
-            st.metric("SUSPEND Абонплата", f"{df_revenue['SUSPEND Абонплата'].sum():,.2f}")
+            # SUSPEND Абонплата
+            if 'REVENUE_SUSPEND_ABON' in df_revenue.columns:
+                st.metric("SUSPEND Абонплата", f"{df_revenue['REVENUE_SUSPEND_ABON'].sum():,.2f}")
+            # Мониторинг Абонплата
+            if 'REVENUE_MONITORING_ABON' in df_revenue.columns:
+                st.metric("Мониторинг Абонплата", f"{df_revenue['REVENUE_MONITORING_ABON'].sum():,.2f}")
+            # Блокировка мониторинга
+            if 'REVENUE_MONITORING_BLOCK_ABON' in df_revenue.columns:
+                st.metric("Блокировка мониторинга", f"{df_revenue['REVENUE_MONITORING_BLOCK_ABON'].sum():,.2f}")
+            # Сообщения Абонплата
+            if 'REVENUE_MSG_ABON' in df_revenue.columns:
+                st.metric("Сообщения Абонплата", f"{df_revenue['REVENUE_MSG_ABON'].sum():,.2f}")
             st.metric("Записей", f"{len(df_revenue):,}")
         
         st.markdown("---")
@@ -111,5 +141,8 @@ def show_tab(get_connection, get_revenue_report,
             )
     elif df_revenue is not None and df_revenue.empty:
         st.warning("⚠️ Данные не найдены для выбранных фильтров")
+
+
+
 
 

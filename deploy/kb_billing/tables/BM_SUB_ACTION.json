@@ -1,0 +1,235 @@
+{
+  "table_name": "BM_SUB_ACTION",
+  "schema": "billing",
+  "description": "Справочник подтипов действий. Детализирует типы действий из BM_ACTION, указывая конкретную операцию в рамках базового действия. Используется в BM_ACTION_LOG.SUB_ACTION_ID для точной идентификации выполненной операции.",
+  "database": "Oracle (production)",
+  "ddl": "CREATE TABLE BM_SUB_ACTION (\n    SUB_ACTION_ID NUMBER,\n    ACTION_ID NUMBER,\n    MNEMONIC VARCHAR2(255),\n    DESCRIPTION VARCHAR2(4000)\n);",
+  "key_columns": {
+    "SUB_ACTION_ID": "Уникальный идентификатор подтипа действия (PRIMARY KEY). Используется в BM_ACTION_LOG.SUB_ACTION_ID",
+    "ACTION_ID": "ID базового типа действия из BM_ACTION.ACTION_ID. Связь с BM_ACTION.ACTION_ID",
+    "MNEMONIC": "Мнемоника подтипа действия (например, 'change_tariff', 'suspend_sbd', 'add_zone')",
+    "DESCRIPTION": "Описание подтипа действия на русском языке"
+  },
+  "business_rules": [
+    "SUB_ACTION_ID детализирует ACTION_ID, указывая конкретную операцию",
+    "Один ACTION_ID может иметь множество SUB_ACTION_ID",
+    "MNEMONIC имеет мнемонический смысл для понимания типа операции",
+    "SUB_ACTION_ID для ACTION_ID=302 (edit_service):",
+    "  - 30201: change_radgroup - изменение списка RADIUS-групп",
+    "  - 30202: change_ext - изменение дополнительных параметров",
+    "  - 30203: change_rad - изменение RADIUS-атрибутов",
+    "  - 30204: change_param - изменение основных свойств услуги (статус, логин, дата остановки, тариф)",
+    "  - 30205: change_tariff - смена тарифного плана",
+    "  - 30206: undo_change_tariff - отказ от смены тарифного плана",
+    "  - 30207: change_apoint - изменение списка точек доступа",
+    "  - 30208: change_status - изменение статуса услуги",
+    "  - 30209: add_partner - добавление партнёра услуги",
+    "  - 30210: del_partner - удаление партнёра услуги",
+    "  - 30211: change_counter - редактирование счетчика",
+    "SUB_ACTION_ID для ACTION_ID=301 (add_service):",
+    "  - 3000: suspend_sbd - SUSPEND SBD (приостановление SBD услуги). ВАЖНО: Ведется ТОЛЬКО для TYPE_ID=9002 (SBD - главная услуга). Для остальных услуг (9005, 9008, 9013) это избыточно",
+    "  - 3001: un_suspend_sbd - SUSPEND SBD (возобновление SBD услуги). ВАЖНО: Ведется ТОЛЬКО для TYPE_ID=9002 (SBD - главная услуга)",
+    "SUB_ACTION_ID для ACTION_ID=10030 (edit_tariffs):",
+    "  - 1003001: add_tariff - создание нового тарифного плана",
+    "  - 1003002: edit_tariff - изменение параметров тарифного плана",
+    "  - 1003003: del_tariff - удаление тарифного плана",
+    "  - 1003004: clone_tariff - создание копии тарифного плана",
+    "  - 1003005: add_tariffel - создание тарифного элемента",
+    "  - 1003006: edit_tariffel - изменение тарифного элемента",
+    "  - 1003007: close_tariffel - закрытие тарифного элемента",
+    "  - 1003008: remove_tariffel_version - отказ от новой версии тарифного элемента",
+    "SUB_ACTION_ID для ACTION_ID=10040 (edit_zones):",
+    "  - 1004001: add_zone_group - создание группы зон",
+    "  - 1004006: add_zone - создание зоны",
+    "  - 1004007: del_zone - удаление зоны",
+    "  - 1004008: edit_zone - изменение зоны",
+    "SUB_ACTION_ID для ACTION_ID=60000 (system_audit):",
+    "  - 600001: staff_add - добавление нового оператора",
+    "  - 600002: staff_delete - удаление оператора",
+    "  - 600003: staff_edit - редактирование данных об операторе",
+    "  - 600004: staff_change_password - изменение пароля оператора",
+    "  - 600005: staff_right_add - добавление оператору права",
+    "  - 600006: staff_right_delete - удаление права у оператора"
+  ],
+  "relationships": [
+    {
+      "table": "BM_ACTION",
+      "type": "JOIN",
+      "on": "BM_SUB_ACTION.ACTION_ID = BM_ACTION.ACTION_ID",
+      "note": "Связь с базовым типом действия"
+    },
+    {
+      "table": "BM_ACTION_LOG",
+      "type": "JOIN",
+      "on": "BM_SUB_ACTION.SUB_ACTION_ID = BM_ACTION_LOG.SUB_ACTION_ID",
+      "note": "Связь с журналом действий для расшифровки подтипа действия"
+    }
+  ],
+  "usage_notes": [
+    "Используется для расшифровки SUB_ACTION_ID в BM_ACTION_LOG",
+    "MNEMONIC позволяет быстро понять тип операции (например, 'change_tariff', 'suspend_sbd')",
+    "DESCRIPTION используется для отображения пользователю",
+    "Для поиска всех операций по конкретному подтипу: JOIN BM_ACTION_LOG WHERE SUB_ACTION_ID = :sub_action_id",
+    "Для поиска всех операций по базовому действию: WHERE ACTION_ID = :action_id",
+    "Пример: найти все смены тарифов: WHERE SUB_ACTION_ID = 30205 (change_tariff)",
+    "Пример: найти все приостановления SBD: WHERE SUB_ACTION_ID = 3000 (suspend_sbd)"
+  ],
+  "reference_data": {
+    "description": "Справочные данные подтипов действий для понимания бизнеса",
+    "key_sub_actions": [
+      {
+        "SUB_ACTION_ID": 3000,
+        "ACTION_ID": 301,
+        "MNEMONIC": "suspend_sbd",
+        "DESCRIPTION": "SUSPEND SBD",
+        "note": "Приостановление SBD услуги. ВАЖНО: SUB_ACTION_ID=3000 ведется ТОЛЬКО для TYPE_ID=9002 (SBD - главная услуга). Для остальных услуг (9005, 9008, 9013) это избыточно, так как расчет начислений ведется для группы услуг на одном и том же IMEI (2 или 4 услуги). В BM_ACTION_LOG: OLD_VALUE='ACTIVE', NEW_VALUE='SUSPENDED'"
+      },
+      {
+        "SUB_ACTION_ID": 3001,
+        "ACTION_ID": 301,
+        "MNEMONIC": "un_suspend_sbd",
+        "DESCRIPTION": "SUSPEND SBD",
+        "note": "Возобновление SBD услуги"
+      },
+      {
+        "SUB_ACTION_ID": 30201,
+        "ACTION_ID": 302,
+        "MNEMONIC": "change_radgroup",
+        "DESCRIPTION": "Изменение списка RADUIS-групп",
+        "note": "Изменение RADIUS-групп услуги"
+      },
+      {
+        "SUB_ACTION_ID": 30204,
+        "ACTION_ID": 302,
+        "MNEMONIC": "change_param",
+        "DESCRIPTION": "Изменение основных свойств услуги",
+        "note": "Используется для изменения логина, даты остановки, статуса и других основных параметров услуги"
+      },
+      {
+        "SUB_ACTION_ID": 30205,
+        "ACTION_ID": 302,
+        "MNEMONIC": "change_tariff",
+        "DESCRIPTION": "Смена тарифного плана",
+        "note": "В BM_ACTION_LOG: OLD_VALUE и NEW_VALUE содержат TARIFF_ID (старый и новый)"
+      },
+      {
+        "SUB_ACTION_ID": 30208,
+        "ACTION_ID": 302,
+        "MNEMONIC": "change_status",
+        "DESCRIPTION": "Изменение статуса услуги",
+        "note": "Изменение статуса услуги (активна, приостановлена и т.д.)"
+      },
+      {
+        "SUB_ACTION_ID": 1003001,
+        "ACTION_ID": 10030,
+        "MNEMONIC": "add_tariff",
+        "DESCRIPTION": "Создание нового тарифного плана",
+        "note": "Системное действие для создания тарифа"
+      },
+      {
+        "SUB_ACTION_ID": 1003002,
+        "ACTION_ID": 10030,
+        "MNEMONIC": "edit_tariff",
+        "DESCRIPTION": "Изменение параметров тарифного плана",
+        "note": "Системное действие для редактирования тарифа"
+      },
+      {
+        "SUB_ACTION_ID": 1003005,
+        "ACTION_ID": 10030,
+        "MNEMONIC": "add_tariffel",
+        "DESCRIPTION": "Создание тарифного элемента",
+        "note": "Системное действие для создания элемента тарифа (абонплата, трафик и т.д.)"
+      },
+      {
+        "SUB_ACTION_ID": 1003006,
+        "ACTION_ID": 10030,
+        "MNEMONIC": "edit_tariffel",
+        "DESCRIPTION": "Изменение тарифного элемента",
+        "note": "Системное действие для редактирования элемента тарифа"
+      },
+      {
+        "SUB_ACTION_ID": 1004006,
+        "ACTION_ID": 10040,
+        "MNEMONIC": "add_zone",
+        "DESCRIPTION": "Создание зоны",
+        "note": "Системное действие для создания тарифной зоны"
+      },
+      {
+        "SUB_ACTION_ID": 1004008,
+        "ACTION_ID": 10040,
+        "MNEMONIC": "edit_zone",
+        "DESCRIPTION": "Изменение зоны",
+        "note": "Системное действие для редактирования тарифной зоны"
+      },
+      {
+        "SUB_ACTION_ID": 600001,
+        "ACTION_ID": 60000,
+        "MNEMONIC": "staff_add",
+        "DESCRIPTION": "Добавление нового оператора",
+        "note": "Аудит: добавление оператора в систему"
+      },
+      {
+        "SUB_ACTION_ID": 600003,
+        "ACTION_ID": 60000,
+        "MNEMONIC": "staff_edit",
+        "DESCRIPTION": "Редактирование данных об операторе",
+        "note": "Аудит: изменение данных оператора"
+      }
+    ],
+    "examples_from_log": [
+      {
+        "description": "Приостановление SBD услуги",
+        "SUB_ACTION_ID": 3000,
+        "ACTION_ID": 302,
+        "MNEMONIC": "suspend_sbd",
+        "note": "ВАЖНО: SUB_ACTION_ID=3000 ведется ТОЛЬКО для TYPE_ID=9002 (SBD - главная услуга). Для остальных услуг (9005, 9008, 9013) это избыточно, так как расчет начислений ведется для группы услуг на одном и том же IMEI (2 или 4 услуги). Когда меняется статус 9002, автоматически меняются статусы зависимых услуг.",
+        "BM_ACTION_LOG_example": {
+          "ACTION_LOG_ID": 992943,
+          "OLD_VALUE": "ACTIVE",
+          "NEW_VALUE": "SUSPENDED",
+          "STAFF_COMMENT": "service SUSPENDED by swap koroleva",
+          "SERVICE_TYPE_ID": 9002
+        }
+      },
+      {
+        "description": "Смена тарифа услуги",
+        "SUB_ACTION_ID": 30205,
+        "ACTION_ID": 302,
+        "MNEMONIC": "change_tariff",
+        "BM_ACTION_LOG_example": {
+          "ACTION_LOG_ID": 992460,
+          "OLD_VALUE": "114361",
+          "NEW_VALUE": "137892",
+          "STAFF_COMMENT": "operator edit change service's tariff_id immideately",
+          "note": "OLD_VALUE и NEW_VALUE содержат TARIFF_ID"
+        }
+      },
+      {
+        "description": "Изменение даты остановки услуги",
+        "SUB_ACTION_ID": 30204,
+        "ACTION_ID": 302,
+        "MNEMONIC": "change_param",
+        "BM_ACTION_LOG_example": {
+          "ACTION_LOG_ID": 992937,
+          "OLD_VALUE": "NULL",
+          "NEW_VALUE": "2025-12-18",
+          "STAFF_COMMENT": "operator edit service's stop date:"
+        }
+      },
+      {
+        "description": "Изменение логина услуги",
+        "SUB_ACTION_ID": 30204,
+        "ACTION_ID": 302,
+        "MNEMONIC": "change_param",
+        "BM_ACTION_LOG_example": {
+          "ACTION_LOG_ID": 992940,
+          "OLD_VALUE": "SUB-63274664638",
+          "NEW_VALUE": "dSUB-63274664638",
+          "STAFF_COMMENT": "login changed by operator:",
+          "note": "Для Iridium SBD LOGIN = CONTRACT_ID (SUB-XXXXX)"
+        }
+      }
+    ]
+  }
+}
+

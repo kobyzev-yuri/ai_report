@@ -8,7 +8,7 @@ from tabs.common import export_to_csv, export_to_excel
 
 def show_tab(get_connection, get_analytics_invoice_period_report, get_analytics_duplicates,
              selected_period, contract_id_filter, imei_filter,
-             customer_name_filter, code_1c_filter):
+             customer_name_filter, code_1c_filter, remove_analytics_duplicates):
     """
     Отображение закладки отчетов по счетам за период
     """
@@ -92,29 +92,69 @@ def show_tab(get_connection, get_analytics_invoice_period_report, get_analytics_
         if df_analytics is not None and not df_analytics.empty and st.session_state.get('analytics_loaded', False):
             st.success(f"✅ Загружено записей: {len(df_analytics):,}")
             
-            # Простая статистика
+            # Простая статистика - используем правильные названия колонок из VIEW
             st.markdown("---")
             col1, col2, col3, col4 = st.columns(4)
             with col1:
-                st.metric("Всего сумм (руб)", f"{df_analytics['Сумма (руб)'].sum():,.2f}")
+                # Ищем колонку с общей суммой
+                total_sum = 0
+                if 'MONEY' in df_analytics.columns:
+                    total_sum = df_analytics['MONEY'].sum()
+                elif 'MONEY_ABON' in df_analytics.columns and 'MONEY_TRAFFIC' in df_analytics.columns:
+                    total_sum = df_analytics['MONEY_ABON'].sum() + df_analytics['MONEY_TRAFFIC'].sum()
+                st.metric("Всего сумм (руб)", f"{total_sum:,.2f}")
             with col2:
-                st.metric("Абонплата (руб)", f"{df_analytics['Абонплата (руб)'].sum():,.2f}")
+                if 'MONEY_ABON' in df_analytics.columns:
+                    st.metric("Абонплата (руб)", f"{df_analytics['MONEY_ABON'].sum():,.2f}")
+                else:
+                    st.metric("Абонплата", "N/A")
             with col3:
-                st.metric("Трафик (руб)", f"{df_analytics['Трафик (руб)'].sum():,.2f}")
+                if 'MONEY_TRAFFIC' in df_analytics.columns:
+                    st.metric("Трафик (руб)", f"{df_analytics['MONEY_TRAFFIC'].sum():,.2f}")
+                else:
+                    st.metric("Трафик", "N/A")
             with col4:
                 st.metric("Записей", f"{len(df_analytics):,}")
             
             st.markdown("---")
             
-            # Детализированная таблица (простая, без группировок)
+            # Детализированная таблица - используем все доступные колонки
             st.subheader("📋 Детализированный отчет")
-            display_columns = [
-                'Период', 'Клиент', 'Код 1С', 'Договор', 'Contract ID', 'Service ID', 'IMEI',
-                'Тариф', 'Зона', 'Тип ресурса', 'Название ресурса',
-                'Сумма (руб)', 'Абонплата (руб)', 'Трафик (руб)', 
-                'Трафик (объем)', 'Общий трафик', 'В счете', 'Статус услуги'
-            ]
-            display_df = df_analytics[display_columns].copy()
+            # Определяем доступные колонки для отображения
+            available_columns = []
+            column_mapping = {
+                'PERIOD_YYYYMM': 'Период',
+                'CUSTOMER_NAME': 'Клиент',
+                'CODE_1C': 'Код 1С',
+                'ACCOUNT_NAME': 'Договор',
+                'CONTRACT_ID': 'Contract ID',
+                'SERVICE_ID': 'Service ID',
+                'IMEI': 'IMEI',
+                'TARIFF_NAME': 'Тариф',
+                'ZONE_NAME': 'Зона',
+                'RESOURCE_TYPE_MNEMONIC': 'Тип ресурса',
+                'RESOURCE_TYPE_NAME': 'Название ресурса',
+                'MONEY': 'Сумма (руб)',
+                'MONEY_ABON': 'Абонплата (руб)',
+                'MONEY_TRAFFIC': 'Трафик (руб)',
+                'TRAF': 'Трафик (объем)',
+                'TOTAL_TRAF': 'Общий трафик',
+                'IN_INVOICE': 'В счете',
+                'SERVICE_STATUS': 'Статус услуги'
+            }
+            
+            # Собираем только те колонки, которые есть в DataFrame
+            for db_col, display_name in column_mapping.items():
+                if db_col in df_analytics.columns:
+                    available_columns.append(db_col)
+            
+            # Если есть другие колонки, добавляем их тоже
+            other_cols = [col for col in df_analytics.columns if col not in column_mapping.keys()]
+            available_columns.extend(other_cols)
+            
+            display_df = df_analytics[available_columns].copy()
+            # Переименовываем колонки для отображения
+            display_df = display_df.rename(columns=column_mapping)
             for col in display_df.columns:
                 if display_df[col].dtype == 'object':
                     display_df[col] = display_df[col].fillna('')
@@ -160,8 +200,9 @@ def show_tab(get_connection, get_analytics_invoice_period_report, get_analytics_
     # ========== SUB TAB: ПРОВЕРКА ДУБЛИКАТОВ ==========
     with sub_tab_duplicates:
         st.header("🔍 Проверка дубликатов в ANALYTICS")
-        st.markdown("Поиск записей, где все поля совпадают, кроме AID (первичного ключа).")
+        st.markdown("Поиск записей, где **все ключевые поля совпадают**, кроме AID (первичного ключа).")
         st.info("💡 Дубликаты могут возникать при повторной загрузке данных или ошибках в процессе формирования ANALYTICS.")
+        st.warning("⚠️ **Важно**: Дубликаты определяются по всем бизнес-полям таблицы ANALYTICS (включая ZONE_ID, TARIFFEL_ID, COUNTER_CF и др.). Если записи различаются хотя бы одним полем, они НЕ считаются дубликатами.")
         
         conn = get_connection()
         if conn:
@@ -196,29 +237,143 @@ def show_tab(get_connection, get_analytics_invoice_period_report, get_analytics_
                         
                         st.markdown("---")
                         
-                        if st.button("🔍 Найти дубликаты", key='find_duplicates_btn'):
-                            with st.spinner("Поиск дубликатов..."):
-                                duplicates_df = get_analytics_duplicates(get_connection, period_id)
+                        col_btn1, col_btn2 = st.columns(2)
+                        with col_btn1:
+                            if st.button("🔍 Найти дубликаты", key='find_duplicates_btn', use_container_width=True):
+                                # Очищаем предыдущие результаты
+                                if 'duplicates_df' in st.session_state:
+                                    del st.session_state.duplicates_df
+                                if 'duplicates_found' in st.session_state:
+                                    del st.session_state.duplicates_found
                                 
-                                if duplicates_df is not None and not duplicates_df.empty:
-                                    st.success(f"✅ Найдено дубликатов: {len(duplicates_df):,}")
-                                    st.dataframe(duplicates_df, use_container_width=True, height=400)
+                                with st.spinner("Поиск дубликатов..."):
+                                    # Используем функцию, переданную как параметр
+                                    duplicates_df = get_analytics_duplicates(get_connection, period_id)
                                     
-                                    # Экспорт
-                                    st.markdown("---")
-                                    col1, col2 = st.columns(2)
+                                    if duplicates_df is not None and not duplicates_df.empty:
+                                        st.session_state.duplicates_found = True
+                                        st.session_state.duplicates_df = duplicates_df
+                                        st.session_state.duplicates_period_id = period_id
+                                        st.success(f"✅ Найдено групп дубликатов: {len(duplicates_df):,}")
+                                    elif duplicates_df is not None and duplicates_df.empty:
+                                        st.session_state.duplicates_found = False
+                                        st.info("✅ Дубликатов не найдено")
+                                    else:
+                                        st.session_state.duplicates_found = False
+                                        st.error("❌ Ошибка при поиске дубликатов")
+                        
+                        # Показываем результаты поиска дубликатов
+                        if st.session_state.get('duplicates_found', False) and st.session_state.get('duplicates_period_id') == period_id:
+                            duplicates_df = st.session_state.get('duplicates_df')
+                            if duplicates_df is not None and not duplicates_df.empty:
+                                st.markdown("---")
+                                st.subheader("📊 Найденные дубликаты")
+                                
+                                # Статистика
+                                total_duplicate_records = duplicates_df['DUPLICATE_COUNT'].sum() if 'DUPLICATE_COUNT' in duplicates_df.columns else 0
+                                total_groups = len(duplicates_df)
+                                records_to_delete = total_duplicate_records - total_groups  # Удаляем все кроме одной в каждой группе
+                                
+                                col1, col2, col3 = st.columns(3)
+                                with col1:
+                                    st.metric("Групп дубликатов", total_groups)
+                                with col2:
+                                    st.metric("Всего дублирующихся записей", total_duplicate_records)
+                                with col3:
+                                    st.metric("Записей к удалению", records_to_delete)
+                                
+                                # Выводим все поля дубликатов
+                                # Настраиваем отображение всех колонок
+                                pd.set_option('display.max_columns', None)
+                                pd.set_option('display.width', None)
+                                pd.set_option('display.max_colwidth', 100)
+                                
+                                # Показываем информацию о колонках
+                                st.info(f"📊 Всего полей в отчете: **{len(duplicates_df.columns)}** | Всего строк: **{len(duplicates_df)}**")
+                                
+                                # Выводим DataFrame со всеми колонками
+                                # Принудительно показываем все колонки
+                                display_df = duplicates_df.copy()
+                                
+                                # Убеждаемся, что все колонки видны
+                                st.dataframe(
+                                    display_df,
+                                    use_container_width=True,
+                                    height=600,
+                                    hide_index=True,
+                                    column_config={
+                                        col: st.column_config.TextColumn(col, width="small")
+                                        for col in display_df.columns
+                                    }
+                                )
+                                
+                                # Дополнительная информация для отладки
+                                with st.expander("🔍 Отладочная информация"):
+                                    st.write(f"**Количество колонок в DataFrame:** {len(display_df.columns)}")
+                                    st.write(f"**Первые 10 колонок:** {', '.join(display_df.columns.tolist()[:10])}")
+                                    
+                                # Показываем список всех колонок
+                                with st.expander("📋 Список всех полей в отчете"):
+                                    cols_list = duplicates_df.columns.tolist()
+                                    st.write(f"**Всего полей: {len(cols_list)}**")
+                                    # Разбиваем на колонки для лучшего отображения
+                                    col1, col2, col3 = st.columns(3)
+                                    chunk_size = (len(cols_list) + 2) // 3
                                     with col1:
-                                        csv_data = duplicates_df.to_csv(index=False).encode('utf-8')
-                                        st.download_button(
-                                            label="📥 Скачать CSV",
-                                            data=csv_data,
-                                            file_name=f"analytics_duplicates_{period_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
-                                            mime="text/csv"
-                                        )
-                                elif duplicates_df is not None and duplicates_df.empty:
-                                    st.info("✅ Дубликатов не найдено")
+                                        st.write("**Колонки 1:**")
+                                        for col in cols_list[:chunk_size]:
+                                            st.write(f"- {col}")
+                                    with col2:
+                                        st.write("**Колонки 2:**")
+                                        for col in cols_list[chunk_size:chunk_size*2]:
+                                            st.write(f"- {col}")
+                                    with col3:
+                                        st.write("**Колонки 3:**")
+                                        for col in cols_list[chunk_size*2:]:
+                                            st.write(f"- {col}")
+                                
+                                # Экспорт
+                                st.markdown("---")
+                                col1, col2 = st.columns(2)
+                                with col1:
+                                    csv_data = duplicates_df.to_csv(index=False).encode('utf-8')
+                                    st.download_button(
+                                        label="📥 Скачать CSV",
+                                        data=csv_data,
+                                        file_name=f"analytics_duplicates_{period_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+                                        mime="text/csv"
+                                    )
+                                
+                                # Удаление дубликатов
+                                st.markdown("---")
+                                st.subheader("🗑️ Удаление дубликатов")
+                                st.warning(f"⚠️ Будет удалено {records_to_delete} записей (останутся только записи с максимальным AID в каждой группе)")
+                                
+                                if remove_analytics_duplicates:
+                                    # Двойное подтверждение
+                                    confirm_text = st.text_input(
+                                        "Для подтверждения введите 'УДАЛИТЬ ДУБЛИКАТЫ'",
+                                        key='confirm_delete_duplicates',
+                                        placeholder="УДАЛИТЬ ДУБЛИКАТЫ"
+                                    )
+                                    
+                                    if confirm_text == "УДАЛИТЬ ДУБЛИКАТЫ":
+                                        if st.button("🗑️ Удалить дубликаты", type="primary", key='delete_duplicates_btn', use_container_width=True):
+                                            with st.spinner("Удаление дубликатов..."):
+                                                success, deleted_count, message = remove_analytics_duplicates(get_connection, period_id)
+                                                
+                                                if success:
+                                                    st.success(message)
+                                                    # Очищаем состояние после успешного удаления
+                                                    st.session_state.duplicates_found = False
+                                                    st.session_state.duplicates_df = None
+                                                    st.rerun()
+                                                else:
+                                                    st.error(message)
+                                    else:
+                                        st.info("💡 Введите 'УДАЛИТЬ ДУБЛИКАТЫ' для активации кнопки удаления")
                                 else:
-                                    st.error("❌ Ошибка при поиске дубликатов")
+                                    st.info("💡 Функция удаления дубликатов недоступна")
             except Exception as e:
                 st.error(f"❌ Ошибка: {e}")
                 import traceback
@@ -228,5 +383,8 @@ def show_tab(get_connection, get_analytics_invoice_period_report, get_analytics_
                 conn.close()
         else:
             st.error("❌ Ошибка подключения к базе данных")
+
+
+
 
 

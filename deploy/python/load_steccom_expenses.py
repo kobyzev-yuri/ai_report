@@ -34,7 +34,24 @@ class STECCOMDataLoader:
         """
         self.oracle_config = oracle_config
         self.connection = None
-        self.gdrive_path = "STECCOMLLCRussiaSBD.AccessFees_reports"
+        # Каталог с CSV-инвойсами STECCOM относительно корня проекта.
+        # Ищем в двух вариантах:
+        #   1) STECCOMLLCRussiaSBD.AccessFees_reports
+        #   2) data/STECCOMLLCRussiaSBD.AccessFees_reports
+        # При выборе проверяем не только наличие директории, но и наличие CSV-файлов.
+        base_paths = [
+            "STECCOMLLCRussiaSBD.AccessFees_reports",
+            os.path.join("data", "STECCOMLLCRussiaSBD.AccessFees_reports"),
+        ]
+        for p in base_paths:
+            if os.path.isdir(p):
+                import glob
+                if glob.glob(os.path.join(p, "*.csv")):
+                    self.gdrive_path = p
+                    break
+        else:
+            # Если каталог не найден, оставляем дефолт и далее будет warning "CSV файлы STECCOM не найдены"
+            self.gdrive_path = base_paths[0]
         
     def connect_to_oracle(self):
         """Подключение к Oracle базе данных (с поддержкой SID и SERVICE_NAME)"""

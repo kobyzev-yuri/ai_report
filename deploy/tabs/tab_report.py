@@ -239,3 +239,22 @@ def show_tab(get_connection, get_main_report,
         st.warning("⚠️ Данные не найдены для выбранных фильтров")
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

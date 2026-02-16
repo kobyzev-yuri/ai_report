@@ -1,0 +1,87 @@
+{
+  "table_name": "DICT",
+  "schema": "billing",
+  "description": "Справочник атрибутов услуг. Определяет типы расширенных атрибутов, которые могут быть назначены услугам через SERVICES_EXT. Содержит описание атрибутов, их типы данных и значения по умолчанию. Используется для хранения метаданных о расширенных параметрах услуг (права доступа, настройки, флаги).",
+  "database": "Oracle (production)",
+  "ddl": "CREATE TABLE DICT (\n    DICT_ID NUMBER,\n    TYPE_ID NUMBER,\n    FORMAT_ID NUMBER,\n    ATTRIBUTE VARCHAR2(255),\n    BM_CLASS VARCHAR2(255),\n    CTL_TYPE VARCHAR2(255),\n    DFL_VAL VARCHAR2(4000),\n    DESCRIPTION VARCHAR2(4000)\n);",
+  "key_columns": {
+    "DICT_ID": "Уникальный идентификатор атрибута (PRIMARY KEY). Используется в SERVICES_EXT.DICT_ID",
+    "TYPE_ID": "ID типа услуги из BM_TYPE.TYPE_ID. Определяет, для каких типов услуг применим этот атрибут",
+    "FORMAT_ID": "ID формата данных атрибута",
+    "ATTRIBUTE": "Название атрибута (мнемоника, например, 'allow_suspend', 'allow_change_password' и т.д.)",
+    "BM_CLASS": "Класс атрибута в биллинге (например, 'pstn' для телефонных услуг)",
+    "CTL_TYPE": "Тип контрола для отображения (например, 'single' для одиночного значения)",
+    "DFL_VAL": "Значение по умолчанию для атрибута",
+    "DESCRIPTION": "Описание атрибута на русском языке"
+  },
+  "business_rules": [
+    "DICT определяет метаданные расширенных атрибутов услуг",
+    "TYPE_ID связывает атрибут с типом услуги (например, TYPE_ID = 30 для личного кабинета)",
+    "ATTRIBUTE имеет мнемонический смысл для понимания назначения атрибута",
+    "DICT_ID = 283: ATTRIBUTE = 'allow_suspend', DESCRIPTION = 'Право на SUSPEND/UNSUSPEND'",
+    "Для DICT_ID = 283: TYPE_ID = 30 (личный кабинет), BM_CLASS = 'pstn', CTL_TYPE = 'single'",
+    "ATTRIBUTE = 'allow_suspend' используется для услуг типа 30 (личный кабинет)",
+    "VALUE = '1' в SERVICES_EXT для allow_suspend означает наличие права на приостановку/возобновление услуги",
+    "VALUE = '0' или NULL означает отсутствие права",
+    "Услуга типа 30 позволяет абоненту входить в личный кабинет по логину и паролю услуги",
+    "Флаги в DICT определяют права пользователя в личном кабинете"
+  ],
+  "relationships": [
+    {
+      "table": "SERVICES_EXT",
+      "type": "JOIN",
+      "on": "DICT.DICT_ID = SERVICES_EXT.DICT_ID",
+      "note": "Связь с расширенными атрибутами услуг"
+    },
+    {
+      "table": "BM_TYPE",
+      "type": "LEFT JOIN",
+      "on": "DICT.TYPE_ID = BM_TYPE.TYPE_ID",
+      "note": "Связь с типом услуги, для которого применим атрибут"
+    }
+  ],
+  "usage_notes": [
+    "Используется для расшифровки DICT_ID в SERVICES_EXT",
+    "ATTRIBUTE позволяет быстро понять назначение атрибута",
+    "DESCRIPTION используется для отображения пользователю",
+    "TYPE_ID помогает фильтровать атрибуты по типу услуги",
+    "Для поиска атрибутов для типа услуги: WHERE TYPE_ID = :type_id",
+    "Для поиска конкретного атрибута: WHERE ATTRIBUTE = 'allow_suspend'",
+    "Пример: найти описание атрибута allow_suspend:",
+    "  SELECT * FROM DICT WHERE DICT_ID = 283",
+    "  Результат: ATTRIBUTE = 'allow_suspend', DESCRIPTION = 'Право на SUSPEND/UNSUSPEND'"
+  ],
+  "reference_data": {
+    "description": "Справочные данные атрибутов для понимания бизнеса",
+    "key_attributes": [
+      {
+        "DICT_ID": 283,
+        "TYPE_ID": 30,
+        "FORMAT_ID": 6,
+        "ATTRIBUTE": "allow_suspend",
+        "BM_CLASS": "pstn",
+        "CTL_TYPE": "single",
+        "DFL_VAL": null,
+        "DESCRIPTION": "Право на SUSPEND/UNSUSPEND",
+        "usage": "Используется для услуг типа 30 (личный кабинет). VALUE = '1' в SERVICES_EXT означает, что пользователь имеет право приостанавливать/возобновлять услугу через личный кабинет",
+        "business_context": "Услуга типа 30 позволяет абоненту входить в личный кабинет по логину и паролю услуги. Флаг allow_suspend определяет, может ли пользователь самостоятельно приостанавливать и активировать услугу через интерфейс личного кабинета"
+      }
+    ],
+    "examples": [
+      {
+        "description": "Поиск описания атрибута allow_suspend",
+        "query": "SELECT * FROM DICT WHERE DICT_ID = 283",
+        "result": {
+          "DICT_ID": 283,
+          "TYPE_ID": 30,
+          "FORMAT_ID": 6,
+          "ATTRIBUTE": "allow_suspend",
+          "BM_CLASS": "pstn",
+          "CTL_TYPE": "single",
+          "DFL_VAL": null,
+          "DESCRIPTION": "Право на SUSPEND/UNSUSPEND"
+        }
+      }
+    ]
+  }
+}

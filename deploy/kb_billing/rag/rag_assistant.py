@@ -647,6 +647,21 @@ class RAGAssistant:
    - Для нескольких периодов: SELECT TO_CHAR(pm.START_DATE, 'YYYY-MM') AS PERIOD_YYYYMM, AVG(ii.RATE) AS RATE FROM BM_INVOICE_ITEM ii JOIN BM_PERIOD pm ON ii.PERIOD_ID = pm.PERIOD_ID WHERE TO_CHAR(pm.START_DATE, 'YYYY-MM') >= 'YYYY-MM' AND (ii.CURRENCY_ID = 4 OR ii.ACC_CURRENCY_ID = 4) AND ii.RATE IS NOT NULL GROUP BY TO_CHAR(pm.START_DATE, 'YYYY-MM')
    - НЕ используй ROWNUM в подзапросах CTE - это неэффективно и может вызвать ошибки
    - НЕ используй BM_CURRENCY_RATE напрямую - используй курс из счетов-фактур!
+13. 🚨 КРИТИЧЕСКИ ВАЖНО: В Oracle НЕЛЬЗЯ использовать DISTINCT в LISTAGG! Это вызовет ошибку ORA-30482!
+   - ❌ НЕПРАВИЛЬНО (ВЫЗОВЕТ ОШИБКУ!): LISTAGG(DISTINCT column, ', ') WITHIN GROUP (ORDER BY column)
+   - ❌ НЕПРАВИЛЬНО (ВЫЗОВЕТ ОШИБКУ!): LISTAGG(DISTINCT CASE ... END, '; ') WITHIN GROUP (ORDER BY ...)
+   - ✅ ПРАВИЛЬНО: Используй подзапрос с DISTINCT перед LISTAGG:
+     SELECT LISTAGG(bank_info, '; ') WITHIN GROUP (ORDER BY bank_info) AS BANK_DETAILS
+     FROM (
+         SELECT DISTINCT cd2.MNEMONIC || ': ' || cc2.VALUE AS bank_info
+         FROM BM_CUSTOMER_CONTACT cc2
+         JOIN BM_CONTACT_DICT cd2 ON cc2.CONTACT_DICT_ID = cd2.CONTACT_DICT_ID
+         WHERE cc2.CUSTOMER_ID = cc.CUSTOMER_ID
+           AND (cd2.MNEMONIC LIKE '%bank%' OR cd2.MNEMONIC LIKE '%account%' OR ...)
+     )
+   - 🚨 ВАЖНО: В подзапросах используй правильные алиасы! Если в основном запросе используется алиас `cc` для BM_CUSTOMER_CONTACT, то в подзапросе используй `cc.CUSTOMER_ID` для связи с основным запросом, а для таблиц в подзапросе используй другие алиасы (cc2, cd2) чтобы избежать конфликтов!
+   - ✅ АЛЬТЕРНАТИВА: Используй GROUP BY в подзапросе для удаления дубликатов перед LISTAGG
+   - 🚨 ПРОВЕРЯЙ: Если в твоем SQL есть LISTAGG, убедись что в нем НЕТ слова DISTINCT!
    - Если курс из счетов недоступен, используй BM_CURRENCY_RATE как запасной вариант: SELECT RATE FROM BM_CURRENCY_RATE WHERE CURRENCY_ID = 4 AND START_TIME <= LAST_DAY(TO_DATE('2025-10', 'YYYY-MM')) ORDER BY START_TIME DESC FETCH FIRST 1 ROW ONLY
    
 10. ОПТИМИЗАЦИЯ ПРОИЗВОДИТЕЛЬНОСТИ (КРИТИЧЕСКИ ВАЖНО):
@@ -728,7 +743,21 @@ class RAGAssistant:
 - Если вопрос про КВАРТАЛ (Q1, Q2, Q3, Q4, первый квартал, второй квартал и т.д.) → генерируй запрос ТОЛЬКО для квартала, НЕ для года!
 - Если вопрос про МЕСЯЦ (октябрь, ноябрь и т.д.) → генерируй запрос ТОЛЬКО для месяца, НЕ для квартала или года!
 - Если вопрос про ГОД → генерируй запрос ТОЛЬКО для года, НЕ для квартала!
-- Строго следуй запросу пользователя по периоду!"""
+- Строго следуй запросу пользователя по периоду!
+
+🚨🚨🚨 КРИТИЧЕСКИ ВАЖНО: НЕ ИСПОЛЬЗУЙ DISTINCT В LISTAGG! 🚨🚨🚨
+- ❌ НЕПРАВИЛЬНО (ВЫЗОВЕТ ОШИБКУ ORA-30482!): LISTAGG(DISTINCT ..., ', ')
+- ❌ НЕПРАВИЛЬНО (ВЫЗОВЕТ ОШИБКУ ORA-30482!): LISTAGG(DISTINCT CASE ... END, '; ')
+- ✅ ПРАВИЛЬНО: Используй подзапрос с DISTINCT перед LISTAGG:
+  SELECT LISTAGG(bank_info, '; ') WITHIN GROUP (ORDER BY bank_info) AS BANK_DETAILS
+  FROM (
+      SELECT DISTINCT cd.MNEMONIC || ': ' || cc.VALUE AS bank_info
+      FROM BM_CUSTOMER_CONTACT cc
+      JOIN BM_CONTACT_DICT cd ON cc.CONTACT_DICT_ID = cd.CONTACT_DICT_ID
+      WHERE cc.CUSTOMER_ID = :customer_id
+        AND (условия)
+  )
+- 🚨 ПЕРЕД ОТПРАВКОЙ SQL: Проверь, что в нем НЕТ "LISTAGG(DISTINCT" - если есть, исправь!"""
             
             # Получение температуры из конфигурации
             temperature = float(os.getenv("OPENAI_TEMPERATURE", "0.2"))
@@ -759,7 +788,8 @@ class RAGAssistant:
                     raise
             
             # Извлечение SQL из ответа
-            sql = response.choices[0].message.content.strip()
+            original_response = response.choices[0].message.content.strip()
+            sql = original_response
             
             # Очистка SQL от markdown форматирования, если есть
             if sql.startswith("```sql"):
@@ -770,53 +800,142 @@ class RAGAssistant:
                 sql = sql[:-3]
             sql = sql.strip()
             
-            # Извлечение только первого SQL запроса, если их несколько
-            # Удаляем варианты типа "Вариант 1:", "Вариант 2:", "Вариант 3:"
             import re
-            # Ищем первый SQL запрос (начинается с SELECT, WITH, INSERT, UPDATE, DELETE)
-            sql_match = re.search(r'(?i)(?:SELECT|WITH|INSERT|UPDATE|DELETE).*?(?=\n\s*(?:Вариант|Вариант\s*\d+|SELECT|WITH|INSERT|UPDATE|DELETE|$))', sql, re.DOTALL)
-            if sql_match:
-                sql = sql_match.group(0).strip()
+            
+            # Удаляем блоки с примерами ПЕРЕД удалением объяснений
+            sql = re.sub(r'(?i)(?:Примеры|Рекомендуемые примеры|Примеры запросов|Examples|Recommended examples)[:.]?\s*.*?(?=(?i)(?:SELECT|WITH|INSERT|UPDATE|DELETE|$))', '', sql, flags=re.DOTALL)
             
             # Удаляем префиксы типа "Вариант 1:", "Вариант 2:", "Вариант 3:"
             sql = re.sub(r'^(?:Вариант\s*\d+[:.]?\s*|Option\s*\d+[:.]?\s*)', '', sql, flags=re.IGNORECASE | re.MULTILINE)
             
-            # Удаляем блоки с примерами ПЕРЕД удалением объяснений (Примеры:, Рекомендуемые примеры:, Примеры запросов: и т.д.)
-            sql = re.sub(r'(?i)(?:Примеры|Рекомендуемые примеры|Примеры запросов|Examples|Recommended examples)[:.]?\s*.*?(?=(?i)(?:SELECT|WITH|INSERT|UPDATE|DELETE|$))', '', sql, flags=re.DOTALL)
+            # Ищем начало основного SQL запроса (не подзапроса)
+            # Ищем первое вхождение SELECT/WITH/INSERT/UPDATE/DELETE на уровне строки (не внутри подзапроса)
+            # Это должно быть в начале строки или после пробелов/переноса строки
+            main_sql_match = re.search(r'(?i)^\s*(SELECT|WITH|INSERT|UPDATE|DELETE)\s+', sql, re.MULTILINE)
+            if not main_sql_match:
+                # Если не найдено в начале строки, ищем любое вхождение
+                main_sql_match = re.search(r'(?i)(SELECT|WITH|INSERT|UPDATE|DELETE)\s+', sql)
             
-            # Удаляем объяснения до SQL (текст до первого SELECT/WITH/INSERT/UPDATE/DELETE)
-            sql = re.sub(r'^.*?(?=(?i)(?:SELECT|WITH|INSERT|UPDATE|DELETE))', '', sql, flags=re.DOTALL)
+            if main_sql_match:
+                # Находим позицию начала основного запроса
+                start_pos = main_sql_match.start()
+                sql = sql[start_pos:].strip()
             
-            # Удаляем объяснения после SQL (текст после последнего ; или после последнего SELECT блока)
-            # Находим последний SQL запрос
+            # Теперь нужно найти конец SQL запроса
+            # Ищем точку с запятой или конец текста, но учитываем подзапросы
+            # Простой подход: ищем последнюю точку с запятой или конец, если скобки сбалансированы
+            bracket_count = 0
             sql_lines = sql.split('\n')
             sql_clean = []
-            in_sql = False
-            for line in sql_lines:
-                line_upper = line.upper().strip()
-                # Начало SQL запроса
-                if any(line_upper.startswith(keyword) for keyword in ['SELECT', 'WITH', 'INSERT', 'UPDATE', 'DELETE']):
-                    in_sql = True
-                    sql_clean.append(line)
-                # Продолжение SQL запроса
-                elif in_sql:
-                    # Если строка начинается с ключевого слова SQL или является частью SQL (содержит SQL операторы)
-                    if any(keyword in line_upper for keyword in ['FROM', 'WHERE', 'JOIN', 'GROUP', 'ORDER', 'HAVING', 'UNION', 'AND', 'OR', ',', '(', ')', 'AS', 'CASE', 'WHEN', 'THEN', 'ELSE', 'END']):
+            found_main_keyword = False
+            
+            for i, line in enumerate(sql_lines):
+                line_stripped = line.strip()
+                line_upper = line_stripped.upper()
+                
+                # Проверяем, является ли это началом основного запроса
+                if not found_main_keyword:
+                    if any(line_upper.startswith(keyword) for keyword in ['SELECT', 'WITH', 'INSERT', 'UPDATE', 'DELETE']):
+                        found_main_keyword = True
                         sql_clean.append(line)
-                    # Если строка пустая или содержит только пробелы - продолжаем SQL
-                    elif not line.strip():
-                        sql_clean.append(line)
-                    # Если строка не похожа на SQL - это конец SQL запроса
-                    elif not any(char in line for char in [',', '(', ')', '=', '<', '>', "'", '"']):
-                        break
+                        bracket_count += line.count('(') - line.count(')')
+                        continue
                     else:
-                        sql_clean.append(line)
+                        # Пропускаем строки до начала основного запроса
+                        continue
+                
+                # После начала основного запроса добавляем все строки
+                sql_clean.append(line)
+                bracket_count += line.count('(') - line.count(')')
+                
+                # Если строка заканчивается точкой с запятой и скобки сбалансированы - это конец
+                if line_stripped.endswith(';') and bracket_count == 0:
+                    break
+                
+                # Если скобки сбалансированы и строка не похожа на SQL - проверяем, не конец ли это
+                if bracket_count == 0 and line_stripped and not any(keyword in line_upper for keyword in 
+                    ['SELECT', 'FROM', 'WHERE', 'JOIN', 'LEFT', 'RIGHT', 'INNER', 'OUTER', 'ON', 'AND', 'OR', 
+                     'GROUP', 'ORDER', 'HAVING', 'UNION', 'AS', 'CASE', 'WHEN', 'THEN', 'ELSE', 'END', 
+                     'IN', 'EXISTS', 'NOT', 'NULL', 'IS', 'LIKE', 'BETWEEN', 'WITH', 'INSERT', 'UPDATE', 'DELETE']):
+                    # Проверяем, есть ли еще SQL после этой строки
+                    remaining = '\n'.join(sql_lines[i+1:]).strip()
+                    if not re.search(r'(?i)(SELECT|FROM|WHERE|JOIN|GROUP|ORDER)', remaining):
+                        break
             
             if sql_clean:
                 sql = '\n'.join(sql_clean).strip()
+                # Удаляем точку с запятой в конце
+                sql = sql.rstrip(';').strip()
             
-            # Удаляем точку с запятой в конце (Oracle через pandas может не принимать её)
-            sql = sql.rstrip(';').strip()
+            
+            # Строгая валидация SQL
+            sql_upper = sql.upper().strip()
+            
+            # Проверка 1: SQL должен начинаться с ключевого слова
+            if not any(sql_upper.startswith(keyword) for keyword in ['SELECT', 'WITH', 'INSERT', 'UPDATE', 'DELETE']):
+                # Логируем оригинальный ответ для отладки
+                logger.warning(f"SQL не начинается с ключевого слова. Оригинальный ответ LLM:\n{original_response[:1000]}")
+                logger.warning(f"Извлеченный SQL:\n{sql[:500]}")
+                
+                # Пытаемся найти начало SQL запроса
+                sql_match = re.search(r'(?i)(SELECT|WITH|INSERT|UPDATE|DELETE).*', sql, re.DOTALL)
+                if sql_match:
+                    sql = sql_match.group(0).strip()
+                    sql_upper = sql.upper().strip()
+                    logger.info(f"SQL исправлен, начинается с: {sql_upper[:50]}")
+                else:
+                    raise ValueError(f"❌ Не удалось извлечь корректный SQL запрос. SQL не начинается с SELECT/WITH/INSERT/UPDATE/DELETE.\n\nОригинальный ответ LLM (первые 1000 символов):\n{original_response[:1000]}\n\nИзвлеченный SQL (первые 500 символов):\n{sql[:500]}")
+            
+            # Проверка 2: Для SELECT должен быть FROM
+            if sql_upper.startswith('SELECT') and 'FROM' not in sql_upper:
+                logger.warning(f"SELECT запрос без FROM. SQL:\n{sql[:500]}")
+                raise ValueError(f"❌ SQL запрос SELECT должен содержать ключевое слово FROM.\n\nSQL запрос (первые 500 символов):\n{sql[:500]}")
+            
+            # Проверка 3: Баланс скобок
+            open_brackets = sql.count('(')
+            close_brackets = sql.count(')')
+            if open_brackets != close_brackets:
+                logger.warning(f"Несбалансированные скобки: открывающих {open_brackets}, закрывающих {close_brackets}")
+                raise ValueError(f"❌ SQL запрос содержит незакрытые скобки: открывающих {open_brackets}, закрывающих {close_brackets}.\n\nSQL запрос (первые 500 символов):\n{sql[:500]}")
+            
+            # Проверка 4: SQL не должен быть слишком коротким (менее 20 символов)
+            if len(sql.strip()) < 20:
+                raise ValueError(f"❌ SQL запрос слишком короткий (менее 20 символов), возможно он обрезан.\n\nSQL запрос:\n{sql}\n\nОригинальный ответ LLM (первые 1000 символов):\n{original_response[:1000]}")
+            
+            # Проверка 5: НЕ должно быть LISTAGG(DISTINCT ...) - это вызовет ошибку ORA-30482
+            if re.search(r'LISTAGG\s*\(\s*DISTINCT', sql, re.IGNORECASE):
+                logger.warning("Обнаружен LISTAGG(DISTINCT ...) в SQL - исправляю автоматически")
+                # Исправляем: заменяем LISTAGG(DISTINCT ...) на LISTAGG(...) без DISTINCT
+                # Это простое исправление - убираем DISTINCT из LISTAGG
+                sql = re.sub(r'LISTAGG\s*\(\s*DISTINCT\s+', 'LISTAGG(', sql, flags=re.IGNORECASE)
+                logger.info("SQL исправлен: удален DISTINCT из LISTAGG")
+                # Добавляем предупреждение в логи
+                logger.warning("⚠️ ВНИМАНИЕ: DISTINCT был удален из LISTAGG. Если нужны уникальные значения, используй подзапрос с DISTINCT перед LISTAGG.")
+            
+            # Проверка 6: Проверка на использование несуществующих алиасов в подзапросах
+            # Ищем подзапросы и проверяем, что используемые алиасы существуют в основном запросе
+            # Простая проверка: если в подзапросе используется c.CUSTOMER_ID, но в основном запросе нет алиаса c
+            main_query_aliases = set(re.findall(r'\b([a-z_][a-z0-9_]*)\s*\.', sql.split('FROM')[0] if 'FROM' in sql else sql, re.IGNORECASE))
+            # Ищем подзапросы (SELECT ... FROM ... WHERE ...)
+            subquery_pattern = r'\(SELECT\s+.*?FROM\s+.*?WHERE\s+.*?\)'
+            subqueries = re.findall(subquery_pattern, sql, re.IGNORECASE | re.DOTALL)
+            for subquery in subqueries:
+                # Проверяем использование алиасов в подзапросе
+                subquery_aliases = set(re.findall(r'\b([a-z_][a-z0-9_]*)\s*\.', subquery, re.IGNORECASE))
+                # Если в подзапросе используется алиас, которого нет в основном запросе (кроме стандартных таблиц)
+                for alias in subquery_aliases:
+                    if alias.upper() not in ['SYSDATE', 'TRUNC', 'ADD_MONTHS', 'TO_CHAR', 'TO_DATE', 'NVL', 'COALESCE', 'MAX', 'MIN', 'SUM', 'COUNT', 'AVG']:
+                        # Проверяем, есть ли этот алиас в основном запросе
+                        if alias not in main_query_aliases and len(alias) <= 10:  # Короткие алиасы (c, cc, cd и т.д.)
+                            # Ищем, какой алиас должен использоваться
+                            # Если используется c.CUSTOMER_ID, но в основном запросе есть cc.CUSTOMER_ID, исправляем
+                            if alias == 'c' and 'cc' in main_query_aliases:
+                                logger.warning(f"Обнаружен неверный алиас {alias} в подзапросе - исправляю на cc")
+                                sql = re.sub(rf'\b{alias}\.CUSTOMER_ID\b', 'cc.CUSTOMER_ID', sql, flags=re.IGNORECASE)
+                            elif alias == 'c' and 'inv' in main_query_aliases:
+                                # Если используется c.CUSTOMER_ID, но есть inv.CUSTOMER_ID
+                                logger.warning(f"Обнаружен неверный алиас {alias} в подзапросе - исправляю на inv")
+                                sql = re.sub(rf'\b{alias}\.CUSTOMER_ID\b', 'inv.CUSTOMER_ID', sql, flags=re.IGNORECASE)
             
             # Валидация SQL для финансового анализа - проверка на запрещенные паттерны
             if is_financial_analysis:

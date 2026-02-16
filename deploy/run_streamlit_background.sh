@@ -76,7 +76,7 @@ if ps -p "$STREAMLIT_PID" > /dev/null 2>&1; then
     echo "Внешний URL: stat.steccom.ru:7776${BASE_URL_PATH}"
     echo ""
     echo "Остановить: kill $STREAMLIT_PID"
-    echo "Или: ./stop_streamlit.sh"
+    echo "Или: ./stop_streamlit.sh $DB_TYPE $PORT"
 else
     echo "❌ Ошибка запуска Streamlit!"
     echo "Проверьте логи: cat $LOG_FILE"

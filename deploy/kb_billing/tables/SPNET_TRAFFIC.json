@@ -17,7 +17,7 @@
   "business_rules": [
     "Только записи с USAGE_TYPE = 'SBD Data Usage' считаются трафиком",
     "События (Mailbox Checks, Registrations) имеют USAGE_UNIT = 'EVENT'",
-    "BILL_MONTH может быть в двух форматах: YYYYMM (новые данные) или MMYYYY (старые данные)",
+    "ШДД_ЬЩТЕР 'nj yt jnxtnysq gthbjl b d h-nt ytdthyjsq jndtn BILL_MONTH может быть в двух форматах: YYYYMM (новые данные) или MMYYYY (старые данные)",
     "CONTRACT_ID связывается с SERVICES.LOGIN в биллинге",
     "PLAN_NAME должен соответствовать записям в TARIFF_PLANS.PLAN_NAME"
   ],
@@ -52,5 +52,19 @@
     "События (Mailbox Checks, Registrations) не учитываются в расчете превышения трафика"
   ]
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
