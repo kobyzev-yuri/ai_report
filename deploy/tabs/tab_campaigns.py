@@ -157,6 +157,18 @@ def _save_campaign_to_db(
     Возвращает CAMPAIGN_ID или None при ошибке
     """
     try:
+        # Проверяем и убираем дублирование текста перед сохранением
+        if greeting and len(greeting) > 10:
+            greeting = greeting.strip()
+            text_length = len(greeting)
+            if text_length > 20:
+                half_length = text_length // 2
+                first_half = greeting[:half_length].strip()
+                second_half = greeting[half_length:].strip()
+                if first_half == second_half and len(first_half) > 10:
+                    greeting = first_half
+                    logging.warning(f"Обнаружено дублирование текста при сохранении кампании, исправлено")
+        
         cursor = conn.cursor()
         email_list_str = ','.join(email_list)
         test_emails_str = ','.join(test_emails) if test_emails else None
