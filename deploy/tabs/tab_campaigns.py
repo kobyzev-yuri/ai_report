@@ -281,16 +281,23 @@ def _send_email_campaign(
         email_body_text = greeting or 'Здравствуйте!'
         
         # HTML версия для совместимости
-        full_html = f"""
-        <html>
-        <head>
-            <meta charset="UTF-8">
-        </head>
-        <body>
-            <p>{email_body_text.replace(chr(10), '<br>').replace(chr(13), '')}</p>
-        </body>
-        </html>
-        """
+        # Конвертируем переносы строк в HTML <br>, экранируем HTML символы
+        import html
+        html_body_text = html.escape(email_body_text)
+        html_body_text = html_body_text.replace('\n', '<br>').replace('\r', '')
+        
+        full_html = f"""<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+</head>
+<body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
+    <div style="max-width: 600px; margin: 0 auto; padding: 20px;">
+        {html_body_text}
+    </div>
+</body>
+</html>"""
         
         # Отправляем письма с задержками для избежания блокировки как спам
         sent_count = 0
@@ -341,16 +348,17 @@ def _send_email_campaign(
                     msg['Subject'] = subject
                     
                     # Создаем альтернативные версии (текст и HTML)
+                    # ВАЖНО: Сначала текст, потом HTML - почтовые клиенты выберут лучшую версию
                     # Если есть вложения, оборачиваем в отдельную часть
                     if attachment_content and attachment_filename:
                         # Создаем альтернативную часть для текста и HTML
                         alt_part = MIMEMultipart('alternative')
                         
-                        # Добавляем текстовую версию
+                        # Добавляем текстовую версию ПЕРВОЙ (для старых клиентов)
                         text_part = MIMEText(email_body_text, 'plain', 'utf-8')
                         alt_part.attach(text_part)
                         
-                        # Добавляем HTML версию
+                        # Добавляем HTML версию ВТОРОЙ (почтовые клиенты выберут HTML если поддерживают)
                         html_part = MIMEText(full_html, 'html', 'utf-8')
                         alt_part.attach(html_part)
                         
@@ -367,10 +375,13 @@ def _send_email_campaign(
                         )
                         msg.attach(attachment_part)
                     else:
-                        # Если нет вложений, просто добавляем альтернативные версии
+                        # Если нет вложений, добавляем альтернативные версии
+                        # ВАЖНО: Порядок важен - сначала текст (для старых клиентов), потом HTML
+                        # Некоторые клиенты могут показывать обе версии, поэтому убедимся что текст не дублируется
                         text_part = MIMEText(email_body_text, 'plain', 'utf-8')
                         msg.attach(text_part)
                         
+                        # HTML версия - почтовые клиенты выберут её если поддерживают HTML
                         html_part = MIMEText(full_html, 'html', 'utf-8')
                         msg.attach(html_part)
                     
