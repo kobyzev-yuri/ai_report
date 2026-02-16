@@ -278,20 +278,37 @@ def _send_email_campaign(
                     attachment_filename = None
         
         # Формируем тело письма с приветствием (простой текст)
-        # Убираем возможное дублирование текста (если текст повторяется дважды подряд)
         email_body_text = greeting or 'Здравствуйте!'
         
         # Проверяем и убираем дублирование текста
-        # Если текст повторяется дважды (например, из-за ошибки при сохранении)
-        text_length = len(email_body_text)
-        if text_length > 0:
-            half_length = text_length // 2
-            first_half = email_body_text[:half_length]
-            second_half = email_body_text[half_length:]
-            # Если вторая половина точно совпадает с первой, убираем дублирование
-            if first_half == second_half:
-                email_body_text = first_half
-                logging.warning(f"Обнаружено дублирование текста в greeting, исправлено")
+        # Ищем повторяющиеся фрагменты текста
+        if email_body_text and len(email_body_text) > 10:
+            # Убираем лишние пробелы и переносы строк в начале и конце
+            email_body_text = email_body_text.strip()
+            
+            # Проверяем, не повторяется ли текст дважды подряд
+            text_length = len(email_body_text)
+            if text_length > 20:  # Минимальная длина для проверки
+                # Проверяем точное дублирование (текст повторяется дважды)
+                half_length = text_length // 2
+                first_half = email_body_text[:half_length].strip()
+                second_half = email_body_text[half_length:].strip()
+                
+                # Если вторая половина точно совпадает с первой, убираем дублирование
+                if first_half == second_half and len(first_half) > 10:
+                    email_body_text = first_half
+                    logging.warning(f"Обнаружено точное дублирование текста в greeting (длина: {text_length}), исправлено")
+                else:
+                    # Проверяем частичное дублирование - ищем повторяющиеся фрагменты
+                    # Разбиваем текст на предложения и проверяем, не повторяются ли они
+                    sentences = email_body_text.split('\n\n')
+                    if len(sentences) >= 4:
+                        # Проверяем, не повторяются ли первые предложения в конце
+                        first_part = '\n\n'.join(sentences[:len(sentences)//2])
+                        second_part = '\n\n'.join(sentences[len(sentences)//2:])
+                        if first_part.strip() == second_part.strip() and len(first_part.strip()) > 20:
+                            email_body_text = first_part.strip()
+                            logging.warning(f"Обнаружено дублирование по предложениям в greeting, исправлено")
         
         # HTML версия для совместимости
         # Конвертируем переносы строк в HTML <br>, экранируем HTML символы
