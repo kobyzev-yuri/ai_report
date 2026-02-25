@@ -324,6 +324,16 @@ class KBLoader:
             logger.info("Директория confluence_docs не найдена — документы Confluence не загружаются")
             return []
 
+        # Список page_id, помеченных как устаревшие (не загружаем в Qdrant)
+        outdated_file = confluence_docs_dir / "outdated.txt"
+        outdated_ids = set()
+        if outdated_file.exists():
+            try:
+                with open(outdated_file, "r", encoding="utf-8") as f:
+                    outdated_ids = {line.strip() for line in f if line.strip()}
+            except Exception as e:
+                logger.warning("Не удалось прочитать %s: %s", outdated_file, e)
+
         points = []
         for json_file in confluence_docs_dir.glob("*.json"):
             try:
@@ -335,11 +345,13 @@ class KBLoader:
             if not isinstance(docs, list):
                 docs = [docs]
             for doc in docs:
+                source = doc.get("source") or {}
+                page_id = source.get("page_id", "")
+                if page_id and page_id in outdated_ids:
+                    continue
                 title = doc.get("title", "Без названия")
                 content = doc.get("content", [])
-                source = doc.get("source") or {}
                 source_url = source.get("url", "")
-                page_id = source.get("page_id", "")
                 full_text = f"{title}\n\n{self._confluence_content_to_text(content)}".strip()
                 if not full_text:
                     continue

@@ -204,7 +204,7 @@ class RAGAssistant:
         
         Args:
             query: Поисковый запрос
-            content_type: Тип контента для фильтрации ('qa_example', 'documentation', 'ddl', 'view')
+            content_type: Тип контента для фильтрации ('qa_example', 'documentation', 'ddl', 'view', 'confluence_doc')
             limit: Количество результатов (по умолчанию из SQL4AConfig)
         
         Returns:
@@ -256,6 +256,10 @@ class RAGAssistant:
                     doc["description"] = result.payload.get("description", "")
                 elif doc["type"] == "ddl":
                     doc["table_name"] = result.payload.get("table_name", "")
+                elif doc["type"] == "confluence_doc":
+                    doc["title"] = result.payload.get("title", "")
+                    doc["source_url"] = result.payload.get("source_url", "")
+                    doc["page_id"] = result.payload.get("page_id", "")
                 
                 documents.append(doc)
             

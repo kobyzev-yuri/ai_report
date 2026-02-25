@@ -157,6 +157,9 @@ class ConfluenceKBGenerator:
         Синхронизация пространства: скачать страницы, преобразовать в KB, сохранить в JSON.
         Возвращает список созданных документов KB.
         """
+        space_key = (space_key or "").strip()
+        if not space_key:
+            return []
         base_url = base_url or self.client.base_url
         docs: List[Dict[str, Any]] = []
         count = 0
@@ -175,6 +178,126 @@ class ConfluenceKBGenerator:
         logger.info("Сохранено %s документов в %s", len(docs), out_file)
         return docs
 
+    def sync_page_ids(
+        self,
+        page_ids: List[str],
+        base_url: Optional[str] = None,
+        output_suffix: str = "custom_pages",
+    ) -> List[Dict[str, Any]]:
+        """
+        Синхронизация выбранных страниц по ID или URL (из URL извлекается pageId).
+        Сохраняет в confluence_<output_suffix>.json.
+        """
+        import re
+        base_url = base_url or self.client.base_url
+        ids: List[str] = []
+        for raw in page_ids:
+            raw = raw.strip()
+            if not raw:
+                continue
+            # Число — это ID
+            if raw.isdigit():
+                ids.append(raw)
+                continue
+            # Иначе считаем URL и вытаскиваем pageId=
+            m = re.search(r"pageId=(\d+)", raw, re.IGNORECASE)
+            if m:
+                ids.append(m.group(1))
+            else:
+                logger.warning("Не удалось извлечь pageId из строки: %s", raw[:80])
+        docs: List[Dict[str, Any]] = []
+        for page_id in ids:
+            try:
+                page = self.client.get_page_by_id(page_id)
+                doc = self.page_to_kb_doc(page, base_url)
+                docs.append(doc)
+            except Exception as e:
+                logger.warning("Ошибка обработки страницы %s: %s", page_id, e)
+        out_file = self.output_dir / f"confluence_{output_suffix}.json"
+        with open(out_file, "w", encoding="utf-8") as f:
+            json.dump(docs, f, ensure_ascii=False, indent=2)
+        logger.info("Сохранено %s документов в %s", len(docs), out_file)
+        return docs
+
     def get_synced_docs_path(self) -> Path:
         """Директория с JSON файлами Confluence KB."""
         return self.output_dir
+
+    def get_outdated_path(self) -> Path:
+        """Файл со списком page_id устаревших документов (по одному на строку)."""
+        return self.output_dir / "outdated.txt"
+
+    def read_outdated_ids(self) -> set:
+        """Прочитать множество page_id, помеченных как устаревшие."""
+        path = self.get_outdated_path()
+        if not path.exists():
+            return set()
+        with open(path, "r", encoding="utf-8") as f:
+            return {line.strip() for line in f if line.strip()}
+
+    def add_to_outdated(self, page_id: str) -> None:
+        """Добавить page_id в список устаревших."""
+        page_id = (page_id or "").strip()
+        if not page_id:
+            return
+        ids = self.read_outdated_ids()
+        ids.add(page_id)
+        with open(self.get_outdated_path(), "w", encoding="utf-8") as f:
+            f.write("\n".join(sorted(ids)) + "\n")
+        logger.info("Помечен устаревшим: page_id=%s", page_id)
+
+    def remove_from_outdated(self, page_id: str) -> None:
+        """Убрать page_id из списка устаревших."""
+        page_id = (page_id or "").strip()
+        if not page_id:
+            return
+        ids = self.read_outdated_ids()
+        ids.discard(page_id)
+        path = self.get_outdated_path()
+        if ids:
+            with open(path, "w", encoding="utf-8") as f:
+                f.write("\n".join(sorted(ids)) + "\n")
+        elif path.exists():
+            path.unlink()
+        logger.info("Снята пометка устаревшего: page_id=%s", page_id)
+
+    def update_docs_by_page_ids(
+        self,
+        page_ids: List[str],
+        base_url: Optional[str] = None,
+    ) -> int:
+        """
+        Обновить документы по списку page_id: заново забрать из Confluence и перезаписать в JSON.
+        Возвращает количество обновлённых документов.
+        """
+        base_url = base_url or self.client.base_url
+        updated = 0
+        for page_id in page_ids:
+            page_id = (page_id or "").strip()
+            if not page_id or not page_id.isdigit():
+                continue
+            try:
+                page = self.client.get_page_by_id(page_id)
+                new_doc = self.page_to_kb_doc(page, base_url)
+            except Exception as e:
+                logger.warning("Не удалось обновить страницу %s: %s", page_id, e)
+                continue
+            # Найти файл, в котором лежит этот page_id, и заменить документ
+            for json_file in self.output_dir.glob("*.json"):
+                try:
+                    with open(json_file, "r", encoding="utf-8") as f:
+                        docs = json.load(f)
+                except Exception:
+                    continue
+                if not isinstance(docs, list):
+                    continue
+                for i, doc in enumerate(docs):
+                    src = doc.get("source") or {}
+                    if str(src.get("page_id", "")) == str(page_id):
+                        docs[i] = new_doc
+                        with open(json_file, "w", encoding="utf-8") as f:
+                            json.dump(docs, f, ensure_ascii=False, indent=2)
+                        updated += 1
+                        logger.info("Обновлён документ %s в %s", page_id, json_file.name)
+                        break
+        return updated

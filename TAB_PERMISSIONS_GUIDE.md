@@ -21,8 +21,6 @@
 | `revenue` | 💰 Доходы | Отчет по доходам из счетов-фактур |
 | `analytics` | 📋 Счета за период | Отчет по счетам из ANALYTICS |
 | `loader` | 📥 Data Loader | Загрузка CSV/Excel файлов |
-| `ifindex` | 7206_ifindex | Технический отчет по ifindex |
-| `ifindex_mapping` | 🔀 Маппинг индексов 7206 | Технический отчет по маппингу |
 
 ## 🚀 Быстрый старт
 
@@ -190,10 +188,6 @@ if 'analytics' in allowed_tabs:
     tab_configs.append(('tab_analytics', '📋 Счета за период'))
 if 'loader' in allowed_tabs:
     tab_configs.append(('tab_loader', '📥 Data Loader'))
-if 'ifindex' in allowed_tabs:
-    tab_configs.append(('tab_ifindex', '7206_ifindex'))
-if 'ifindex_mapping' in allowed_tabs:
-    tab_configs.append(('tab_ifindex_mapping', '🔀 Маппинг индексов 7206'))
 
 # Если нет доступных вкладок, показываем сообщение
 if not tab_configs:

@@ -93,6 +93,9 @@ class ConfluenceClient:
         Итератор по страницам пространства (все дочерние страницы рекурсивно не обходим —
         только корневые по spaceKey; при необходимости можно добавить CQL).
         """
+        space_key = (space_key or "").strip()
+        if not space_key:
+            return
         start = 0
         while True:
             r = self.session.get(

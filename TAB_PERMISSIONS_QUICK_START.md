@@ -48,8 +48,6 @@ python create_user_v2.py update-permissions --username analyst --tabs assistant 
 | `revenue` | 💰 Доходы |
 | `analytics` | 📋 Счета за период |
 | `loader` | 📥 Data Loader |
-| `ifindex` | 7206_ifindex |
-| `ifindex_mapping` | 🔀 Маппинг индексов 7206 |
 
 ## 🔧 Интеграция в Streamlit
 
@@ -99,10 +97,6 @@ if 'analytics' in allowed_tabs:
     tab_configs.append(('tab_analytics', '📋 Счета за период'))
 if 'loader' in allowed_tabs:
     tab_configs.append(('tab_loader', '📥 Data Loader'))
-if 'ifindex' in allowed_tabs:
-    tab_configs.append(('tab_ifindex', '7206_ifindex'))
-if 'ifindex_mapping' in allowed_tabs:
-    tab_configs.append(('tab_ifindex_mapping', '🔀 Маппинг индексов 7206'))
 
 # Проверка доступа
 if not tab_configs:
@@ -151,16 +145,6 @@ for i, (tab_key, tab_name) in enumerate(tab_configs):
         
         elif tab_key == 'tab_loader':
             # Код вкладки Data Loader
-            # ... (весь существующий код)
-            pass
-        
-        elif tab_key == 'tab_ifindex':
-            # Код вкладки ifindex
-            # ... (весь существующий код)
-            pass
-        
-        elif tab_key == 'tab_ifindex_mapping':
-            # Код вкладки маппинг
             # ... (весь существующий код)
             pass
 ```
@@ -234,13 +218,6 @@ python create_user_v2.py create --username operator --password pass \
   --tabs loader report
 ```
 **Доступ:** Data Loader, Расходы
-
-### Технический специалист
-```bash
-python create_user_v2.py create --username tech --password pass \
-  --tabs ifindex ifindex_mapping report
-```
-**Доступ:** 7206_ifindex, Маппинг, Расходы
 
 ## 🔍 Проверка
 

@@ -22,7 +22,6 @@ AVAILABLE_TABS = {
     'revenue': '💰 Доходы',
     'analytics': '📋 Счета за период',
     'loader': '📥 Data Loader',
-    'campaigns': '📧 Рекламные кампании',
 }
 
 def get_db_connection():
@@ -114,9 +113,9 @@ def create_user(username, password, is_superuser=False, allowed_tabs=None, creat
         if is_superuser:
             allowed_tabs = list(AVAILABLE_TABS.keys())
         
-        # Если allowed_tabs не указан, даем доступ ко всем вкладкам по умолчанию
+        # Если allowed_tabs не указан, даем доступ только к основным вкладкам
         if allowed_tabs is None:
-            allowed_tabs = list(AVAILABLE_TABS.keys())  # По умолчанию все вкладки
+            allowed_tabs = ['report', 'revenue']  # По умолчанию только отчеты
         
         # Валидация allowed_tabs
         if not isinstance(allowed_tabs, list):
@@ -176,8 +175,8 @@ def authenticate_user(username, password):
             except json.JSONDecodeError:
                 allowed_tabs = []
         else:
-            # Если allowed_tabs не установлен, даем доступ ко всем вкладкам по умолчанию
-            allowed_tabs = list(AVAILABLE_TABS.keys())
+            # Если allowed_tabs не установлен, даем доступ к базовым вкладкам
+            allowed_tabs = ['report', 'revenue']
         
         # Суперпользователи имеют доступ ко всем вкладкам
         if is_superuser:
@@ -276,9 +275,9 @@ def get_user_permissions(username):
                 allowed_tabs = json.loads(allowed_tabs_json)
                 return True, allowed_tabs
             except json.JSONDecodeError:
-                return True, list(AVAILABLE_TABS.keys())  # Все вкладки по умолчанию
+                return True, ['report', 'revenue']  # Базовые права по умолчанию
         else:
-            return True, list(AVAILABLE_TABS.keys())  # Все вкладки по умолчанию
+            return True, ['report', 'revenue']  # Базовые права по умолчанию
     finally:
         conn.close()
 

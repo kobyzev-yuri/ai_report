@@ -23,8 +23,6 @@ AVAILABLE_TABS = {
     'revenue': '💰 Доходы',
     'analytics': '📋 Счета за период',
     'loader': '📥 Data Loader',
-    'ifindex': '7206_ifindex',
-    'ifindex_mapping': '🔀 Маппинг индексов 7206'
 }
 
 def get_db_connection():
