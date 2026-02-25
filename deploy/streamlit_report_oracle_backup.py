@@ -353,6 +353,12 @@ def main():
                     show_kb_expansion_tab()
                 except Exception as e:
                     st.error(f"Ошибка расширения KB: {e}")
+            elif tab_key == 'confluence_librarian':
+                try:
+                    from kb_billing.rag.streamlit_confluence_librarian import show_confluence_librarian_tab
+                    show_confluence_librarian_tab()
+                except Exception as e:
+                    st.error(f"Ошибка спутникового библиотекаря: {e}")
 
 if __name__ == "__main__":
     main()

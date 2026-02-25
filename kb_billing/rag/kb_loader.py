@@ -296,7 +296,78 @@ class KBLoader:
         
         logger.info("Загружены метаданные схемы")
         return [point]
-    
+
+    def _confluence_content_to_text(self, content: List[Dict[str, Any]]) -> str:
+        """Сведение content[] (секции/подсекции из Confluence KB) в один текст для эмбеддинга."""
+        parts: List[str] = []
+
+        def walk(sections: List[Dict], prefix: str = "") -> None:
+            for s in sections:
+                if s.get("title"):
+                    parts.append(f"{prefix}{s['title']}")
+                if s.get("text"):
+                    parts.append(s["text"])
+                walk(s.get("subsections", []), prefix=prefix + "  ")
+
+        walk(content)
+        return "\n\n".join(parts).strip()
+
+    def load_confluence_docs(self) -> List[PointStruct]:
+        """
+        Загрузка документов из Confluence (схемы сети, документация спутниковых инженеров).
+        Читает JSON из kb_billing/confluence_docs/*.json, формат из confluence_kb_generator.
+        Точки помечаются domain='satellite'. Наполнение этой части KB идёт по структуре
+        Confluence (страницы → секции/подсекции), а не на SQL-примерах, как в биллинге.
+        """
+        confluence_docs_dir = self.kb_dir / "confluence_docs"
+        if not confluence_docs_dir.exists():
+            logger.info("Директория confluence_docs не найдена — документы Confluence не загружаются")
+            return []
+
+        points = []
+        for json_file in confluence_docs_dir.glob("*.json"):
+            try:
+                with open(json_file, "r", encoding="utf-8") as f:
+                    docs = json.load(f)
+            except Exception as e:
+                logger.warning("Не удалось прочитать %s: %s", json_file, e)
+                continue
+            if not isinstance(docs, list):
+                docs = [docs]
+            for doc in docs:
+                title = doc.get("title", "Без названия")
+                content = doc.get("content", [])
+                source = doc.get("source") or {}
+                source_url = source.get("url", "")
+                page_id = source.get("page_id", "")
+                full_text = f"{title}\n\n{self._confluence_content_to_text(content)}".strip()
+                if not full_text:
+                    continue
+                embedding = self.model.encode(
+                    full_text,
+                    normalize_embeddings=SQL4AConfig.NORMALIZE_EMBEDDINGS,
+                ).tolist()
+                # Стабильный id по источнику для обновления при повторной синхронизации
+                point_id = hash(f"confluence_{page_id or source_url or title}") & 0x7FFFFFFFFFFFFFFF
+                points.append(
+                    PointStruct(
+                        id=point_id,
+                        vector=embedding,
+                        payload={
+                            "type": "confluence_doc",
+                            "domain": "satellite",
+                            "title": title,
+                            "content": full_text[:10000],
+                            "source_url": source_url,
+                            "page_id": page_id,
+                            "last_updated": source.get("last_updated", ""),
+                            "scope": doc.get("scope", ["general"]),
+                        },
+                    )
+                )
+        logger.info("Загружено %s документов Confluence (сектор спутниковых систем)", len(points))
+        return points
+
     def load_all(self, recreate: bool = False):
         """Загрузка всех данных в Qdrant"""
         # Создаем коллекцию
@@ -320,6 +391,10 @@ class KBLoader:
         # Метаданные
         metadata_points = self.load_metadata()
         all_points.extend(metadata_points)
+
+        # Документы Confluence (схемы сети, документация спутниковых инженеров) — расширение единой KB
+        confluence_points = self.load_confluence_docs()
+        all_points.extend(confluence_points)
         
         # Загружаем в Qdrant батчами
         batch_size = 100

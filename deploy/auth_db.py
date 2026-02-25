@@ -18,11 +18,13 @@ DB_PATH = Path(__file__).parent / 'users.db'
 AVAILABLE_TABS = {
     'assistant': '🤖 Ассистент',
     'kb_expansion': '📚 Расширение KB',
+    'confluence_librarian': '🛰️ Спутниковый библиотекарь',
     'report': '💰 Расходы Иридиум',
     'revenue': '💰 Доходы',
     'analytics': '📋 Счета за период',
     'loader': '📥 Data Loader',
     'bills': '📨 Счета 1С (рассылка)',
+    'campaigns': '📧 Рекламные кампании',
 }
 
 def get_db_connection():
