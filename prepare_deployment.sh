@@ -23,7 +23,6 @@ mkdir -p "$DEPLOY_DIR/oracle/views"
 mkdir -p "$DEPLOY_DIR/oracle/functions"
 mkdir -p "$DEPLOY_DIR/oracle/data"
 mkdir -p "$DEPLOY_DIR/python"
-mkdir -p "$DEPLOY_DIR/tabs"
 mkdir -p "$DEPLOY_DIR/kb_billing/tables"
 mkdir -p "$DEPLOY_DIR/kb_billing/views"
 mkdir -p "$DEPLOY_DIR/kb_billing/training_data"
@@ -31,7 +30,7 @@ mkdir -p "$DEPLOY_DIR/kb_billing/rag"
 mkdir -p "$DEPLOY_DIR/docs"
 mkdir -p "$DEPLOY_DIR/data/SPNet reports"
 mkdir -p "$DEPLOY_DIR/data/STECCOMLLCRussiaSBD.AccessFees_reports"
-mkdir -p "$DEPLOY_DIR/data"
+mkdir -p "$DEPLOY_DIR/tabs"
 
 echo "📋 Копирование файлов..."
 
@@ -48,15 +47,13 @@ echo "  → Python приложение..."
 cp streamlit_report_oracle_backup.py "$DEPLOY_DIR/"
 cp streamlit_data_loader.py "$DEPLOY_DIR/"
 cp db_connection.py "$DEPLOY_DIR/"
+cp queries.py "$DEPLOY_DIR/"
 cp auth_db.py "$DEPLOY_DIR/"
 cp auth_db_v2.py "$DEPLOY_DIR/" 2>/dev/null || true
-cp queries.py "$DEPLOY_DIR/"
 cp create_user.py "$DEPLOY_DIR/"
 cp create_user_v2.py "$DEPLOY_DIR/" 2>/dev/null || true
 cp python/*.py "$DEPLOY_DIR/python/" 2>/dev/null || true
-
-# 2.1. Закладки (tabs)
-echo "  → Закладки (tabs)..."
+echo "  → Вкладки (tabs)..."
 cp tabs/*.py "$DEPLOY_DIR/tabs/" 2>/dev/null || true
 
 # 3. Конфигурация
@@ -97,11 +94,6 @@ cp -r kb_billing/*.md "$DEPLOY_DIR/kb_billing/" 2>/dev/null || true
 cp -r kb_billing/tables/*.json "$DEPLOY_DIR/kb_billing/tables/" 2>/dev/null || true
 cp -r kb_billing/views/*.json "$DEPLOY_DIR/kb_billing/views/" 2>/dev/null || true
 cp -r kb_billing/training_data/*.json "$DEPLOY_DIR/kb_billing/training_data/" 2>/dev/null || true
-
-# 5.1. Файлы для email кампаний (MVSAT)
-echo "  → Файлы для email кампаний..."
-cp data/письмо_MVSAT.docx "$DEPLOY_DIR/data/" 2>/dev/null || true
-cp "data/почты для рассылки MVSAT.txt" "$DEPLOY_DIR/data/" 2>/dev/null || true
 
 # 5.1. RAG модули
 echo "  → RAG модули..."
@@ -216,12 +208,15 @@ echo ""
 echo "📊 Статистика:"
 du -sh "$DEPLOY_DIR" 2>/dev/null || echo "  Размер: проверьте вручную"
 echo ""
-echo "📝 Следующие шаги:"
-echo "  1. Проверьте содержимое: ls -la $DEPLOY_DIR"
-echo "  2. Создайте архив: tar -czf ai_report_deploy.tar.gz $DEPLOY_DIR"
-echo "  3. Или синхронизируйте через rsync/scp"
+echo "📝 Следующие шаги (перезапуск — только на сервере, после синхронизации):"
+echo "  1. Синхронизируйте deploy на сервер (rsync/scp или ваш sync_* скрипт)"
+echo "  2. На сервере: cd <REMOTE_DIR> && ./restart_streamlit.sh"
+echo "  Локальный перезапуск не нужен."
 echo ""
-echo "📖 Подробнее: cat $DEPLOY_DIR/DEPLOY_README.md"
+echo "  Проверка содержимого: ls -la $DEPLOY_DIR"
+echo "  Архив: tar -czf ai_report_deploy.tar.gz $DEPLOY_DIR"
+echo ""
+echo "📖 Подробнее: см. docs/deploy.md"
 
 
 

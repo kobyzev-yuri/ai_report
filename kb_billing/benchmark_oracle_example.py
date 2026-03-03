@@ -255,10 +255,7 @@ async def main():
         """
         Пример функции поиска (адаптировать под конкретную векторную БД)
         """
-        # Реализация зависит от векторной БД:
-        # - pgvector: SQL запрос с векторным поиском
-        # - Qdrant: API запрос с фильтрами
-        # - Chroma: query с where фильтрами
+        # В проекте используется Qdrant: RAGAssistant.search_semantic() с фильтрами по type/category
         pass
     
     async def generate_sql(question: str, context: str):

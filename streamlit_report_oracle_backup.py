@@ -18,8 +18,14 @@ import warnings
 from auth_db import (
     init_db, authenticate_user, create_user, list_users, 
     delete_user, is_superuser, update_user_permissions, 
-    get_user_permissions, AVAILABLE_TABS
+    get_user_permissions, AVAILABLE_TABS as _AVAILABLE_TABS
 )
+# Гарантируем наличие «Рассылка счетов» и «Кампании» в списке (на сервере может быть старый auth_db)
+AVAILABLE_TABS = dict(_AVAILABLE_TABS)
+if 'bills' not in AVAILABLE_TABS:
+    AVAILABLE_TABS['bills'] = '📄 Рассылка счетов'
+if 'campaigns' not in AVAILABLE_TABS:
+    AVAILABLE_TABS['campaigns'] = '📧 Кампании'
 
 # Импорт модулей закладок
 from tabs.tab_report import show_tab as show_report_tab
@@ -164,7 +170,7 @@ def show_user_management():
                             if not current_tabs:
                                 current_tabs = list(AVAILABLE_TABS.keys())
                             
-                            # Чекбоксы для каждой вкладки
+                            # Чекбоксы для каждой вкладки (в т.ч. «Счета» и «Кампании»)
                             selected_tabs = []
                             st.markdown("**Доступные вкладки:**")
                             for tab_key, tab_name in AVAILABLE_TABS.items():

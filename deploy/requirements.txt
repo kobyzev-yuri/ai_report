@@ -27,12 +27,20 @@ bcrypt>=4.0.0
 colorama
 tqdm
 
+# Confluence integration (спутниковый библиотекарь, полная индексация вложений)
+requests
+beautifulsoup4
+pymupdf
+python-docx
+Pillow
+pytesseract
+
 # RAG and Vector Database
 qdrant-client>=1.7.0
 sentence-transformers>=2.2.0
 torch>=2.0.0
 transformers>=4.30.0
 
-# Email campaigns
-python-docx>=0.8.11
+# Спутниковый библиотекарь — агент на Gemini (инженер спутникового сегмента, куратор KB)
+google-genai>=1.0.0
 

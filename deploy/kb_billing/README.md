@@ -39,62 +39,18 @@ kb_billing/
 
 ## Использование
 
-### Загрузка в векторную базу знаний (sql4A)
+### Загрузка в векторную БД (Qdrant)
 
-1. **DDL описания таблиц и VIEW:**
-   ```python
-   from src.vanna.vanna_pgvector_native import DocStructureVannaNative
-   
-   vanna = DocStructureVannaNative()
-   
-   # Загрузка DDL из JSON файлов
-   import json
-   
-   # Таблицы
-   for table_file in ['tables/SPNET_TRAFFIC.json', ...]:
-       with open(table_file) as f:
-           table_info = json.load(f)
-           vanna.add_ddl(table_info['ddl'])
-   
-   # VIEW
-   for view_file in ['views/V_SPNET_OVERAGE_ANALYSIS.json', ...]:
-       with open(view_file) as f:
-           view_info = json.load(f)
-           # Извлечь DDL из описания или использовать CREATE VIEW из исходных SQL файлов
-   ```
+Векторы хранятся в **Qdrant** (коллекция `kb_billing`). Загрузка через `kb_billing/rag/kb_loader.py`:
 
-2. **Документация:**
-   ```python
-   # Загрузка описаний таблиц и VIEW как документации
-   for table_file in ['tables/SPNET_TRAFFIC.json', ...]:
-       with open(table_file) as f:
-           table_info = json.load(f)
-           doc = f"{table_info['description']}\n\nКлючевые поля:\n"
-           for col, desc in table_info['key_columns'].items():
-               doc += f"- {col}: {desc}\n"
-           vanna.add_documentation(doc)
-   ```
+```python
+from kb_billing.rag.kb_loader import KBLoader
 
-3. **Q/A примеры:**
-   ```python
-   from src.tools.kb_training_client import KBTrainingClient
-   
-   client = KBTrainingClient(api_base_url="http://localhost:8000")
-   
-   # Загрузка из JSON файла
-   with open('training_data/sql_examples.json') as f:
-       examples = json.load(f)
-       for example in examples:
-           client.add_training_example(
-               question=example['question'],
-               sql=example['sql']
-           )
-   ```
+loader = KBLoader()
+loader.load_all(recreate=False)  # или recreate=True для полной перезаписи
+```
 
-   Или через CLI:
-   ```bash
-   python -m src.tools.kb_training_client --file kb_billing/training_data/sql_examples.json
-   ```
+Данные берутся из: `training_data/sql_examples.json`, `tables/*.json`, `views/*.json`, `metadata.json`, `confluence_docs/*.json`. См. docs/kb-billing-vs-presales.md.
 
 ### Формат JSON файлов
 
@@ -185,7 +141,7 @@ kb_billing/
 
 - API эндпоинты (`/training/ddl`, `/training/documentation`, `/training/question_sql`)
 - CLI инструменты (`kb_training_client.py`)
-- Прямое использование `vanna_pgvector_native`
+- Загрузка через `KBLoader.load_all()` (Qdrant). См. docs/kb-billing-vs-presales.md
 
 ## Дополнительные ресурсы
 

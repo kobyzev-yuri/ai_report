@@ -260,7 +260,12 @@ class RAGAssistant:
                     doc["title"] = result.payload.get("title", "")
                     doc["source_url"] = result.payload.get("source_url", "")
                     doc["page_id"] = result.payload.get("page_id", "")
-                
+                elif doc["type"] == "confluence_section":
+                    doc["title"] = result.payload.get("title", "")
+                    doc["section_title"] = result.payload.get("section_title", "")
+                    doc["source_url"] = result.payload.get("source_url", "")
+                    doc["page_id"] = result.payload.get("page_id", "")
+
                 documents.append(doc)
             
             return documents

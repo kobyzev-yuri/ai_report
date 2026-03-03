@@ -145,7 +145,7 @@ CREATE TABLE SPNET_TRAFFIC (
 
 #### Этап 4: Загрузка в векторную БД
 
-**Независимо от типа векторной БД (pgvector/Qdrant/Chroma):**
+**Векторная БД: Qdrant (коллекция kb_billing).**
 
 1. **Структурирование данных:**
    - Каждый элемент имеет: `content`, `content_type`, `metadata`

@@ -39,29 +39,18 @@ kb_billing/
 
 ## Использование
 
-### Загрузка в векторную базу знаний (sql4A)
+### Загрузка в векторную БД (Qdrant)
 
-1. **DDL описания таблиц и VIEW:**
-   ```python
-   from src.vanna.vanna_pgvector_native import DocStructureVannaNative
-   
-   vanna = DocStructureVannaNative()
-   
-   # Загрузка DDL из JSON файлов
-   import json
-   
-   # Таблицы
-   for table_file in ['tables/SPNET_TRAFFIC.json', ...]:
-       with open(table_file) as f:
-           table_info = json.load(f)
-           vanna.add_ddl(table_info['ddl'])
-   
-   # VIEW
-   for view_file in ['views/V_SPNET_OVERAGE_ANALYSIS.json', ...]:
-       with open(view_file) as f:
-           view_info = json.load(f)
-           # Извлечь DDL из описания или использовать CREATE VIEW из исходных SQL файлов
-   ```
+Векторы хранятся в **Qdrant** (коллекция `kb_billing`). Загрузка через `kb_billing/rag/kb_loader.py`:
+
+```python
+from kb_billing.rag.kb_loader import KBLoader
+
+loader = KBLoader()
+loader.load_all(recreate=False)  # или recreate=True для полной перезаписи
+```
+
+Данные берутся из: `training_data/sql_examples.json`, `tables/*.json`, `views/*.json`, `metadata.json`, `confluence_docs/*.json`. См. [docs/kb-billing-vs-presales.md](../docs/kb-billing-vs-presales.md).
 
 2. **Документация:**
    ```python
@@ -179,13 +168,9 @@ kb_billing/
 3. Добавьте Q/A примеры в `training_data/sql_examples.json`
 4. Загрузите в векторную БД через API или CLI
 
-## Связь с проектом sql4A
+## Векторная БД
 
-Эта база знаний создана в формате проекта sql4A (`/mnt/ai/cnn/sql4A`) и может быть загружена в векторную базу знаний через:
-
-- API эндпоинты (`/training/ddl`, `/training/documentation`, `/training/question_sql`)
-- CLI инструменты (`kb_training_client.py`)
-- Прямое использование `vanna_pgvector_native`
+Загрузка и поиск — через **Qdrant** (коллекция `kb_billing`). Модули: `kb_billing/rag/kb_loader.py`, `rag_assistant.py`. Конфиг: `config.env` (QDRANT_HOST, QDRANT_PORT, QDRANT_COLLECTION). См. [docs/kb-billing-vs-presales.md](../docs/kb-billing-vs-presales.md).
 
 ## Дополнительные ресурсы
 

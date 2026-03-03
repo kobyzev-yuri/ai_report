@@ -82,10 +82,9 @@ def show_tab():
         Эта вкладка позволяет оператору перенести **пакет счетов из 1С** в директорию `bills`,
         откуда их дальше забирает система рассылки.
 
-        **Как использовать:**
-        - В 1С сформируйте папку со счетами (обычно набор PDF/HTML файлов).
-        - Упакуйте папку(и) в ZIP‑архив **или** выделите все файлы и перетащите их сюда.
-        - Здесь файлы будут сохранены в серверной директории `bills`.
+        **Как использовать:** сформируйте в 1С папку со счетами и актами (PDF/HTML и т.п.), упакуйте в **ZIP‑архив**
+        и загрузите архив здесь — он распакуется в `bills`. После работы с рассылкой можно **очистить папку** `bills`;
+        в следующем месяце загрузите новый ZIP в пустую папку.
         """
     )
 
@@ -104,11 +103,10 @@ def show_tab():
     st.subheader("📤 Перенос счетов (загрузка файлов)")
 
     uploaded_files = st.file_uploader(
-        "Перетащите сюда ZIP‑архивы с папками счетов или отдельные файлы",
+        "Загрузите ZIP‑архив со счетами (или несколько ZIP/файлов)",
         accept_multiple_files=True,
         type=None,
-        help="Браузер не умеет загружать папки напрямую, поэтому для сохранения структуры "
-             "используйте ZIP‑архивы. Обычные файлы будут просто сохранены в выбранную директорию.",
+        help="ZIP распаковывается в папку bills с сохранением структуры. Отдельные файлы сохраняются в bills.",
         key="bills_uploader",
     )
 
@@ -128,97 +126,6 @@ def show_tab():
                 st.write(line)
 
     st.markdown("---")
-    st.subheader("📂 Перенос уже имеющихся на сервере папок 1С")
-
-    st.markdown(
-        """
-        Оператор может предварительно **скопировать папки 1С на сервер** (через WinSCP/Samba и т.п.),
-        а затем выбрать их здесь для переноса в `bills` **целиком с поддиректориями**.
-        """
-    )
-
-    # Исходная директория с папками счетов 1С
-    default_source = str(project_root / "bills_inbox")
-    source_root_str = st.text_input(
-        "Исходная директория с папками счетов (на сервере)",
-        value=default_source,
-        help="Укажите путь на сервере, куда попадают папки со счетами из 1С. "
-             "Например: /usr/local/projects/ai_report/bills_inbox",
-        key="bills_source_root",
-    )
-    source_root = Path(source_root_str).expanduser()
-
-    col_src1, col_src2 = st.columns(2)
-    with col_src1:
-        if source_root.exists() and source_root.is_dir():
-            st.success(f"Источник найден: {source_root}")
-        else:
-            st.warning(f"Директория источника не найдена: {source_root}\n"
-                       f"Создайте её и положите туда папки со счетами.")
-            # Даже если директории нет, продолжаем показывать состояние bills ниже
-
-    with col_src2:
-        move_after_copy = st.checkbox(
-            "После копирования удалять исходные папки (перенос)",
-            value=False,
-            help="Если включено, после успешного копирования папки будут удалены из исходной директории.",
-            key="bills_move_after_copy",
-        )
-
-    source_subdirs = []
-    if source_root.exists() and source_root.is_dir():
-        source_subdirs = sorted(
-            [p for p in source_root.iterdir() if p.is_dir()],
-            key=lambda p: p.name.lower(),
-        )
-
-    if source_subdirs:
-        st.markdown("**Папки, доступные для переноса:**")
-        options_src = [p.name for p in source_subdirs]
-        selected_src = st.multiselect(
-            "Выберите одну или несколько папок для переноса в bills",
-            options=options_src,
-            default=[],
-            key="bills_source_subdirs",
-        )
-
-        if st.button("📂 Копировать/перенести выбранные папки в bills", type="primary", use_container_width=True):
-            if not selected_src:
-                st.warning("Не выбрано ни одной папки для переноса.")
-            else:
-                reports = []
-                with st.spinner("Перенос папок..."):
-                    for name in selected_src:
-                        src_dir = source_root / name
-                        if not src_dir.exists() or not src_dir.is_dir():
-                            reports.append(f"❌ Исходная папка `{name}` не найдена.")
-                            continue
-
-                            # Целевая директория: сохраняем структуру по имени папки
-                        dst_dir = target_dir / name
-                        # Если уже существует – добавим timestamp
-                        if dst_dir.exists():
-                            ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-                            dst_dir = target_dir / f"{name}_{ts}"
-
-                        try:
-                            shutil.copytree(src_dir, dst_dir)
-                            if move_after_copy:
-                                shutil.rmtree(src_dir)
-                                reports.append(f"✅ Папка `{name}` перенесена в `{dst_dir}` (копирование+удаление источника).")
-                            else:
-                                reports.append(f"✅ Папка `{name}` скопирована в `{dst_dir}`.")
-                        except Exception as e:
-                            reports.append(f"❌ Ошибка при обработке `{name}`: {e}")
-
-                st.markdown("### Результат переноса папок")
-                for line in reports:
-                    st.write(line)
-
-    else:
-        st.info("В исходной директории пока нет подкаталогов с папками счетов 1С.")
-
-    st.markdown("---")
     st.subheader("📊 Текущее содержимое директории bills")
 
     subdirs = sorted(
@@ -226,45 +133,67 @@ def show_tab():
         key=lambda p: p.stat().st_mtime,
         reverse=True,
     )
+    options = []
 
     if not subdirs:
-        st.info("Пока нет подкаталогов в `bills` — после первой загрузки они появятся автоматически.")
-        return
+        st.info("Папка `bills` пуста. Загрузите ZIP со счетами и актами — он распакуется сюда.")
+        # Показываем блок «Очистить всю папку» ниже (пустая папка — нечего очищать)
+    else:
+        rows = []
+        options = []
+        for d in subdirs[:50]:
+            file_count = 0
+            latest_mtime = None
+            for root, _, files in os.walk(d):
+                for name in files:
+                    file_count += 1
+                    mtime = Path(root, name).stat().st_mtime
+                    if latest_mtime is None or mtime > latest_mtime:
+                        latest_mtime = mtime
 
-    rows = []
-    options = []
-    for d in subdirs[:50]:
-        file_count = 0
-        latest_mtime = None
-        for root, _, files in os.walk(d):
-            for name in files:
-                file_count += 1
-                mtime = Path(root, name).stat().st_mtime
-                if latest_mtime is None or mtime > latest_mtime:
-                    latest_mtime = mtime
+            rel = str(d.relative_to(bills_root))
+            rows.append(
+                {
+                    "Подкаталог": rel,
+                    "Файлов": file_count,
+                    "Последнее изменение": datetime.fromtimestamp(latest_mtime).strftime("%Y-%m-%d %H:%M:%S")
+                    if latest_mtime
+                    else "-",
+                }
+            )
+            options.append(rel)
 
-        rel = str(d.relative_to(bills_root))
-        rows.append(
-            {
-                "Подкаталог": rel,
-                "Файлов": file_count,
-                "Последнее изменение": datetime.fromtimestamp(latest_mtime).strftime("%Y-%m-%d %H:%M:%S")
-                if latest_mtime
-                else "-",
-            }
-        )
-        options.append(rel)
+        import pandas as pd
+        df = pd.DataFrame(rows)
+        st.dataframe(df, use_container_width=True, hide_index=True, height=300)
 
-    import pandas as pd
-
-    df = pd.DataFrame(rows)
-    st.dataframe(df, use_container_width=True, hide_index=True, height=300)
-
-    # Управление подкаталогами (удаление)
+    # Управление: очистить всю папку или удалить один подкаталог
     st.markdown("---")
-    st.subheader("🗑️ Управление подкаталогами")
+    st.subheader("🗑️ Управление папкой bills")
+
+    # Очистить всю папку bills (после работы — в следующем месяце загрузить новый ZIP)
+    has_content = any(bills_root.iterdir())
+    if has_content:
+        st.markdown("**Очистить всю папку** — удалить всё содержимое `bills`. После этого можно загрузить новый ZIP со счетами и актами.")
+        clear_confirm = st.checkbox("Подтверждаю полную очистку папки bills", key="bills_clear_confirm")
+        if st.button("🗑️ Очистить всю папку bills", type="secondary", use_container_width=True):
+            if not clear_confirm:
+                st.warning("Поставьте галочку подтверждения.")
+            else:
+                try:
+                    for item in bills_root.iterdir():
+                        if item.is_dir():
+                            shutil.rmtree(item)
+                        else:
+                            item.unlink()
+                    st.success("✅ Папка `bills` очищена. Можно загрузить новый ZIP в следующем месяце.")
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"❌ Ошибка при очистке: {e}")
+        st.markdown("---")
 
     if options:
+        st.markdown("**Удалить один подкаталог:**")
         col_sel, col_btn = st.columns([3, 1])
         with col_sel:
             to_delete = st.selectbox(

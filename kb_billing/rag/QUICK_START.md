@@ -147,7 +147,7 @@ pip list | grep -E "qdrant|sentence-transformers"
 
 - Полная документация: `kb_billing/rag/README.md`
 - Рекомендации по архитектуре: `kb_billing/RAG_ARCHITECTURE_RECOMMENDATION.md`
-- Выбор векторной БД: `kb_billing/VECTOR_DB_FINAL_RECOMMENDATION.md`
+- Векторная БД: Qdrant (коллекция kb_billing). См. [docs/kb-billing-vs-presales.md](../../docs/kb-billing-vs-presales.md)
 
 
 

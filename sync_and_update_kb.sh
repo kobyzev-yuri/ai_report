@@ -57,21 +57,21 @@ if [ -f "$LOCAL_DIR/deploy/streamlit_report_oracle_backup.py" ]; then
         "$SERVER:$REMOTE_DIR/streamlit_report_oracle_backup.py" 2>/dev/null || true
 fi
 
-# RAG модули
-echo "  → RAG модули..."
-rsync -avz --delete \
+# RAG модули (код). confluence_docs/ на сервере не трогаем — пополняется через Спутниковый библиотекарь
+echo "  → RAG модули (код)..."
+rsync -avz \
     -e "$SSH_CMD" \
     "$LOCAL_DIR/kb_billing/rag/" \
     "$SERVER:$REMOTE_DIR/kb_billing/rag/"
 
-# База знаний (KB)
-echo "  → База знаний (KB)..."
-rsync -avz --delete \
+# База знаний (KB): код и таблицы/примеры. confluence_docs/ НЕ синхронизируем — пополняется на сервере (Спутниковый библиотекарь)
+echo "  → База знаний (KB: tables, views, training_data)..."
+rsync -avz \
     -e "$SSH_CMD" \
     "$LOCAL_DIR/kb_billing/tables/" \
     "$SERVER:$REMOTE_DIR/kb_billing/tables/"
 
-rsync -avz --delete \
+rsync -avz \
     -e "$SSH_CMD" \
     "$LOCAL_DIR/kb_billing/views/" \
     "$SERVER:$REMOTE_DIR/kb_billing/views/"
@@ -111,8 +111,8 @@ $SSH_CMD "$SERVER" "cd $REMOTE_DIR && python3 kb_billing/rag/init_kb.py --host l
 if [ -f "$LOCAL_DIR/deploy/streamlit_report_oracle_backup.py" ]; then
     echo ""
     echo "⚠️  ВАЖНО: Синхронизирован Streamlit файл!"
-    echo "   Для применения изменений в интерфейсе перезапустите Streamlit:"
-    echo "   $SSH_CMD $SERVER 'cd $REMOTE_DIR && ./restart_streamlit.sh'"
+    echo "   Для применения изменений в интерфейсе перезапустите Streamlit на сервере:"
+    echo "   ssh -p 1194 $SERVER 'cd $REMOTE_DIR && ./restart_streamlit.sh'"
 fi
 
 echo ""
@@ -124,8 +124,8 @@ echo "База знаний обновлена на сервере $SERVER"
 echo "Новые примеры запросов доступны в RAG-ассистенте"
 if [ -f "$LOCAL_DIR/deploy/streamlit_report_oracle_backup.py" ]; then
     echo ""
-    echo "⚠️  ВАЖНО: Если синхронизировали Streamlit файлы, перезапустите Streamlit:"
-    echo "  ssh -p 1194 $SERVER 'cd $REMOTE_DIR && ./restart_streamlit.sh'"
+    echo "⚠️  Для обновления кода приложения: SSH_CMD=\"ssh -p 1194\" ./sync_deploy.sh $SERVER"
+    echo "   Затем перезапуск: ssh -p 1194 $SERVER 'cd $REMOTE_DIR && ./restart_streamlit.sh'"
 fi
 
 

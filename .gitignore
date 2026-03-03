@@ -54,6 +54,7 @@ ENV/
 *.bak
 *.backup
 *.old
+*.pid
 
 # Test scripts (temporary)
 test_*.py

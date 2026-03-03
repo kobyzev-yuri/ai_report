@@ -296,7 +296,106 @@ class KBLoader:
         
         logger.info("Загружены метаданные схемы")
         return [point]
-    
+
+    def _confluence_content_to_text(self, content: List[Dict[str, Any]]) -> str:
+        """Сведение content[] (секции/подсекции из Confluence KB) в один текст для эмбеддинга."""
+        parts: List[str] = []
+
+        def walk(sections: List[Dict], prefix: str = "") -> None:
+            for s in sections:
+                if s.get("title"):
+                    parts.append(f"{prefix}{s['title']}")
+                if s.get("text"):
+                    parts.append(s["text"])
+                walk(s.get("subsections", []), prefix=prefix + "  ")
+
+        walk(content)
+        return "\n\n".join(parts).strip()
+
+    def _confluence_section_to_text(self, section: Dict[str, Any]) -> str:
+        """Текст одной секции (заголовок + текст + рекурсивно подсекции)."""
+        parts = []
+        if section.get("title"):
+            parts.append(section["title"])
+        if section.get("text"):
+            parts.append(section["text"])
+        for sub in section.get("subsections", []):
+            parts.append(self._confluence_section_to_text(sub))
+        return "\n\n".join(parts).strip()
+
+    def load_confluence_docs(self) -> List[PointStruct]:
+        """
+        Загрузка документов из Confluence (схемы сети, документация спутниковых инженеров).
+        Читает JSON из kb_billing/confluence_docs/*.json. Каждая секция страницы (в т.ч. «Вложение: …»)
+        загружается отдельной точкой (confluence_section), чтобы поиск возвращал релевантные фрагменты,
+        а не целую страницу. domain='satellite'.
+        """
+        confluence_docs_dir = self.kb_dir / "confluence_docs"
+        if not confluence_docs_dir.exists():
+            logger.info("Директория confluence_docs не найдена — документы Confluence не загружаются")
+            return []
+
+        outdated_file = confluence_docs_dir / "outdated.txt"
+        outdated_ids = set()
+        if outdated_file.exists():
+            try:
+                with open(outdated_file, "r", encoding="utf-8") as f:
+                    outdated_ids = {line.strip() for line in f if line.strip()}
+            except Exception as e:
+                logger.warning("Не удалось прочитать %s: %s", outdated_file, e)
+
+        points = []
+        for json_file in confluence_docs_dir.glob("*.json"):
+            try:
+                with open(json_file, "r", encoding="utf-8") as f:
+                    docs = json.load(f)
+            except Exception as e:
+                logger.warning("Не удалось прочитать %s: %s", json_file, e)
+                continue
+            if not isinstance(docs, list):
+                docs = [docs]
+            for doc in docs:
+                source = doc.get("source") or {}
+                page_id = source.get("page_id", "")
+                if page_id and page_id in outdated_ids:
+                    continue
+                page_title = doc.get("title", "Без названия")
+                source_url = source.get("url", "")
+                content = doc.get("content", [])
+                for idx, section in enumerate(content):
+                    section_title = section.get("title", "").strip()
+                    section_text = self._confluence_section_to_text(section)
+                    if not section_text:
+                        continue
+                    # Один чанк = одна секция (в т.ч. «Вложение: filename»)
+                    text_for_embed = f"{page_title}\n\n{section_title}\n\n{section_text}".strip()
+                    if len(text_for_embed) > 15000:
+                        text_for_embed = text_for_embed[:15000] + "\n\n[... обрезано ...]"
+                    embedding = self.model.encode(
+                        text_for_embed,
+                        normalize_embeddings=SQL4AConfig.NORMALIZE_EMBEDDINGS,
+                    ).tolist()
+                    point_id = hash(f"confluence_{page_id}_{idx}_{section_title or idx}") & 0x7FFFFFFFFFFFFFFF
+                    points.append(
+                        PointStruct(
+                            id=point_id,
+                            vector=embedding,
+                            payload={
+                                "type": "confluence_section",
+                                "domain": "satellite",
+                                "title": page_title,
+                                "section_title": section_title or "(без заголовка)",
+                                "content": text_for_embed[:12000],
+                                "source_url": source_url,
+                                "page_id": page_id,
+                                "last_updated": source.get("last_updated", ""),
+                                "scope": doc.get("scope", ["general"]),
+                            },
+                        )
+                    )
+        logger.info("Загружено %s чанков Confluence (сектор спутниковых систем)", len(points))
+        return points
+
     def load_all(self, recreate: bool = False):
         """Загрузка всех данных в Qdrant"""
         # Создаем коллекцию
@@ -320,6 +419,10 @@ class KBLoader:
         # Метаданные
         metadata_points = self.load_metadata()
         all_points.extend(metadata_points)
+
+        # Документы Confluence (схемы сети, документация спутниковых инженеров) — расширение единой KB
+        confluence_points = self.load_confluence_docs()
+        all_points.extend(confluence_points)
         
         # Загружаем в Qdrant батчами
         batch_size = 100

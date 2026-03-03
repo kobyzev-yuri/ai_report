@@ -69,18 +69,9 @@ streamlit run streamlit_report_oracle_backup.py \
 
 ## 🚀 Развертывание на сервере
 
-Подробные инструкции по развертыванию на боевом сервере (82.114.2.2):
+Подробные инструкции: **[docs/deploy.md](docs/deploy.md)** — схема поддержки и тестирования, синхронизация, перезапуск на сервере (без Docker). Вся документация: **[docs/](docs/README.md)**.
 
-- **[Визуальное руководство](DEPLOYMENT_VISUAL_GUIDE.md)** - 🎯 Начните с этого, если хотите понять общий процесс
-- **[Быстрый старт](deploy/START_HERE.md)** - ⚡ Инструкция для немедленного развертывания
-- **[Анализ методов](DEPLOYMENT_METHODS_ANALYSIS.md)** - 📋 Сравнение safe_deploy vs docker vs manual
-- **[Краткая сводка](DEPLOYMENT_SUMMARY_RU.md)** - 📄 Простая шпаргалка
-
-### Быстрая команда для деплоя
-```bash
-cd deploy
-SSH_CMD="ssh -p 1194" ./safe_deploy.sh root@82.114.2.2
-```
+Кратко: `./prepare_deployment.sh` → `SSH_CMD="ssh -p 1194" ./sync_deploy.sh root@82.114.2.2` → на сервере `./restart_streamlit.sh`.
 
 ### Подключение к Oracle
 
@@ -334,13 +325,12 @@ ai_report/
 │   ├── calculate_overage.py    # Python модуль расчета превышений
 │   └── restore_load_history.py  # Восстановление истории загрузок
 │
-├── docs/                        # Документация
-│   ├── INSTALLATION_ORACLE.md   # Инструкция по установке Oracle
-│   └── INSTALLATION_ORACLE.md   # Инструкция по установке Oracle
+├── docs/                        # Документация (развёртывание, права, отладка)
+│   ├── README.md                # Оглавление
+│   ├── deploy.md                # Развёртывание и поддержка
+│   ├── auth.md, tab-permissions.md, restart-streamlit.md и др.
 │
-├── tests/                       # Тесты и проверки
-│   ├── advance_charge_fix/      # Тесты для исправления авансов
-│   └── legacy/                  # Старые тесты
+├── tests/                       # Тесты (при наличии)
 │
 ├── archive/                     # Архив (включая PostgreSQL файлы)
 │   └── postgresql_migration_*/  # Архив PostgreSQL файлов
@@ -388,7 +378,7 @@ pip install -r requirements.txt
 
 ## 📚 Документация
 
-Дополнительная документация находится в `archive/docs/`
+Вся актуальная документация: **[docs/](docs/README.md)** (развёртывание, сервер, права, отладка).
 
 ## 📚 База знаний (KB) по Billing
 

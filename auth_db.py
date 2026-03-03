@@ -23,6 +23,8 @@ AVAILABLE_TABS = {
     'revenue': '💰 Доходы',
     'analytics': '📋 Счета за период',
     'loader': '📥 Data Loader',
+    'bills': '📄 Рассылка счетов',
+    'campaigns': '📧 Кампании',
 }
 
 def get_db_connection():

@@ -36,11 +36,33 @@ def _get_db_connection():
     return get_db_connection()
 
 
-def _parse_email_list(email_text: str) -> List[str]:
+def _parse_email_list(email_text) -> List[str]:
     """
     Парсинг списка email из текста (разделитель - запятая, точка с запятой или новая строка)
     Возвращает список валидных email адресов
+    
+    Поддерживает строки и cx_Oracle.LOB объекты
     """
+    # Если это LOB объект, читаем его в строку
+    if email_text is None:
+        return []
+    
+    # Проверяем, является ли это LOB объектом (cx_Oracle.LOB)
+    if hasattr(email_text, 'read'):
+        try:
+            email_text = email_text.read()
+        except Exception:
+            email_text = str(email_text)
+    
+    # Конвертируем в строку, если еще не строка
+    if not isinstance(email_text, str):
+        email_text = str(email_text) if email_text else ''
+    
+    # Убираем пробелы по краям и проверяем на пустую строку или только пробел
+    email_text = email_text.strip()
+    if not email_text or email_text == '':
+        return []
+    
     # Заменяем переносы строк и точку с запятой на запятые
     email_text = email_text.replace('\n', ',').replace(';', ',')
     # Разбиваем по запятым
@@ -55,10 +77,91 @@ def _parse_email_list(email_text: str) -> List[str]:
     return valid_emails
 
 
+def _looks_like_html(text: str) -> bool:
+    """Проверяет, содержит ли строка HTML-теги (для выбора режима: HTML как есть или экранирование)."""
+    if not text or not text.strip():
+        return False
+    # Проверка на типичные теги: открывающие/закрывающие или самозакрывающиеся
+    tag_pattern = re.compile(
+        r'<(?:p|div|span|b|strong|i|em|u|br|font|h[1-6]|ul|ol|li|table|tr|td|th|a)\s*(?:\s[^>]*)?/?>',
+        re.IGNORECASE
+    )
+    return bool(tag_pattern.search(text))
+
+
+def _remove_duplicate_text(text: str) -> str:
+    """
+    Удалить дублирование текста из строки.
+    Проверяет несколько методов для обнаружения дублирования.
+    """
+    if not text or len(text) < 10:
+        return text
+    
+    text = text.strip()
+    original_length = len(text)
+    
+    if original_length < 20:
+        return text
+    
+    # Метод 1: Ищем повторение по маркеру "Уважаемые коллеги"
+    marker_phrase = "Уважаемые коллеги"
+    if marker_phrase in text:
+        positions = []
+        start = 0
+        while True:
+            pos = text.find(marker_phrase, start)
+            if pos == -1:
+                break
+            positions.append(pos)
+            start = pos + 1
+        
+        if len(positions) >= 2:
+            first_occurrence = positions[0]
+            second_occurrence = positions[1]
+            first_part = text[:second_occurrence].strip()
+            second_part = text[second_occurrence:].strip()
+            
+            marker_len = len(marker_phrase)
+            first_after_marker = first_part[first_occurrence + marker_len:].strip()
+            second_after_marker = second_part[marker_len:].strip() if len(second_part) > marker_len else second_part.strip()
+            
+            if len(first_after_marker) > 50 and len(second_after_marker) > 50:
+                min_len = min(len(first_after_marker), len(second_after_marker))
+                matches = sum(1 for a, b in zip(first_after_marker[:min_len], second_after_marker[:min_len]) if a == b)
+                if matches > min_len * 0.9:  # 90% совпадение
+                    text = first_part
+                    logging.info(f"Обнаружено дублирование по маркеру '{marker_phrase}' (было {original_length} -> стало {len(text)}), исправлено")
+                    return text
+    
+    # Метод 2: Проверяем точное дублирование пополам
+    half_length = original_length // 2
+    first_half = text[:half_length].strip()
+    second_half = text[half_length:].strip()
+    
+    if first_half == second_half and len(first_half) > 10:
+        text = first_half
+        logging.info(f"Обнаружено точное дублирование пополам (было {original_length} -> стало {len(text)}), исправлено")
+        return text
+    
+    # Метод 3: Проверяем дублирование по предложениям (разделитель - двойной перенос строки)
+    sentences = text.split('\n\n')
+    if len(sentences) >= 4:
+        mid_point = len(sentences) // 2
+        first_part = '\n\n'.join(sentences[:mid_point]).strip()
+        second_part = '\n\n'.join(sentences[mid_point:]).strip()
+        if first_part == second_part and len(first_part) > 20:
+            text = first_part
+            logging.info(f"Обнаружено дублирование по предложениям (было {original_length} -> стало {len(text)}), исправлено")
+            return text
+    
+    return text
+
+
 def _extract_subject_and_greeting_from_docx(docx_content: bytes) -> Tuple[str, str]:
     """
     Извлечь тему письма (subject) и приветствие (greeting) из DOCX файла.
     Предполагается, что первая строка - это тема, остальное - приветствие.
+    Автоматически удаляет дублирование текста из greeting.
     Возвращает (subject, greeting)
     """
     try:
@@ -76,6 +179,10 @@ def _extract_subject_and_greeting_from_docx(docx_content: bytes) -> Tuple[str, s
         # Остальные строки - приветствие
         greeting_lines = paragraphs[1:] if len(paragraphs) > 1 else []
         greeting = '\n\n'.join(greeting_lines) if greeting_lines else ""
+        
+        # Удаляем дублирование из greeting перед возвратом
+        if greeting:
+            greeting = _remove_duplicate_text(greeting)
         
         return subject, greeting
     except ImportError:
@@ -157,20 +264,21 @@ def _save_campaign_to_db(
     Возвращает CAMPAIGN_ID или None при ошибке
     """
     try:
-        # Проверяем и убираем дублирование текста перед сохранением
-        if greeting and len(greeting) > 10:
-            greeting = greeting.strip()
-            text_length = len(greeting)
-            if text_length > 20:
-                half_length = text_length // 2
-                first_half = greeting[:half_length].strip()
-                second_half = greeting[half_length:].strip()
-                if first_half == second_half and len(first_half) > 10:
-                    greeting = first_half
-                    logging.warning(f"Обнаружено дублирование текста при сохранении кампании, исправлено")
+        # Убираем дублирование только для обычного текста (не для HTML, чтобы не повредить разметку)
+        if greeting and not _looks_like_html(greeting):
+            greeting = _remove_duplicate_text(greeting)
         
         cursor = conn.cursor()
-        email_list_str = ','.join(email_list)
+        # Преобразуем список email в строку
+        # Для тестовой рассылки основной список может быть пустым, но поле не может быть NULL
+        if email_list and len(email_list) > 0:
+            email_list_str = ','.join(email_list)
+        else:
+            # Если список пуст, используем пробел вместо пустой строки
+            # Oracle может интерпретировать пустую строку '' как NULL для CLOB,
+            # поэтому используем пробел как минимальное непустое значение
+            email_list_str = ' '
+        
         test_emails_str = ','.join(test_emails) if test_emails else None
         
         # Создаем переменную для получения ID
@@ -250,24 +358,58 @@ def _send_email_campaign(
         
         campaign_name, subject, greeting, email_list_str, docx_content, docx_filename, emails_total, db_test_mode, db_test_emails = row
         
+        # Конвертируем ВСЕ LOB объекты в строки ДО использования len() или других операций
+        # Функция для безопасной конвертации LOB в строку
+        def convert_lob_to_string(lob_value, default=''):
+            if lob_value is None:
+                return default
+            if isinstance(lob_value, cx_Oracle.LOB):
+                try:
+                    return lob_value.read()
+                except Exception as e:
+                    logging.warning(f"Ошибка при чтении LOB: {e}")
+                    return str(lob_value) if lob_value else default
+            elif hasattr(lob_value, 'read') and hasattr(lob_value, 'size'):
+                try:
+                    return lob_value.read()
+                except Exception as e:
+                    logging.warning(f"Ошибка при чтении LOB-подобного объекта: {e}")
+                    return str(lob_value) if lob_value else default
+            elif not isinstance(lob_value, str):
+                return str(lob_value) if lob_value else default
+            return lob_value
+        
+        # Конвертируем все поля, которые могут быть LOB
+        email_list_str = convert_lob_to_string(email_list_str, '')
+        greeting = convert_lob_to_string(greeting, '')
+        db_test_emails = convert_lob_to_string(db_test_emails, None) if db_test_emails is not None else None
+        
         # Определяем режим рассылки: если передан test_mode или в БД установлен TEST_MODE=1
         use_test_mode = test_mode or (db_test_mode == 1)
         
         # Выбираем список email для рассылки
         if use_test_mode:
             # Используем тестовые email из параметра или из БД
-            if test_emails:
+            if test_emails and len(test_emails) > 0:
+                # Если передан список тестовых email, используем его
                 email_list = test_emails
             elif db_test_emails:
-                email_list = _parse_email_list(db_test_emails)
+                # Если в БД есть тестовые email, парсим их
+                parsed_test_emails = _parse_email_list(db_test_emails)
+                if parsed_test_emails and len(parsed_test_emails) > 0:
+                    email_list = parsed_test_emails
+                else:
+                    return 0, 0, "Для тестовой рассылки не указаны контрольные email (список пуст или невалиден)"
             else:
                 return 0, 0, "Для тестовой рассылки не указаны контрольные email"
         else:
             # Обычная рассылка по основному списку
             email_list = _parse_email_list(email_list_str)
         
-        if not email_list:
-            return 0, 0, "Список email пуст или невалиден"
+        # Финальная проверка списка
+        if not email_list or len(email_list) == 0:
+            mode_text = "тестовой" if use_test_mode else "обычной"
+            return 0, 0, f"Список email для {mode_text} рассылки пуст или невалиден"
         
         # Читаем BLOB вложения (PDF) из Oracle, если есть
         attachment_content = None
@@ -316,118 +458,19 @@ def _send_email_campaign(
         # Формируем тело письма с приветствием (простой текст)
         email_body_text = greeting or 'Здравствуйте!'
         
-        # Проверяем и убираем дублирование текста
-        # Ищем повторяющиеся фрагменты текста
+        # Проверяем и убираем дублирование текста (используем единую функцию)
         original_length = len(email_body_text) if email_body_text else 0
+        email_body_text = _remove_duplicate_text(email_body_text)
         
-        if email_body_text and len(email_body_text) > 10:
-            # Убираем лишние пробелы и переносы строк в начале и конце
-            email_body_text = email_body_text.strip()
-            
-            # Проверяем, не повторяется ли текст дважды подряд
-            text_length = len(email_body_text)
-            if text_length > 20:  # Минимальная длина для проверки
-                # Метод 1: Ищем повторение по характерным фразам
-                # Ищем фразу "Уважаемые коллеги" и проверяем, не повторяется ли текст после неё
-                marker_phrase = "Уважаемые коллеги"
-                if marker_phrase in email_body_text:
-                    # Находим все вхождения маркера
-                    positions = []
-                    start = 0
-                    while True:
-                        pos = email_body_text.find(marker_phrase, start)
-                        if pos == -1:
-                            break
-                        positions.append(pos)
-                        start = pos + 1
-                    
-                    # Если маркер встречается дважды или больше, вероятно есть дублирование
-                    if len(positions) >= 2:
-                        # Берем текст от первого вхождения маркера до второго
-                        first_occurrence = positions[0]
-                        second_occurrence = positions[1]
-                        first_part = email_body_text[:second_occurrence].strip()
-                        second_part = email_body_text[second_occurrence:].strip()
-                        
-                        # Сравниваем, игнорируя возможные различия в начале (например, "Тест")
-                        # Сравниваем основную часть после маркера
-                        marker_len = len(marker_phrase)
-                        first_after_marker = first_part[first_occurrence + marker_len:].strip()
-                        second_after_marker = second_part[marker_len:].strip() if len(second_part) > marker_len else second_part.strip()
-                        
-                        # Если основная часть совпадает на 90% или больше
-                        if len(first_after_marker) > 50 and len(second_after_marker) > 50:
-                            min_len = min(len(first_after_marker), len(second_after_marker))
-                            matches = sum(1 for a, b in zip(first_after_marker[:min_len], second_after_marker[:min_len]) if a == b)
-                            if matches > min_len * 0.9:  # 90% совпадение
-                                email_body_text = first_part
-                                logging.warning(f"Обнаружено дублирование по маркеру '{marker_phrase}' (было {text_length} -> стало {len(email_body_text)}), исправлено")
-                
-                # Метод 2: Проверяем точное дублирование пополам
-                if len(email_body_text) == text_length:  # Если еще не исправлено
-                    half_length = text_length // 2
-                    first_half = email_body_text[:half_length].strip()
-                    second_half = email_body_text[half_length:].strip()
-                    
-                    # Если вторая половина точно совпадает с первой, убираем дублирование
-                    if first_half == second_half and len(first_half) > 10:
-                        email_body_text = first_half
-                        logging.warning(f"Обнаружено точное дублирование текста пополам (длина: {text_length} -> {len(first_half)}), исправлено")
-                    elif len(second_half) > len(first_half) * 0.8:
-                        # Проверяем, не начинается ли вторая половина с похожего текста
-                        # Сравниваем основную часть (пропускаем первые 100 символов на случай различий типа "Тест")
-                        if len(first_half) > 100:
-                            first_compare = first_half[100:]
-                            second_compare = second_half[100:] if len(second_half) > 100 else second_half
-                            if len(second_compare) >= len(first_compare) * 0.9:
-                                min_len = min(len(first_compare), len(second_compare))
-                                matches = sum(1 for a, b in zip(first_compare[:min_len], second_compare[:min_len]) if a == b)
-                                if matches > min_len * 0.95:  # 95% совпадение
-                                    email_body_text = first_half
-                                    logging.warning(f"Обнаружено дублирование с различиями в начале (длина: {text_length} -> {len(first_half)}), исправлено")
-                
-                # Метод 2: Проверяем точное дублирование пополам
-                half_length = text_length // 2
-                first_half = email_body_text[:half_length].strip()
-                second_half = email_body_text[half_length:].strip()
-                
-                # Если вторая половина точно совпадает с первой, убираем дублирование
-                if first_half == second_half and len(first_half) > 10:
-                    email_body_text = first_half
-                    logging.warning(f"Обнаружено точное дублирование текста пополам (длина: {text_length} -> {len(first_half)}), исправлено")
-                elif len(second_half) > len(first_half) * 0.9:
-                    # Проверяем, не начинается ли вторая половина с того же текста (с небольшими различиями)
-                    # Сравниваем первые 100 символов
-                    if len(first_half) > 100 and len(second_half) > 100:
-                        first_100 = first_half[:100]
-                        second_100 = second_half[:100]
-                        # Если первые 100 символов совпадают на 90% или больше
-                        matches = sum(1 for a, b in zip(first_100, second_100) if a == b)
-                        if matches > 90:
-                            # Проверяем полное совпадение основной части
-                            if first_half == second_half[:len(first_half)]:
-                                email_body_text = first_half
-                                logging.warning(f"Обнаружено дублирование с небольшими различиями (длина: {text_length} -> {len(first_half)}), исправлено")
-                    
-                    # Метод 3: Проверяем дублирование по предложениям
-                    sentences = email_body_text.split('\n\n')
-                    if len(sentences) >= 4:
-                        mid_point = len(sentences) // 2
-                        first_part = '\n\n'.join(sentences[:mid_point]).strip()
-                        second_part = '\n\n'.join(sentences[mid_point:]).strip()
-                        if first_part == second_part and len(first_part) > 20:
-                            email_body_text = first_part
-                            logging.warning(f"Обнаружено дублирование по предложениям в greeting, исправлено")
-        
-        # Логируем, если текст был изменен
         if original_length > 0 and len(email_body_text) < original_length * 0.6:
             logging.info(f"Текст greeting был сокращен с {original_length} до {len(email_body_text)} символов (удалено дублирование)")
         
-        # HTML версия для совместимости
-        # Конвертируем переносы строк в HTML <br>, экранируем HTML символы
-        import html
-        html_body_text = html.escape(email_body_text)
-        html_body_text = html_body_text.replace('\n', '<br>').replace('\r', '')
+        # HTML версия: если текст уже содержит HTML-теги — используем как есть, иначе экранируем
+        import html as html_module
+        if _looks_like_html(email_body_text):
+            html_body_content = email_body_text.strip()
+        else:
+            html_body_content = html_module.escape(email_body_text).replace('\n', '<br>').replace('\r', '')
         
         full_html = f"""<!DOCTYPE html>
 <html>
@@ -437,7 +480,7 @@ def _send_email_campaign(
 </head>
 <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
     <div style="max-width: 600px; margin: 0 auto; padding: 20px;">
-        {html_body_text}
+        {html_body_content}
     </div>
 </body>
 </html>"""
@@ -518,28 +561,37 @@ def _send_email_campaign(
                         from email.header import Header
                         from email.utils import encode_rfc2231
                         
-                        # Кодируем имя файла для поддержки кириллицы
-                        if attachment_filename and attachment_filename != "Untitled.bin" and attachment_filename != "attachment.pdf":
+                        # Обрабатываем имя файла для вложения
+                        safe_filename = None
+                        
+                        if attachment_filename:
                             # Убираем путь, оставляем только имя файла
                             safe_filename = attachment_filename.split('/')[-1].split('\\')[-1]
                             
-                            # Убираем расширение .bin если есть
-                            if safe_filename.lower().endswith('.bin'):
-                                # Пытаемся восстановить имя из оригинального файла или используем дефолтное
-                                safe_filename = "MVSAT_СТЭККОМ_26.pdf" if "MVSAT" in str(attachment_filename) else "attachment.pdf"
-                            
-                            # Проверяем, есть ли кириллица в имени файла
-                            try:
-                                safe_filename.encode('ascii')
-                                # Нет кириллицы, используем простое имя
-                                filename_header = safe_filename
-                            except UnicodeEncodeError:
-                                # Есть кириллица, используем RFC 2231 кодирование
-                                filename_header = encode_rfc2231(safe_filename, 'utf-8')
-                        else:
-                            # Если имя файла не указано или это Untitled.bin, используем дефолтное имя
-                            filename_header = "MVSAT_СТЭККОМ_26.pdf"  # Дефолтное имя для MVSAT рассылки
-                            logging.warning(f"Имя файла не указано или некорректно ({attachment_filename}), используется дефолтное: {filename_header}")
+                            # Проверяем на некорректные имена
+                            if (not safe_filename or 
+                                safe_filename == "Untitled.bin" or 
+                                safe_filename.lower().endswith('.bin') or
+                                safe_filename == "attachment.pdf"):
+                                safe_filename = None
+                        
+                        # Если имя файла некорректное или отсутствует, используем дефолтное
+                        if not safe_filename:
+                            safe_filename = "MVSAT_СТЭККОМ_26.pdf"  # Дефолтное имя для MVSAT рассылки
+                            logging.warning(f"Имя файла не указано или некорректно ({attachment_filename}), используется дефолтное: {safe_filename}")
+                        
+                        # Убеждаемся, что имя файла заканчивается на .pdf
+                        if not safe_filename.lower().endswith('.pdf'):
+                            safe_filename = safe_filename.rsplit('.', 1)[0] + '.pdf'
+                        
+                        # Кодируем имя файла для поддержки кириллицы (RFC 2231)
+                        try:
+                            safe_filename.encode('ascii')
+                            # Нет кириллицы, используем простое имя
+                            filename_header = safe_filename
+                        except UnicodeEncodeError:
+                            # Есть кириллица, используем RFC 2231 кодирование
+                            filename_header = encode_rfc2231(safe_filename, 'utf-8')
                         
                         # Устанавливаем заголовки правильно
                         attachment_part.add_header(
@@ -661,21 +713,84 @@ def _get_campaign_details(conn, campaign_id: int) -> Optional[dict]:
         if not row:
             return None
         
+        def _lob_to_str(val, default=''):
+            if val is None:
+                return default
+            if hasattr(val, 'read'):
+                try:
+                    return val.read()
+                except Exception:
+                    return str(val) if val else default
+            return str(val) if val else default
+
+        # Конвертируем LOB и обычные значения в строки (CLOB/GREETING и др.)
+        campaign_name_val = _lob_to_str(row[0], '')
+        if not isinstance(campaign_name_val, str):
+            campaign_name_val = str(campaign_name_val) if campaign_name_val else ''
+        subject_val = _lob_to_str(row[1], '')
+        if not isinstance(subject_val, str):
+            subject_val = str(subject_val) if subject_val else ''
+
+        email_list_value = row[3]
+        if email_list_value and hasattr(email_list_value, 'read'):
+            try:
+                email_list_value = email_list_value.read()
+            except Exception:
+                email_list_value = str(email_list_value) if email_list_value else ''
+        else:
+            email_list_value = email_list_value or ''
+
+        greeting_val = row[2]
+        if greeting_val is not None and hasattr(greeting_val, 'read'):
+            try:
+                greeting_val = greeting_val.read()
+            except Exception:
+                greeting_val = str(greeting_val) if greeting_val else ''
+        else:
+            greeting_val = greeting_val or ''
+        
+        test_emails_value = row[9] if len(row) > 9 else None
+        if test_emails_value and hasattr(test_emails_value, 'read'):
+            try:
+                test_emails_value = test_emails_value.read()
+            except Exception:
+                test_emails_value = str(test_emails_value) if test_emails_value else None
+        
         return {
-            'campaign_name': row[0],
-            'subject': row[1],
-            'greeting': row[2] or '',
-            'email_list': row[3] or '',
+            'campaign_name': campaign_name_val,
+            'subject': subject_val,
+            'greeting': greeting_val,
+            'email_list': email_list_value,
             'docx_filename': row[4],
             'created_by': row[5],
             'created_at': row[6],
             'status': row[7],
             'test_mode': row[8] if len(row) > 8 else 0,
-            'test_emails': row[9] if len(row) > 9 else None
+            'test_emails': test_emails_value
         }
     except Exception as e:
         st.error(f"❌ Ошибка при получении деталей кампании: {e}")
         return None
+
+
+def _update_campaign_metadata(conn, campaign_id: int, campaign_name: str, subject: str, greeting: str) -> bool:
+    """Обновить название, тему и тело письма (GREETING) существующей кампании."""
+    try:
+        cursor = conn.cursor()
+        cursor.execute("""
+            UPDATE EMAIL_CAMPAIGNS
+            SET CAMPAIGN_NAME = :1, SUBJECT = :2, GREETING = :3
+            WHERE CAMPAIGN_ID = :4
+        """, (campaign_name or '', subject or '', greeting or '', campaign_id))
+        conn.commit()
+        updated = cursor.rowcount
+        cursor.close()
+        return updated > 0
+    except Exception as e:
+        st.error(f"❌ Ошибка при обновлении кампании: {e}")
+        if conn:
+            conn.rollback()
+        return False
 
 
 def show_tab():
@@ -688,9 +803,9 @@ def show_tab():
         Эта вкладка позволяет создавать и отправлять рекламные email кампании клиентам.
         
         **Как использовать:**
-        1. Загрузите текстовый файл со списком email (разделитель - запятая)
-        2. Загрузите файл письма в формате DOCX
-        3. Заполните приветствие и тему письма
+        1. Введите тему письма и текст приветствия
+        2. Загрузите текстовый файл со списком email (разделитель - запятая) или введите вручную
+        3. (Опционально) Загрузите PDF файл для вложения
         4. Сохраните кампанию и отправьте письма
         5. Используйте сохраненные кампании для повторной отправки
         """
@@ -742,19 +857,24 @@ def show_tab():
             
             subject = st.text_input(
                 "Тема письма",
-                value=st.session_state.get('auto_subject', ''),
                 placeholder="Например: Специальное предложение от STECCOM",
-                help="Тема email письма (может быть извлечена из DOCX файла автоматически)",
+                help="Тема email письма",
                 key="subject_input"
             )
             
             greeting = st.text_area(
-                "Приветствие",
-                value=st.session_state.get('auto_greeting', 'Здравствуйте!'),
-                placeholder="Текст приветствия, который будет добавлен в тело письма",
-                help="Текст письма (может быть извлечен из DOCX файла автоматически)",
-                key="greeting_input"
+                "Текст письма (поддержка HTML)",
+                placeholder="Введите текст или HTML: <b>жирный</b>, <span style='color:red'>цвет</span>, <br> — перенос",
+                help="Можно вводить обычный текст или HTML: <b>, <i>, <span style='color:...'>, <font>, переносы сохраняются.",
+                key="greeting_input",
+                height=220
             )
+            if greeting.strip():
+                with st.expander("👁 Предпросмотр письма"):
+                    if _looks_like_html(greeting):
+                        st.markdown(greeting, unsafe_allow_html=True)
+                    else:
+                        st.markdown(greeting.replace("\n", "  \n"))
             
             # Проверяем дублирование текста в интерфейсе
             if greeting and len(greeting) > 20:
@@ -842,104 +962,18 @@ def show_tab():
         # Загрузка списка email
         st.subheader("📧 Список получателей")
         
-        # Проверяем наличие готовых файлов в data/
-        project_root = Path(__file__).parent.parent
-        default_email_file_path = project_root / "data" / "почты для рассылки MVSAT.txt"
-        default_docx_file_path = project_root / "data" / "письмо_MVSAT.docx"
-        default_pdf_file_path = project_root / "data" / "MVSAT_СТЭККОМ_26.pdf"
+        uploaded_email_file = st.file_uploader(
+            "Загрузите текстовый файл со списком email",
+            type=['txt', 'csv'],
+            help="Файл должен содержать email адреса, разделенные запятыми, точкой с запятой или переносами строк"
+        )
         
-        use_default_files = False
-        if default_email_file_path.exists() or default_docx_file_path.exists() or default_pdf_file_path.exists():
-            col_check1, col_check2, col_check3 = st.columns(3)
-            with col_check1:
-                if default_email_file_path.exists():
-                    st.info(f"📄 Email список: `{default_email_file_path.name}`")
-            with col_check2:
-                if default_docx_file_path.exists():
-                    st.info(f"📄 Текст письма: `{default_docx_file_path.name}`")
-            with col_check3:
-                if default_pdf_file_path.exists():
-                    st.info(f"📎 Вложение: `{default_pdf_file_path.name}`")
-            
-            use_default_files = st.checkbox(
-                "Использовать готовые файлы из data/ (MVSAT)",
-                value=False,
-                help="Использовать файлы из директории data/: список email, текст письма (DOCX) и вложение (PDF)"
-            )
-        
-        email_file = None
-        docx_file_default = None
-        pdf_file_default = None
-        
-        if use_default_files:
-            if default_email_file_path.exists():
-                with open(default_email_file_path, 'rb') as f:
-                    email_content = f.read()
-                    class FileLike:
-                        def __init__(self, content, name):
-                            self._content = content
-                            self.name = name
-                        def read(self):
-                            return self._content
-                        def getvalue(self):
-                            return self._content
-                    email_file = FileLike(email_content, default_email_file_path.name)
-                    st.success(f"✅ Используется файл: {default_email_file_path.name}")
-            
-            # DOCX для извлечения subject и greeting
-            if default_docx_file_path.exists():
-                with open(default_docx_file_path, 'rb') as f:
-                    docx_content = f.read()
-                    class DocxFileLike:
-                        def __init__(self, content, name):
-                            self._content = content
-                            self.name = name
-                        def read(self):
-                            return self._content
-                        def getvalue(self):
-                            return self._content
-                    docx_file_default = DocxFileLike(docx_content, default_docx_file_path.name)
-                    st.success(f"✅ Используется файл: {default_docx_file_path.name} (для извлечения темы и текста)")
-                    
-                    # Автоматически извлекаем subject и greeting из DOCX
-                    extracted_subject, extracted_greeting = _extract_subject_and_greeting_from_docx(docx_content)
-                    if extracted_subject and not st.session_state.get('subject_set', False):
-                        # Обновляем поле subject, если оно пустое
-                        st.session_state['auto_subject'] = extracted_subject
-                    if extracted_greeting and not st.session_state.get('greeting_set', False):
-                        # Обновляем поле greeting, если оно пустое
-                        st.session_state['auto_greeting'] = extracted_greeting
-            
-            # PDF как вложение
-            if default_pdf_file_path.exists():
-                with open(default_pdf_file_path, 'rb') as f:
-                    pdf_content = f.read()
-                    class PdfFileLike:
-                        def __init__(self, content, name):
-                            self._content = content
-                            self.name = name
-                        def read(self):
-                            return self._content
-                        def getvalue(self):
-                            return self._content
-                    pdf_file_default = PdfFileLike(pdf_content, default_pdf_file_path.name)
-                    st.success(f"✅ Используется файл: {default_pdf_file_path.name} (будет прикреплен к письму)")
-        
-        uploaded_email_file = None
-        if not use_default_files:
-            uploaded_email_file = st.file_uploader(
-                "Загрузите текстовый файл со списком email",
-                type=['txt', 'csv'],
-                help="Файл должен содержать email адреса, разделенные запятыми, точкой с запятой или переносами строк"
-            )
-            if uploaded_email_file:
-                email_file = uploaded_email_file
+        email_file = uploaded_email_file if uploaded_email_file else None
         
         email_text_input = st.text_area(
             "Или введите email адреса вручную",
             placeholder="email1@example.com, email2@example.com, email3@example.com",
-            help="Введите email адреса через запятую, точку с запятой или с новой строки",
-            disabled=use_default_files
+            help="Введите email адреса через запятую, точку с запятой или с новой строки"
         )
         
         email_list = []
@@ -963,7 +997,7 @@ def show_tab():
                 st.info(f"✅ Загружено {len(email_list)} валидных email адресов из файла")
             except Exception as e:
                 st.error(f"❌ Ошибка при чтении файла email: {e}")
-        elif email_text_input and not use_default_files:
+        elif email_text_input:
             email_list = _parse_email_list(email_text_input)
             if email_list:
                 st.info(f"✅ Найдено {len(email_list)} валидных email адресов")
@@ -976,100 +1010,32 @@ def show_tab():
         
         st.markdown("---")
         
-        # Загрузка файлов
-        st.subheader("📄 Файлы для рассылки")
+        # Загрузка вложения PDF
+        st.subheader("📎 Вложение (PDF)")
+        st.caption("Опционально: загрузите PDF файл, который будет прикреплен к письму")
         
-        col_file1, col_file2 = st.columns(2)
+        uploaded_pdf_file = st.file_uploader(
+            "Загрузите PDF файл для вложения",
+            type=['pdf'],
+            help="PDF файл будет прикреплен к каждому письму",
+            key="pdf_uploader"
+        )
         
-        with col_file1:
-            st.markdown("**Текст письма (DOCX)**")
-            st.caption("Из этого файла будут извлечены тема письма и приветствие")
-            uploaded_docx_file = None
-            if not use_default_files:
-                uploaded_docx_file = st.file_uploader(
-                    "Загрузите DOCX файл с текстом письма",
-                    type=['docx'],
-                    help="Первая строка DOCX будет использована как тема письма, остальное - как приветствие",
-                    key="docx_uploader"
-                )
-            
-            docx_file = docx_file_default if use_default_files else uploaded_docx_file
-            
-            if docx_file:
-                try:
-                    if hasattr(docx_file, "getvalue"):
-                        file_size = len(docx_file.getvalue() or b"")
-                    elif hasattr(docx_file, "read"):
-                        content = docx_file.read()
-                        file_size = len(content) if isinstance(content, bytes) else 0
-                    else:
-                        file_size = 0
-                    file_name = getattr(docx_file, "name", "unknown")
-                    st.success(f"✅ {file_name} ({file_size} байт)")
-                    
-                    # Автоматически извлекаем subject и greeting при загрузке нового файла
-                    if uploaded_docx_file and not use_default_files:
-                        try:
-                            docx_bytes = uploaded_docx_file.getvalue() if hasattr(uploaded_docx_file, "getvalue") else uploaded_docx_file.read()
-                            extracted_subject, extracted_greeting = _extract_subject_and_greeting_from_docx(docx_bytes)
-                            if extracted_subject:
-                                st.session_state['auto_subject'] = extracted_subject
-                                st.session_state['subject_set'] = False  # Разрешаем обновление
-                                st.info(f"📝 Извлечена тема: {extracted_subject[:50]}...")
-                            if extracted_greeting:
-                                # Проверяем на дублирование перед сохранением
-                                greeting_clean = extracted_greeting.strip()
-                                original_len = len(greeting_clean)
-                                
-                                if len(greeting_clean) > 20:
-                                    # Проверка точного дублирования
-                                    half_len = len(greeting_clean) // 2
-                                    first_half = greeting_clean[:half_len].strip()
-                                    second_half = greeting_clean[half_len:].strip()
-                                    if first_half == second_half and len(first_half) > 10:
-                                        greeting_clean = first_half
-                                        st.warning(f"⚠️ Обнаружено дублирование в тексте из DOCX (было {original_len} символов, стало {len(greeting_clean)}), исправлено автоматически")
-                                
-                                st.session_state['auto_greeting'] = greeting_clean
-                                st.session_state['greeting_set'] = False  # Разрешаем обновление
-                                st.info(f"📝 Извлечен текст письма ({len(greeting_clean)} символов)")
-                                
-                                # Обновляем страницу для применения изменений в полях
-                                if 'docx_extracted_once' not in st.session_state:
-                                    st.session_state['docx_extracted_once'] = True
-                                    st.rerun()
-                        except Exception as e:
-                            st.error(f"❌ Ошибка при извлечении текста из DOCX: {e}")
-                except Exception as e:
-                    st.warning(f"⚠️ Не удалось определить размер файла: {e}")
+        pdf_file = uploaded_pdf_file
         
-        with col_file2:
-            st.markdown("**Вложение (PDF)**")
-            st.caption("Этот файл будет прикреплен к письму как вложение")
-            uploaded_pdf_file = None
-            if not use_default_files:
-                uploaded_pdf_file = st.file_uploader(
-                    "Загрузите PDF файл для вложения",
-                    type=['pdf'],
-                    help="PDF файл будет прикреплен к каждому письму",
-                    key="pdf_uploader"
-                )
-            
-            pdf_file = pdf_file_default if use_default_files else uploaded_pdf_file
-            
-            if pdf_file:
-                try:
-                    if hasattr(pdf_file, "getvalue"):
-                        file_size = len(pdf_file.getvalue() or b"")
-                    elif hasattr(pdf_file, "read"):
-                        content = pdf_file.read()
-                        file_size = len(content) if isinstance(content, bytes) else 0
-                    else:
-                        file_size = 0
-                    file_name = getattr(pdf_file, "name", "unknown")
-                    st.success(f"✅ {file_name} ({file_size} байт)")
-                except Exception as e:
-                    st.warning(f"⚠️ Не удалось определить размер файла: {e}")
+        if pdf_file:
+            try:
+                if hasattr(pdf_file, "getvalue"):
+                    file_size = len(pdf_file.getvalue() or b"")
+                elif hasattr(pdf_file, "read"):
+                    content = pdf_file.read()
+                    file_size = len(content) if isinstance(content, bytes) else 0
+                else:
+                    file_size = 0
+                file_name = getattr(pdf_file, "name", "unknown")
+                st.success(f"✅ {file_name} ({file_size} байт)")
+            except Exception as e:
+                st.warning(f"⚠️ Не удалось определить размер файла: {e}")
         
         st.markdown("---")
         
@@ -1151,8 +1117,12 @@ def show_tab():
                     st.error("Введите название кампании")
                 elif not subject:
                     st.error("Введите тему письма")
-                elif not email_list:
+                elif not test_mode and not email_list:
+                    # Для обычной рассылки список обязателен, для тестовой - может быть пустым
                     st.error("Загрузите список email получателей")
+                elif test_mode and not test_emails_list:
+                    # Для тестовой рассылки нужны тестовые email
+                    st.error("Для тестовой рассылки укажите контрольные email адреса")
                 else:
                     with st.spinner("Сохранение кампании..."):
                         # Сохраняем PDF как вложение (в BLOB)
@@ -1164,7 +1134,26 @@ def show_tab():
                                     attachment_content = pdf_file.getvalue()
                                 elif hasattr(pdf_file, "read"):
                                     attachment_content = pdf_file.read()
-                                attachment_filename = getattr(pdf_file, "name", "attachment.pdf")
+                                
+                                # Получаем имя файла и проверяем его корректность
+                                raw_filename = getattr(pdf_file, "name", "attachment.pdf")
+                                
+                                # Если имя файла некорректное (Untitled.bin, пустое и т.д.), используем дефолтное
+                                if not raw_filename or raw_filename == "Untitled.bin" or raw_filename.lower().endswith('.bin'):
+                                    # Пытаемся определить имя из пути по умолчанию или используем стандартное
+                                    if default_pdf_file_path and default_pdf_file_path.exists():
+                                        attachment_filename = default_pdf_file_path.name
+                                    else:
+                                        attachment_filename = "MVSAT_СТЭККОМ_26.pdf"
+                                    logging.warning(f"Имя файла некорректное ({raw_filename}), используется: {attachment_filename}")
+                                else:
+                                    # Убираем путь, оставляем только имя файла
+                                    attachment_filename = raw_filename.split('/')[-1].split('\\')[-1]
+                                    
+                                    # Если имя не заканчивается на .pdf, добавляем расширение
+                                    if not attachment_filename.lower().endswith('.pdf'):
+                                        attachment_filename = attachment_filename + '.pdf'
+                                    
                             except Exception as e:
                                 st.warning(f"⚠️ Ошибка при чтении PDF файла: {e}")
                         
@@ -1208,7 +1197,26 @@ def show_tab():
                                     attachment_content = pdf_file.getvalue()
                                 elif hasattr(pdf_file, "read"):
                                     attachment_content = pdf_file.read()
-                                attachment_filename = getattr(pdf_file, "name", "attachment.pdf")
+                                
+                                # Получаем имя файла и проверяем его корректность
+                                raw_filename = getattr(pdf_file, "name", "attachment.pdf")
+                                
+                                # Если имя файла некорректное (Untitled.bin, пустое и т.д.), используем дефолтное
+                                if not raw_filename or raw_filename == "Untitled.bin" or raw_filename.lower().endswith('.bin'):
+                                    # Пытаемся определить имя из пути по умолчанию или используем стандартное
+                                    if default_pdf_file_path and default_pdf_file_path.exists():
+                                        attachment_filename = default_pdf_file_path.name
+                                    else:
+                                        attachment_filename = "MVSAT_СТЭККОМ_26.pdf"
+                                    logging.warning(f"Имя файла некорректное ({raw_filename}), используется: {attachment_filename}")
+                                else:
+                                    # Убираем путь, оставляем только имя файла
+                                    attachment_filename = raw_filename.split('/')[-1].split('\\')[-1]
+                                    
+                                    # Если имя не заканчивается на .pdf, добавляем расширение
+                                    if not attachment_filename.lower().endswith('.pdf'):
+                                        attachment_filename = attachment_filename + '.pdf'
+                                    
                             except Exception as e:
                                 st.warning(f"⚠️ Ошибка при чтении PDF файла: {e}")
                         

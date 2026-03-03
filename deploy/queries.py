@@ -254,247 +254,82 @@ def get_revenue_report(get_connection, period_filter=None, contract_id_filter=No
         if conn: conn.close()
 
 def get_analytics_duplicates(get_connection, period_id):
-    """
-    Поиск дубликатов в ANALYTICS.
+    """Поиск дубликатов в ANALYTICS"""
+    conn = get_connection()
+    if not conn: return None
     
-    ВАЖНО: дубликаты определяются по **всем полям (ключевой состав как в remove_analytics_duplicates), кроме AID**.
-    Здесь используется тот же набор полей в PARTITION BY, что и в remove_analytics_duplicates.
-    """
-    conn = get_connection()
-    if not conn:
-        return None
-
-    query = """
-    SELECT
-        a.*,
-        COUNT(*) OVER (
-            PARTITION BY
-                a.PERIOD_ID,
-                a.DOMAIN_ID,
-                a.GROUP_ID,
-                a.CUSTOMER_ID,
-                a.ACCOUNT_ID,
-                a.TYPE_ID,
-                a.SERVICE_ID,
-                a.ZONE_ID,
-                a.PRICE,
-                a.TRAF,
-                a.MONEY,
-                a.VSAT,
-                a.BLANK,
-                a.COUNTER_CF,
-                a.TARIFF_ID,
-                a.TARIFFEL_ID,
-                a.THRESHOLD,
-                a.CLASS_ID,
-                a.CLASS_NAME,
-                a.CBYTE,
-                a.FLAG,
-                a.COUNTER_ID,
-                a.RESOURCE_TYPE_ID,
-                a.SUB_TYPE_ID,
-                a.SUB_PERIOD_ID,
-                a.INVOICE_ITEM_ID,
-                a.CARD_ID,
-                a.SERIAL_ID,
-                a.SUBSCRIPTION_ID,
-                a.TOTAL_TRAF,
-                a.PMONEY,
-                a.IRIFILENUM,
-                a.PARTNER_PERCENT
-        ) AS DUPLICATE_COUNT
-    FROM ANALYTICS a
-    WHERE a.PERIOD_ID = :period_id
-    """
-
-    outer_query = """
-    SELECT *
-    FROM (
-        {inner_sql}
-    )
-    WHERE DUPLICATE_COUNT > 1
-    ORDER BY DUPLICATE_COUNT DESC, AID DESC
-    """.format(inner_sql=query)
-
-    try:
-        # Возвращаем все строки-дубликаты с полями ANALYTICS и колонкой DUPLICATE_COUNT
-        return pd.read_sql_query(outer_query, conn, params={"period_id": period_id})
-    except Exception as e:
-        st.error(f"Ошибка при поиске дубликатов ANALYTICS: {e}")
-        return None
-    finally:
-        if conn:
-            conn.close()
-
-def remove_analytics_duplicates(get_connection, period_id):
-    """
-    Удаление дубликатов в таблице ANALYTICS за заданный PERIOD_ID.
-    Дубликаты определяются как записи, где совпадают ВСЕ поля, кроме AID.
-    Оставляем запись с максимальным AID в каждой группе.
-    """
-    conn = get_connection()
-    if not conn:
-        return False, 0, "❌ Не удалось подключиться к базе данных"
-
-    cursor = conn.cursor()
-    try:
-        delete_sql = """
-        DELETE FROM ANALYTICS
-        WHERE AID IN (
-            SELECT AID FROM (
-                SELECT
-                    AID,
-                    ROW_NUMBER() OVER (
-                        PARTITION BY
-                            PERIOD_ID,
-                            DOMAIN_ID,
-                            GROUP_ID,
-                            CUSTOMER_ID,
-                            ACCOUNT_ID,
-                            TYPE_ID,
-                            SERVICE_ID,
-                            ZONE_ID,
-                            PRICE,
-                            TRAF,
-                            MONEY,
-                            VSAT,
-                            BLANK,
-                            TARIFF_ID,
-                            TARIFFEL_ID,
-                            THRESHOLD,
-                            CLASS_ID,
-                            CLASS_NAME,
-                            CBYTE,
-                            FLAG,
-                            COUNTER_ID,
-                            RESOURCE_TYPE_ID,
-                            SUB_TYPE_ID,
-                            SUB_PERIOD_ID,
-                            INVOICE_ITEM_ID,
-                            CARD_ID,
-                            SERIAL_ID,
-                            SUBSCRIPTION_ID,
-                            TOTAL_TRAF,
-                            PMONEY,
-                            IRIFILENUM,
-                            PARTNER_PERCENT
-                        ORDER BY AID DESC
-                    ) AS RN
-                FROM ANALYTICS
-                WHERE PERIOD_ID = :period_id
-            )
-            WHERE RN > 1
-        )
-        """
-
-        cursor.execute(delete_sql, period_id=period_id)
-        deleted_count = cursor.rowcount if cursor.rowcount is not None else 0
-        conn.commit()
-        return True, deleted_count, f"✅ Удалено дубликатов: {deleted_count}"
-    except Exception as e:
-        try:
-            conn.rollback()
-        except Exception:
-            pass
-        return False, 0, f"❌ Ошибка удаления дубликатов: {e}"
-    finally:
-        try:
-            cursor.close()
-        except Exception:
-            pass
-        conn.close()
-
-def get_lbs_services_report(get_connection, contract_id_filter=None, imei_filter=None, customer_name_filter=None, code_1c_filter=None, exclude_steccom=True):
-    """Получение отчета по активным SBD IMEI сервисам без расходов за последний месяц"""
-    conn = get_connection()
-    if not conn:
-        return None
-
-    # Фильтр по CONTRACT_ID
-    contract_condition = ""
-    if contract_id_filter and contract_id_filter.strip():
-        contract_value = contract_id_filter.strip().replace("'", "''")
-        contract_condition = f"AND vi.CONTRACT_ID LIKE '%{contract_value}%'"
-
-    # Фильтр по IMEI
-    imei_condition = ""
-    if imei_filter and imei_filter.strip():
-        imei_value = imei_filter.strip().replace("'", "''")
-        imei_condition = f"AND vi.IMEI = '{imei_value}'"
-
-    # Фильтр по названию клиента
-    customer_condition = ""
-    if customer_name_filter and customer_name_filter.strip():
-        customer_value = customer_name_filter.strip().replace("'", "''")
-        customer_condition = f"AND UPPER(vi.CUSTOMER_NAME) LIKE UPPER('%{customer_value}%')"
-
-    # Фильтр по коду 1С
-    code_1c_condition = ""
-    if code_1c_filter and code_1c_filter.strip():
-        code_1c_value = code_1c_filter.strip().replace("'", "''")
-        code_1c_condition = f"AND vi.CODE_1C LIKE '%{code_1c_value}%'"
-
-    # Отсутствие расходов за последний календарный месяц
-    last_month_condition = """
-        AND NOT EXISTS (
-            SELECT 1
-            FROM STECCOM_EXPENSES se
-            WHERE se.CONTRACT_ID = vi.CONTRACT_ID
-              AND se.ICC_ID_IMEI = vi.IMEI
-              AND TO_CHAR(se.INVOICE_DATE, 'YYYY-MM') = TO_CHAR(ADD_MONTHS(TRUNC(SYSDATE, 'MM'), -1), 'YYYY-MM')
-        )
-    """
-
-    # Исключаем тестовые/внутренние услуги клиента СТЭККОМ (customer_id=521), если флаг включен
-    steccom_condition = ""
-    if exclude_steccom:
-        steccom_condition = "AND vi.CUSTOMER_ID <> 521"
-
     query = f"""
-    SELECT
-        vi.IMEI,
-        vi.SERVICE_ID,
-        vi.CUSTOMER_NAME,
-        vi.AGREEMENT_NUMBER,
-        vi.CONTRACT_ID AS SUB_IRIDIUM,
-        vi.CODE_1C,
-        vi.START_DATE AS OPEN_DATE
-    FROM V_IRIDIUM_SERVICES_INFO vi
-    JOIN SERVICES s ON vi.SERVICE_ID = s.SERVICE_ID
-    WHERE s.TYPE_ID = 9002
-      AND vi.START_DATE IS NOT NULL
-      -- Только реальные контракты Iridium: SUB-XXXXX, исключаем тестовые клоны
-      AND vi.CONTRACT_ID LIKE 'SUB-%'
-      AND vi.CONTRACT_ID NOT LIKE '%-clone-%'
-      -- Не показываем услуги, закрытые до начала последнего месяца
-      AND (s.CLOSE_DATE IS NULL OR s.CLOSE_DATE >= ADD_MONTHS(TRUNC(SYSDATE, 'MM'), -1))
-      AND (vi.STOP_DATE IS NULL OR vi.STOP_DATE >= ADD_MONTHS(TRUNC(SYSDATE, 'MM'), -1))
-      -- Также учитываем период действия IMEI в SERVICES_EXT (DICT_ID = 90021):
-      -- DATE_END либо NULL, либо не раньше начала последнего месяца расходов
-      AND EXISTS (
-          SELECT 1
-          FROM SERVICES_EXT se
-          WHERE se.SERVICE_ID = s.SERVICE_ID
-            AND se.DICT_ID = 90021
-            AND (se.DATE_END IS NULL OR se.DATE_END >= ADD_MONTHS(TRUNC(SYSDATE, 'MM'), -1))
-      )
-      {steccom_condition}
-      {contract_condition}
-      {imei_condition}
-      {customer_condition}
-      {code_1c_condition}
-      {last_month_condition}
-    ORDER BY vi.CUSTOMER_NAME, vi.CONTRACT_ID, vi.IMEI
+    SELECT 
+        COUNT(*) AS DUPLICATE_COUNT,
+        LISTAGG(AID, ', ') WITHIN GROUP (ORDER BY AID) AS AID_LIST,
+        PERIOD_ID, SERVICE_ID, CUSTOMER_ID, VSAT, MONEY, PRICE, TRAF
+    FROM ANALYTICS
+    WHERE PERIOD_ID = {period_id}
+    GROUP BY PERIOD_ID, SERVICE_ID, CUSTOMER_ID, VSAT, MONEY, PRICE, TRAF
+    HAVING COUNT(*) > 1
+    ORDER BY DUPLICATE_COUNT DESC
     """
-
     try:
         return pd.read_sql_query(query, conn)
-    except Exception as e:
-        st.error(f"Ошибка получения отчета LBS: {e}")
+    except:
         return None
     finally:
+        if conn: conn.close()
+
+
+def remove_analytics_duplicates(get_connection, period_id):
+    """Удаление дубликатов в ANALYTICS для периода: в каждой группе оставляем одну запись, остальные удаляем.
+    Возвращает (success: bool, deleted_count: int, message: str).
+    """
+    df = get_analytics_duplicates(get_connection, period_id)
+    if df is None or df.empty:
+        return False, 0, "Не удалось получить список дубликатов или дубликатов нет."
+
+    ids_to_delete = []
+    for _, row in df.iterrows():
+        aid_list = row.get('AID_LIST')
+        if pd.isna(aid_list) or not str(aid_list).strip():
+            continue
+        aids = [x.strip() for x in str(aid_list).split(',') if x.strip()]
+        if len(aids) <= 1:
+            continue
+        # Оставляем первый AID, остальные удаляем
+        ids_to_delete.extend(aids[1:])
+
+    if not ids_to_delete:
+        return True, 0, "Дубликатов для удаления не найдено."
+
+    conn = get_connection()
+    if not conn:
+        return False, 0, "Нет подключения к БД."
+
+    try:
+        cursor = conn.cursor()
+        # Параметризованный запрос (AID в Oracle — число)
+        try:
+            aid_values = [int(float(aid)) for aid in ids_to_delete]
+        except (ValueError, TypeError):
+            aid_values = [aid for aid in ids_to_delete]
+        placeholders = ','.join(':' + str(i + 1) for i in range(len(aid_values)))
+        cursor.execute("DELETE FROM ANALYTICS WHERE AID IN (" + placeholders + ")", aid_values)
+        deleted_count = cursor.rowcount
+        conn.commit()
+        cursor.close()
+        return True, deleted_count, f"Удалено дубликатов: {deleted_count}."
+    except Exception as e:
         if conn:
-            conn.close()
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+        return False, 0, f"Ошибка при удалении: {e}"
+    finally:
+        if conn:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
 
 def get_analytics_invoice_period_report(get_connection, period_filter=None, contract_id_filter=None, imei_filter=None, customer_name_filter=None, code_1c_filter=None, tariff_filter=None, zone_filter=None):
     """Получение отчета по счетам из ANALYTICS"""

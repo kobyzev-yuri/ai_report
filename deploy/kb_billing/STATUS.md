@@ -112,12 +112,9 @@ kb_billing/
 4. Добавить описание нового VIEW в базу знаний
 5. Добавить Q/A примеры для нового отчета
 
-## 🔗 Связь с проектом sql4A
+## 🔗 Векторная БД
 
-База знаний создана в формате проекта sql4A (`/mnt/ai/cnn/sql4A`) и может быть загружена в векторную БД через:
-- API эндпоинты (`/training/ddl`, `/training/documentation`, `/training/question_sql`)
-- CLI инструменты (`kb_training_client.py`)
-- Прямое использование `vanna_pgvector_native`
+Векторы хранятся в **Qdrant** (коллекция `kb_billing`). Загрузка: `kb_billing/rag/kb_loader.py` → `load_all()`. См. docs/kb-billing-vs-presales.md.
 
 ## 📊 Статистика
 

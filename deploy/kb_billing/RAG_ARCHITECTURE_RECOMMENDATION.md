@@ -78,7 +78,7 @@
                │
                ▼
 ┌─────────────────────────────────────────┐
-│   Векторная БД (Qdrant/pgvector)        │
+│   Векторная БД (Qdrant)                 │
 │  ┌──────────────────────────────────┐   │
 │  │  Collection: kb_billing          │   │
 │  │  ├── DDL (структура БД)          │   │
@@ -250,13 +250,9 @@ Graph KB имеет смысл, если:
 
 ## Рекомендации по реализации
 
-### 1. Выбор векторной БД
+### 1. Векторная БД
 
-**Рекомендация: Qdrant** (см. `VECTOR_DB_RECOMMENDATIONS.md`)
-
-**Альтернативы:**
-- **pgvector** - если уже есть PostgreSQL
-- **Chroma** - для простых случаев
+**Используется Qdrant** (коллекция `kb_billing`, настройки в config.env: QDRANT_HOST, QDRANT_PORT, QDRANT_COLLECTION). См. [docs/kb-billing-vs-presales.md](../../docs/kb-billing-vs-presales.md).
 
 ### 2. Модель эмбеддингов
 

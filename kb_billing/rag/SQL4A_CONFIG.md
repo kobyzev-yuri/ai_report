@@ -106,18 +106,13 @@ loader.load_all()
 
 ### Структура данных
 
-Наша структура данных совместима с sql4A:
+Векторы хранятся в **Qdrant** (коллекция `kb_billing`). Структура payload совместима с подходами sql4A:
 
 ```python
-# sql4A использует:
-content_type: 'ddl' | 'documentation' | 'question_sql'
-metadata: JSONB
-embedding: vector(768)
-
-# Мы используем:
-content_type: 'ddl' | 'documentation' | 'qa_example' | 'metadata'
-metadata: JSONB (в payload Qdrant)
-embedding: vector(768)
+# В Qdrant (payload точки):
+type: 'ddl' | 'documentation' | 'qa_example' | 'metadata' | 'view' | 'confluence_section'
+# + метаданные (table_name, category, source_url и т.д.)
+# Вектор — в поле point.vector (размерность 768 для multilingual-e5-base)
 ```
 
 ### Формат метаданных
