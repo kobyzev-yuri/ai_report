@@ -644,19 +644,20 @@ class RAGAssistant:
    - АЛЬТЕРНАТИВА: Используй V_IRIDIUM_SERVICES_INFO.CUSTOMER_NAME, V_CONSOLIDATED_REPORT_WITH_BILLING.CUSTOMER_NAME или V_REVENUE_FROM_INVOICES.CUSTOMER_NAME, которые уже содержат имя клиента
    - НЕ используй CUSTOMERS.CUSTOMER_NAME или CUSTOMERS.ORGANIZATION_NAME - таких колонок не существует!
    - КРИТИЧЕСКИ ВАЖНО: Если вопрос касается финансового анализа (прибыльность, убыточность, маржа, тенденции), ВСЕГДА используй готовые VIEW (V_PROFITABILITY_BY_PERIOD, V_PROFITABILITY_TREND, V_UNPROFITABLE_CUSTOMERS) вместо JOIN с CUSTOMERS или создания сложных CTE!
-11. ВАЖНО: Таблица периодов называется BM_PERIOD (без S), а не BM_PERIODS! 
+11. Схема и типичные ошибки (ORA-00904, ORA-00942): опирайся на контекст из KB (таблицы, представления, usage_notes). В контексте указано: нет BM_CUSTOMERS (только CUSTOMERS); в SERVICES нет PERIOD_ID; в V_IRIDIUM_SERVICES_INFO нет TYPE_ID — TYPE_ID и имя типа из SERVICES + BM_TYPE.
+12. ВАЖНО: Таблица периодов называется BM_PERIOD (без S), а не BM_PERIODS! 
    - Используй BM_PERIOD.START_DATE (не DATE_BEG!) для получения PERIOD_YYYYMM через TO_CHAR(pm.START_DATE, 'YYYY-MM')
    - BM_PERIOD содержит колонки: PERIOD_ID, START_DATE, STOP_DATE, MONTH (не DATE_BEG и DATE_END!)
-12. ВАЖНО: Для расходов лучше использовать V_CONSOLIDATED_REPORT_WITH_BILLING вместо прямого использования STECCOM_EXPENSES:
+13. ВАЖНО: Для расходов лучше использовать V_CONSOLIDATED_REPORT_WITH_BILLING вместо прямого использования STECCOM_EXPENSES:
    - V_CONSOLIDATED_REPORT_WITH_BILLING уже содержит агрегированные расходы (CALCULATED_OVERAGE, SPNET_TOTAL_AMOUNT, FEES_TOTAL)
    - V_CONSOLIDATED_REPORT_WITH_BILLING содержит CUSTOMER_NAME, ORGANIZATION_NAME, CODE_1C, IMEI, CONTRACT_ID
    - Если нужно использовать STECCOM_EXPENSES напрямую, помни что колонка IMEI называется ICC_ID_IMEI (не IMEI!)
-9. Для получения курса валют (КРИТИЧЕСКИ ВАЖНО ДЛЯ ПРОИЗВОДИТЕЛЬНОСТИ):
+14. Для получения курса валют (КРИТИЧЕСКИ ВАЖНО ДЛЯ ПРОИЗВОДИТЕЛЬНОСТИ):
    - ВСЕГДА используй курс из счетов-фактур (BM_INVOICE_ITEM.RATE) для конверсии расходов
    - Для нескольких периодов: SELECT TO_CHAR(pm.START_DATE, 'YYYY-MM') AS PERIOD_YYYYMM, AVG(ii.RATE) AS RATE FROM BM_INVOICE_ITEM ii JOIN BM_PERIOD pm ON ii.PERIOD_ID = pm.PERIOD_ID WHERE TO_CHAR(pm.START_DATE, 'YYYY-MM') >= 'YYYY-MM' AND (ii.CURRENCY_ID = 4 OR ii.ACC_CURRENCY_ID = 4) AND ii.RATE IS NOT NULL GROUP BY TO_CHAR(pm.START_DATE, 'YYYY-MM')
    - НЕ используй ROWNUM в подзапросах CTE - это неэффективно и может вызвать ошибки
    - НЕ используй BM_CURRENCY_RATE напрямую - используй курс из счетов-фактур!
-13. 🚨 КРИТИЧЕСКИ ВАЖНО: В Oracle НЕЛЬЗЯ использовать DISTINCT в LISTAGG! Это вызовет ошибку ORA-30482!
+15. 🚨 КРИТИЧЕСКИ ВАЖНО: В Oracle НЕЛЬЗЯ использовать DISTINCT в LISTAGG! Это вызовет ошибку ORA-30482!
    - ❌ НЕПРАВИЛЬНО (ВЫЗОВЕТ ОШИБКУ!): LISTAGG(DISTINCT column, ', ') WITHIN GROUP (ORDER BY column)
    - ❌ НЕПРАВИЛЬНО (ВЫЗОВЕТ ОШИБКУ!): LISTAGG(DISTINCT CASE ... END, '; ') WITHIN GROUP (ORDER BY ...)
    - ✅ ПРАВИЛЬНО: Используй подзапрос с DISTINCT перед LISTAGG:
@@ -673,12 +674,12 @@ class RAGAssistant:
    - 🚨 ПРОВЕРЯЙ: Если в твоем SQL есть LISTAGG, убедись что в нем НЕТ слова DISTINCT!
    - Если курс из счетов недоступен, используй BM_CURRENCY_RATE как запасной вариант: SELECT RATE FROM BM_CURRENCY_RATE WHERE CURRENCY_ID = 4 AND START_TIME <= LAST_DAY(TO_DATE('2025-10', 'YYYY-MM')) ORDER BY START_TIME DESC FETCH FIRST 1 ROW ONLY
    
-10. ОПТИМИЗАЦИЯ ПРОИЗВОДИТЕЛЬНОСТИ (КРИТИЧЕСКИ ВАЖНО):
+16. ОПТИМИЗАЦИЯ ПРОИЗВОДИТЕЛЬНОСТИ (КРИТИЧЕСКИ ВАЖНО):
    - Фильтруй данные ДО JOIN, а не после: WHERE r.REVENUE_RUB > 0 лучше применять в CTE revenue_by_period
    - Используй HAVING для фильтрации после агрегации вместо WHERE после JOIN
    - Для JOIN по нескольким полям (FINANCIAL_PERIOD, CUSTOMER_NAME, CODE_1C) убедись, что фильтрация по периоду применена ДО агрегации
    - Минимизируй количество строк перед JOIN: фильтруй по периоду в CTE, а не в основном запросе
-11. 🚨 КРИТИЧЕСКИ ВАЖНО: Генерируй ТОЛЬКО ОДИН SQL запрос, БЕЗ точки с запятой в конце, без объяснений и комментариев
+17. 🚨 КРИТИЧЕСКИ ВАЖНО: Генерируй ТОЛЬКО ОДИН SQL запрос, БЕЗ точки с запятой в конце, без объяснений и комментариев
     - НЕ предлагай несколько вариантов!
     - НЕ пиши "Вариант 1:", "Вариант 2:", "Вариант 3:"!
     - НЕ пиши объяснения до или после SQL!
@@ -686,7 +687,7 @@ class RAGAssistant:
     - НЕ пиши "Примеры:", "Рекомендуемые примеры:", "Примеры запросов:"!
     - Верни ТОЛЬКО один SQL запрос, начинающийся с SELECT или WITH!
     - Начни сразу с SELECT или WITH, без предисловий и примеров!
-12. Используй формат Oracle SQL (TO_CHAR, TO_NUMBER, NVL и т.д.)
+18. Используй формат Oracle SQL (TO_CHAR, TO_NUMBER, NVL и т.д.)
 """
             
             # Проверяем, является ли вопрос финансовым анализом
@@ -875,8 +876,10 @@ class RAGAssistant:
                 sql = '\n'.join(sql_clean).strip()
                 # Удаляем точку с запятой в конце
                 sql = sql.rstrip(';').strip()
-            
-            
+
+            # Удаляем завершающую запятую в ORDER BY / GROUP BY / SELECT (ORA-00936: missing expression)
+            sql = re.sub(r',\s*$', '', sql)
+
             # Строгая валидация SQL
             sql_upper = sql.upper().strip()
             

@@ -26,6 +26,7 @@
     "STATUS_IRIDIUM": "Статус Iridium"
   },
   "business_rules": [
+    "В таблице SERVICES нет колонки PERIOD_ID (ORA-00904). Период берётся из BM_PERIOD, V_REVENUE_FROM_INVOICES (PERIOD_ID, PERIOD_YYYYMM), ANALYTICS (PERIOD_ID). Для отчётов по доходам за период: начинай с V_REVENUE_FROM_INVOICES или ANALYTICS, затем JOIN SERVICES по SERVICE_ID для VSAT и TYPE_ID.",
     "Для Iridium SBD (TYPE_ID=9002): LOGIN = SUB-XXXXX (CONTRACT_ID), VSAT = IMEI. ВАЖНО: Это ГЛАВНАЯ услуга, от которой зависят остальные (9008, 9005, 9013)",
     "Для мониторинга (TYPE_ID=9005): зависит от главной услуги 9002, но не для всех SBD есть мониторинг - только для тех, кто на услуге мониторинга. ВАЖНО: Мониторинг и SBD активны ОДНОВРЕМЕННО",
     "Для suspend (TYPE_ID=9008): LOGIN = IMEI (VSAT), связана с главной услугой 9002 по VSAT и ACCOUNT_ID. Зависит от 9002. ВАЖНО: Приостановка активна в ОСТАВШЕЕСЯ ВРЕМЯ (когда SBD не активна)",

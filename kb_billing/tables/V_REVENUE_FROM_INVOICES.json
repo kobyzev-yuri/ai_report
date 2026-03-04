@@ -29,7 +29,8 @@
     "НЕ используй SERVICE_ID = 9002 для фильтрации - это неправильно! SERVICE_ID - это уникальный идентификатор услуги, а не тип услуги",
     "TYPE_ID = 9002 - это тип услуги SBD, но в VIEW нет колонки TYPE_ID",
     "Для проверки типа услуги используй JOIN с SERVICES: JOIN SERVICES s ON v.SERVICE_ID = s.SERVICE_ID WHERE s.TYPE_ID = 9002",
-    "PERIOD_YYYYMM используется для фильтрации по периоду (из BM_PERIOD.START_DATE), а не FINANCIAL_PERIOD"
+    "PERIOD_YYYYMM используется для фильтрации по периоду (из BM_PERIOD.START_DATE), а не FINANCIAL_PERIOD",
+    "В представлении одна строка на подписку (CONTRACT_ID) и период. У одного клиента может быть несколько подписок — поэтому при запросе «доходы по клиентам за период» обязательно использовать GROUP BY PERIOD_YYYYMM, CUSTOMER_NAME, CODE_1C и SUM(REVENUE_TOTAL). Без GROUP BY один и тот же клиент будет повторяться в результате."
   ],
   "relationships": [
     {
@@ -51,7 +52,8 @@
     "Для фильтрации по году: WHERE PERIOD_YYYYMM LIKE '2025-%' или WHERE SUBSTR(PERIOD_YYYYMM, 1, 4) = '2025'",
     "ВАЖНО: Для получения простого списка клиентов с счетами-фактурами НЕ используй V_REVENUE_FROM_INVOICES - это неэффективно! Вместо этого используй таблицу BM_INVOICE напрямую, так как там есть CUSTOMER_ID и PERIOD_ID. Пример: WHERE EXISTS (SELECT 1 FROM BM_INVOICE inv JOIN BM_PERIODS p ON inv.PERIOD_ID = p.PERIOD_ID WHERE inv.CUSTOMER_ID = cc.CUSTOMER_ID AND TO_CHAR(p.DATE_BEG, 'YYYY') = '2025' AND ROWNUM = 1). V_REVENUE_FROM_INVOICES предназначен для анализа доходов с детализацией по типам услуг (SBD, SUSPEND, мониторинг и т.д.), а не для простого списка клиентов.",
     "ВАЖНО: SERVICE_ID - это уникальный идентификатор услуги, а не тип услуги. Для фильтрации SBD используй REVENUE_SBD_TOTAL > 0",
-    "Пример правильного запроса для поиска клиентов с SBD сервисами: SELECT DISTINCT CUSTOMER_NAME, CODE_1C FROM V_REVENUE_FROM_INVOICES WHERE PERIOD_YYYYMM = '2025-11' AND (REVENUE_SBD_TOTAL > 0 OR REVENUE_SBD_TRAFFIC > 0 OR REVENUE_SBD_ABON > 0)"
+    "Пример правильного запроса для поиска клиентов с SBD сервисами: SELECT DISTINCT CUSTOMER_NAME, CODE_1C FROM V_REVENUE_FROM_INVOICES WHERE PERIOD_YYYYMM = '2025-11' AND (REVENUE_SBD_TOTAL > 0 OR REVENUE_SBD_TRAFFIC > 0 OR REVENUE_SBD_ABON > 0)",
+    "Доходы по клиентам за отчётный период (на основании счетов-фактуры): обязательно GROUP BY PERIOD_YYYYMM, CUSTOMER_NAME, CODE_1C и SUM(REVENUE_TOTAL). Пример: SELECT PERIOD_YYYYMM AS \"Отчетный Период\", CUSTOMER_NAME AS \"Клиент\", CODE_1C AS \"Код 1С\", SUM(REVENUE_TOTAL) AS \"Доходы (RUB)\" FROM V_REVENUE_FROM_INVOICES WHERE PERIOD_YYYYMM = '2025-01' GROUP BY PERIOD_YYYYMM, CUSTOMER_NAME, CODE_1C ORDER BY CUSTOMER_NAME"
   ]
 }
 

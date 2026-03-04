@@ -284,7 +284,7 @@ def show_safe_sql_tab():
                             else:
                                 st.error(f"❌ **Ошибка выполнения:** {result.get('error')}")
         else:
-            st.info("ℹ️ Это SELECT запрос. Для выполнения используйте вкладку '🤖 Ассистент'")
+            st.info("ℹ️ Это SELECT запрос. Для выполнения используйте вкладку '🤖 Биллинг ассистент'")
     
     # История выполнения
     if st.session_state.safe_sql_result:

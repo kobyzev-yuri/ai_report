@@ -43,6 +43,11 @@ def main():
         action="store_true",
         help="Пересоздать коллекцию (удалить существующую)"
     )
+    parser.add_argument(
+        "--only-examples",
+        action="store_true",
+        help="Перезагрузить только Q/A примеры (sql_examples + user_added_examples), без таблиц/представлений/Confluence. Быстро, без полной перестройки KB."
+    )
     
     args = parser.parse_args()
     
@@ -53,6 +58,7 @@ def main():
     print(f"Коллекция: {args.collection}")
     print(f"Модель: {args.model}")
     print(f"Пересоздать: {args.recreate}")
+    print(f"Только примеры: {args.only_examples}")
     print("=" * 60)
     print()
     
@@ -64,7 +70,11 @@ def main():
             embedding_model=args.model
         )
         
-        loader.load_all(recreate=args.recreate)
+        if args.only_examples:
+            n = loader.reload_qa_examples_only()
+            print(f"Перезагружено {n} Q/A примеров.")
+        else:
+            loader.load_all(recreate=args.recreate)
         
         print()
         print("=" * 60)

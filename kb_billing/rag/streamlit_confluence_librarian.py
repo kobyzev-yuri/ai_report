@@ -41,8 +41,8 @@ def _get_client(url: str = "", token: str = "") -> ConfluenceClient:
 
 
 def show_confluence_librarian_tab():
-    """Закладка «Спутниковый библиотекарь» — интеграция Confluence с KB."""
-    st.header("🛰️ Спутниковый библиотекарь — Confluence и KB")
+    """Закладка «Спутниковый ассистент» — интеграция Confluence с KB."""
+    st.header("🛰️ Спутниковый ассистент — Confluence и KB")
     if not HAS_CONFLUENCE_GENERATOR:
         st.error(
             "Модуль `confluence_kb_generator` не найден. Синхронизируйте папку `kb_billing/rag/` на сервер "
@@ -57,7 +57,7 @@ def show_confluence_librarian_tab():
     - 🔄 Обновление векторной KB (перезагрузка в Qdrant)
     """)
 
-    # —— Ассистент библиотекаря на Gemini (инженер спутникового сегмента) ——
+    # —— Спутниковый ассистент на Gemini (инженер спутникового сегмента) ——
     try:
         from kb_billing.rag.satellite_librarian_agent import SatelliteLibrarianAgent
         from kb_billing.rag.rag_assistant import RAGAssistant
@@ -68,9 +68,9 @@ def show_confluence_librarian_tab():
 
     if HAS_LIBRARIAN_AGENT:
         st.markdown("---")
-        st.subheader("🧠 Ассистент библиотекаря (Gemini)")
+        st.subheader("🧠 Спутниковый ассистент (Gemini)")
         st.caption(
-            "Библиотекарь и инженер работают вместе: уточняют друг у друга, откуда брать документацию и как формировать KB для работы агента. "
+            "Ассистент и инженер работают вместе: уточняют друг у друга, откуда брать документацию и как формировать KB. "
             "Задавайте вопросы, отвечайте на уточнения библиотекаря — диалог сохраняется. Модель: GEMINI_MODEL в config.env."
         )
         if "librarian_chat" not in st.session_state:
@@ -96,17 +96,32 @@ def show_confluence_librarian_tab():
                                     st.caption(f"[Открыть в Confluence]({ch['source_url']})")
                                 st.text((ch.get("content") or "")[:300] + ("..." if len(ch.get("content") or "") > 300 else ""))
 
-        librarian_question = st.chat_input("Напишите библиотекарю или ответьте на его вопрос...")
-        if librarian_question and librarian_question.strip():
-            st.session_state.librarian_chat.append({"role": "user", "content": librarian_question.strip()})
+        # text_area с key= хранит значение в session_state — не сбрасывается при ре-ране (в отличие от st.chat_input)
+        librarian_question = st.text_area(
+            "Напишите библиотекарю или ответьте на его вопрос",
+            value=st.session_state.get("librarian_input_ta", ""),
+            height=120,
+            placeholder="Директивы, вопросы, уточнения...",
+            key="librarian_input_ta",
+            help="Текст сохраняется при перерисовке страницы. Нажмите «Отправить» для ответа.",
+        )
+
+        col_send, _ = st.columns([1, 4])
+        with col_send:
+            send_clicked = st.button("📤 Отправить библиотекарю", type="primary", key="librarian_send_btn")
+
+        if send_clicked and (librarian_question or "").strip():
+            librarian_question = (librarian_question or "").strip()
+            st.session_state.librarian_chat.append({"role": "user", "content": librarian_question})
             st.session_state.librarian_last_chunks = None
+            st.session_state.librarian_input_ta = ""  # очистить поле после отправки
             with st.spinner("Библиотекарь думает..."):
                 try:
                     rag = RAGAssistant() if use_rag else None
                     if use_rag and rag:
-                        chunks = rag.search_semantic(librarian_question.strip(), content_type="confluence_section", limit=10)
+                        chunks = rag.search_semantic(librarian_question, content_type="confluence_section", limit=10)
                         if not chunks:
-                            chunks = rag.search_semantic(librarian_question.strip(), content_type="confluence_doc", limit=10)
+                            chunks = rag.search_semantic(librarian_question, content_type="confluence_doc", limit=10)
                         st.session_state.librarian_last_chunks = chunks
                     agent = SatelliteLibrarianAgent(rag_assistant=rag)
                     history = []
@@ -114,7 +129,7 @@ def show_confluence_librarian_tab():
                         history.append((m["role"], m["content"]))
                     history = history[-10:]
                     answer = agent.ask(
-                        librarian_question.strip(),
+                        librarian_question,
                         use_rag=use_rag,
                         history=history if history else None,
                     )
@@ -122,10 +137,12 @@ def show_confluence_librarian_tab():
                     st.rerun()
                 except ValueError as e:
                     st.session_state.librarian_chat.pop()
+                    st.session_state.librarian_input_ta = librarian_question  # вернуть текст при ошибке
                     st.error(str(e))
                     st.info("Задайте GEMINI_API_KEY или GOOGLE_API_KEY в config.env.")
                 except Exception as e:
                     st.session_state.librarian_chat.pop()
+                    st.session_state.librarian_input_ta = librarian_question
                     st.error(str(e))
                     import traceback
                     st.code(traceback.format_exc())

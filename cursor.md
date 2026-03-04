@@ -39,7 +39,9 @@ ssh -p 1194 root@82.114.2.2 \
   "cd /usr/local/projects/ai_report && ./restart_streamlit.sh"
 ```
 
-**НЕ используй `docker-compose restart streamlit`** - на сервере Streamlit запущен как обычный процесс, а не через Docker!
+**НЕ используй `docker-compose restart streamlit`** — на сервере Streamlit запущен как обычный процесс, а не через Docker.
+
+**При синхронизации deploy на сервер:** см. раздел [Deploy: синхронизация, перестройка KB (Qdrant), перезапуск](#deploy-синхронизация-перестройка-kb-qdrant-перезапуск) — там команды rsync, полная перестройка KB / только примеры (`init_kb.py --only-examples`), перезапуск.
 
 ---
 
@@ -207,9 +209,13 @@ git add tabs/tab_campaigns.py tabs/common.py streamlit_report_oracle_backup.py
 # Коммит
 git commit -m "Описание изменений"
 
-# Push на GitHub
+# Push на GitHub (токен берётся из config.env, см. ниже)
+./scripts/git_push.sh
+# или вручную, если remote уже настроен с токеном:
 git push origin main
 ```
+
+**Токен GitHub:** в `config.env` задайте `GITHUB_TOKEN=ghp_...` (Personal Access Token). Файл `config.env` в `.gitignore`, в репозиторий не попадает. Скрипт `./scripts/git_push.sh` подставляет токен в URL и выполняет push.
 
 ### 3. Обновление deploy/ (ОБЯЗАТЕЛЬНО после изменений!)
 
@@ -512,6 +518,35 @@ cp -r tabs/ deploy/tabs/
 **Смысл синхронизации KB:** обновить на сервере **код** RAG (`rag/*.py`), при необходимости — таблицы/примеры из корня (tables, views, training_data). Контент, который создаётся на сервере (Confluence-документы в `confluence_docs/`), не перезаписывается.
 
 **Как устроена KB для биллинга и присэйлов:** одна коллекция Qdrant `kb_billing` (имя из `QDRANT_COLLECTION`): в ней точки для биллинга (qa_example, documentation, ddl, view) и для присэйлов (confluence_section, domain=satellite). KB для присэйлов формируется из Confluence через Спутникового библиотекаря → `confluence_docs/*.json` → загрузка в ту же коллекцию. Подробнее: [docs/kb-billing-vs-presales.md](docs/kb-billing-vs-presales.md).
+
+### Deploy: синхронизация, перестройка KB (Qdrant), перезапуск
+
+**Используй при каждой синхронизации на сервер.** Сервер: `root@82.114.2.2`, порт SSH **1194**, путь на сервере: `/usr/local/projects/ai_report`. URL приложения: **stat.steccom.ru:7776/ai_report**.
+
+1. **Синхронизация deploy/ на сервер**
+   ```bash
+   cd /home/cnn/ai_report
+   rsync -avz -e "ssh -p 1194" --exclude='data/' --exclude='*.log' --exclude='__pycache__/' \
+     deploy/ root@82.114.2.2:/usr/local/projects/ai_report/
+   ```
+
+2. **Перестройка KB в Qdrant** (на сервере после синхронизации)
+   - **Полная перестройка** (таблицы, представления, метаданные, Confluence, примеры) — при изменении `tables/*.json`, `views/*.json`, `metadata.json`, Confluence-документов или при первом развёртывании:
+     ```bash
+     ssh -p 1194 root@82.114.2.2 "cd /usr/local/projects/ai_report && (test -f config.env && set -a && . ./config.env && set +a); python3 kb_billing/rag/init_kb.py"
+     ```
+   - **Только примеры** (sql_examples.json, user_added_examples.json) — без пересчёта таблиц/представлений/Confluence; быстрее, когда меняли только примеры:
+     ```bash
+     ssh -p 1194 root@82.114.2.2 "cd /usr/local/projects/ai_report && python3 kb_billing/rag/init_kb.py --only-examples"
+     ```
+   После `--only-examples` перезапуск Streamlit не обязателен (KB подхватывается при запросе). После полной перестройки перезапуск желателен.
+
+3. **Перезапуск веб-интерфейса**
+   ```bash
+   ssh -p 1194 root@82.114.2.2 "cd /usr/local/projects/ai_report && ./restart_streamlit.sh"
+   ```
+
+**Типовой порядок при работе с deploy:** синхронизация → при изменении KB (таблицы/примеры/Confluence) — полная перестройка или `--only-examples` → перезапуск Streamlit. Подробнее: [docs/deploy.md](docs/deploy.md).
 
 ### Чистый перенос kb_billing на сервер (только нужное из deploy)
 

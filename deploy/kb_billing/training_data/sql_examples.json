@@ -112,6 +112,14 @@
     "category": "Клиенты"
   },
   {
+    "question": "Отчёт за год в разрезе период (месяц), IMEI (для услуг TYPE_ID 9002, 9008, 9005, 9014, 9013), имена типов из BM_TYPE.NAME, деньги в рублях, название клиента, код 1С и месяц — все за 2025. IMEI из поля VSAT таблицы SERVICES",
+    "sql": "SELECT TO_CHAR(pm.START_DATE, 'YYYY-MM') AS \"Период\", s.VSAT AS \"IMEI\", COALESCE(vi.CUSTOMER_NAME, '') AS \"Название клиента\", vi.CODE_1C AS \"Код 1С\", bt.NAME AS \"Тип услуги\", bt.TYPE_ID AS \"bm_type_id\", SUM(a.MONEY) AS \"Доходы (RUB)\" FROM ANALYTICS a JOIN BM_PERIOD pm ON a.PERIOD_ID = pm.PERIOD_ID JOIN SERVICES s ON a.SERVICE_ID = s.SERVICE_ID JOIN BM_TYPE bt ON s.TYPE_ID = bt.TYPE_ID LEFT JOIN V_IRIDIUM_SERVICES_INFO vi ON s.LOGIN = vi.CONTRACT_ID WHERE TO_CHAR(pm.START_DATE, 'YYYY') = '2025' AND s.TYPE_ID IN (9002, 9008, 9005, 9014, 9013) GROUP BY TO_CHAR(pm.START_DATE, 'YYYY-MM'), s.VSAT, COALESCE(vi.CUSTOMER_NAME, ''), vi.CODE_1C, bt.NAME, bt.TYPE_ID ORDER BY \"Период\", \"IMEI\"",
+    "context": "Отчёт по доходам за год по месяцам. Период и доход из ANALYTICS (PERIOD_ID, MONEY); SERVICES даёт VSAT (IMEI) и TYPE_ID; BM_TYPE — имя типа (NAME); клиент и код 1С из V_IRIDIUM_SERVICES_INFO по s.LOGIN = vi.CONTRACT_ID. Таблицы BM_CUSTOMERS нет; в SERVICES нет PERIOD_ID; в V_IRIDIUM_SERVICES_INFO нет TYPE_ID.",
+    "business_entity": "revenue",
+    "complexity": 3,
+    "category": "Доходы"
+  },
+  {
     "question": "Найди информацию о клиенте по коду 1С 1C00123",
     "sql": "SELECT DISTINCT c.CUSTOMER_ID, NVL(MAX(CASE WHEN cd.MNEMONIC = 'description' AND cc.CONTACT_DICT_ID = 23 THEN cc.VALUE END), TRIM(NVL(MAX(CASE WHEN cd.MNEMONIC = 'last_name' AND cc.CONTACT_DICT_ID = 11 THEN cc.VALUE END), '') || ' ' || NVL(MAX(CASE WHEN cd.MNEMONIC = 'first_name' AND cc.CONTACT_DICT_ID = 11 THEN cc.VALUE END), '') || ' ' || NVL(MAX(CASE WHEN cd.MNEMONIC = 'middle_name' AND cc.CONTACT_DICT_ID = 11 THEN cc.VALUE END), ''))) AS CUSTOMER_NAME, oi.EXT_ID AS CODE_1C FROM CUSTOMERS c LEFT JOIN BM_CUSTOMER_CONTACT cc ON c.CUSTOMER_ID = cc.CUSTOMER_ID LEFT JOIN BM_CONTACT_DICT cd ON cc.CONTACT_DICT_ID = cd.CONTACT_DICT_ID LEFT JOIN OUTER_IDS oi ON oi.ID = c.CUSTOMER_ID AND UPPER(TRIM(oi.TBL)) = 'CUSTOMERS' WHERE oi.EXT_ID = '1C00123' GROUP BY c.CUSTOMER_ID, oi.EXT_ID",
     "context": "Поиск информации о клиенте по коду 1С. Возвращает customer_id и имя клиента (организация или ФИО) по коду 1С из OUTER_IDS.",
@@ -546,7 +554,15 @@
   {
     "question": "Покажи доходы суммарно по клиентам за октябрь",
     "sql": "SELECT CUSTOMER_NAME, CODE_1C, COUNT(DISTINCT CONTRACT_ID) AS CONTRACT_COUNT, COUNT(DISTINCT IMEI) AS IMEI_COUNT, SUM(REVENUE_SBD_TRAFFIC) AS REVENUE_TRAFFIC, SUM(REVENUE_SBD_ABON) AS REVENUE_ABON, SUM(REVENUE_SBD_TOTAL) AS REVENUE_SBD, SUM(REVENUE_TOTAL) AS REVENUE_TOTAL FROM V_REVENUE_FROM_INVOICES WHERE PERIOD_YYYYMM = '2025-10' GROUP BY CUSTOMER_NAME, CODE_1C ORDER BY REVENUE_TOTAL DESC",
-    "context": "Доходы суммарно по клиентам из счетов-фактур",
+    "context": "Доходы суммарно по клиентам из счетов-фактур. В представлении одна строка на подписку и период — для отчёта по клиентам всегда используй GROUP BY и SUM(REVENUE_TOTAL).",
+    "business_entity": "revenue",
+    "complexity": 2,
+    "category": "Доходы"
+  },
+  {
+    "question": "Доходы по клиентам за отчётный период январь 2025 в биллинге на основании счетов-фактуры",
+    "sql": "SELECT PERIOD_YYYYMM AS \"Отчетный Период\", CUSTOMER_NAME AS \"Клиент\", CODE_1C AS \"Код 1С\", SUM(REVENUE_TOTAL) AS \"Доходы (RUB)\" FROM V_REVENUE_FROM_INVOICES WHERE PERIOD_YYYYMM = '2025-01' GROUP BY PERIOD_YYYYMM, CUSTOMER_NAME, CODE_1C ORDER BY CUSTOMER_NAME",
+    "context": "Доходы по клиентам за период из счетов-фактур. Обязательно GROUP BY PERIOD_YYYYMM, CUSTOMER_NAME, CODE_1C и SUM(REVENUE_TOTAL) — иначе один клиент повторяется несколько раз (у клиента может быть несколько подписок).",
     "business_entity": "revenue",
     "complexity": 2,
     "category": "Доходы"

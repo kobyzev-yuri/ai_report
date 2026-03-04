@@ -42,6 +42,7 @@
     "PERSON_NAME собирается из BM_CUSTOMER_CONTACT где CONTACT_DICT_ID = 11 и MNEMONIC IN ('first_name', 'last_name', 'middle_name')"
   ],
   "usage_notes": [
+    "В этом VIEW нет колонки TYPE_ID (ORA-00904). TYPE_ID только в таблице SERVICES. Для фильтра по типам услуг (9002, 9008, 9005, 9014, 9013) и имени типа (BM_TYPE.NAME) джойнь SERVICES и BM_TYPE по s.TYPE_ID = bt.TYPE_ID. IMEI в этом VIEW уже равен SERVICES.VSAT.",
     "Используется для получения информации о клиентах в отчетах",
     "В Oracle это VIEW, создается на основе таблиц биллинга",
     "Для активных сервисов: STATUS = 10 AND CONTRACT_ID NOT LIKE '%-clone-%'",

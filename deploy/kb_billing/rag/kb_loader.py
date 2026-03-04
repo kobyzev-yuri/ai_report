@@ -10,7 +10,7 @@ import json
 from pathlib import Path
 from typing import List, Dict, Any, Optional
 from qdrant_client import QdrantClient
-from qdrant_client.models import Distance, VectorParams, PointStruct
+from qdrant_client.models import Distance, VectorParams, PointStruct, Filter, FieldCondition, MatchValue
 from sentence_transformers import SentenceTransformer
 import logging
 
@@ -98,34 +98,21 @@ class KBLoader:
             logger.error(f"Ошибка при создании коллекции: {e}")
             raise
     
-    def load_qa_examples(self) -> List[PointStruct]:
-        """Загрузка Q/A примеров из training_data/sql_examples.json"""
-        qa_file = self.kb_dir / "training_data" / "sql_examples.json"
-        
-        if not qa_file.exists():
-            logger.warning(f"Файл {qa_file} не найден")
-            return []
-        
-        logger.info(f"Загрузка Q/A примеров из {qa_file}")
-        
-        with open(qa_file, 'r', encoding='utf-8') as f:
-            examples = json.load(f)
-        
+    def _qa_examples_to_points(self, examples: List[Dict[str, Any]], id_offset: int = 0) -> List[PointStruct]:
+        """Преобразование списка примеров Q/A в точки для Qdrant."""
         points = []
         for i, example in enumerate(examples):
-            # Генерация эмбеддинга для вопроса (как в sql4A - с нормализацией)
             question = example.get('question', '')
+            if not question or not example.get('sql', '').strip():
+                continue
             embedding = self.model.encode(
-                question, 
+                question,
                 normalize_embeddings=SQL4AConfig.NORMALIZE_EMBEDDINGS
             ).tolist()
-            
-            # Извлечение имен таблиц из SQL (простое извлечение)
             sql = example.get('sql', '')
             table_names = self._extract_table_names(sql)
-            
             point = PointStruct(
-                id=i,
+                id=id_offset + i,
                 vector=embedding,
                 payload={
                     "type": "qa_example",
@@ -140,10 +127,59 @@ class KBLoader:
                 }
             )
             points.append(point)
-        
+        return points
+
+    def load_qa_examples(self) -> List[PointStruct]:
+        """Загрузка Q/A примеров из training_data/sql_examples.json и user_added_examples.json (если есть)."""
+        points = []
+        qa_file = self.kb_dir / "training_data" / "sql_examples.json"
+        if qa_file.exists():
+            logger.info(f"Загрузка Q/A примеров из {qa_file}")
+            with open(qa_file, 'r', encoding='utf-8') as f:
+                examples = json.load(f)
+            if not isinstance(examples, list):
+                examples = [examples]
+            points.extend(self._qa_examples_to_points(examples, id_offset=0))
+        else:
+            logger.warning(f"Файл {qa_file} не найден")
+
+        user_file = self.kb_dir / "training_data" / "user_added_examples.json"
+        if user_file.exists():
+            logger.info(f"Загрузка пользовательских примеров из {user_file}")
+            try:
+                with open(user_file, 'r', encoding='utf-8') as f:
+                    user_examples = json.load(f)
+                if not isinstance(user_examples, list):
+                    user_examples = [user_examples]
+                id_offset = 1_000_000
+                points.extend(self._qa_examples_to_points(user_examples, id_offset=id_offset))
+            except Exception as e:
+                logger.warning(f"Не удалось загрузить {user_file}: {e}")
+
         logger.info(f"Загружено {len(points)} Q/A примеров")
         return points
-    
+
+    def reload_qa_examples_only(self) -> int:
+        """Перезагрузить только Q/A примеры (sql_examples.json + user_added_examples.json) без полной перестройки KB.
+        Удаляет из коллекции точки с type=qa_example и загружает примеры заново. Остальные точки (таблицы, представления, Confluence) не трогает.
+        Возвращает количество загруженных точек."""
+        self.create_collection(recreate=False)
+        self.client.delete(
+            collection_name=self.collection_name,
+            points_selector=Filter(should=[FieldCondition(key="type", match=MatchValue(value="qa_example"))]),
+        )
+        logger.info("Удалены старые Q/A примеры из коллекции")
+        points = self.load_qa_examples()
+        if not points:
+            logger.warning("Нет Q/A примеров для загрузки")
+            return 0
+        batch_size = 100
+        for i in range(0, len(points), batch_size):
+            batch = points[i : i + batch_size]
+            self.client.upsert(collection_name=self.collection_name, points=batch)
+        logger.info("Загружено %s Q/A примеров (без перестройки остальной KB)", len(points))
+        return len(points)
+
     def load_table_documentation(self) -> List[PointStruct]:
         """Загрузка документации таблиц из tables/*.json"""
         tables_dir = self.kb_dir / "tables"

@@ -16,9 +16,9 @@ DB_PATH = Path(__file__).parent / 'users.db'
 
 # Список всех доступных вкладок в системе
 AVAILABLE_TABS = {
-    'assistant': '🤖 Ассистент',
+    'assistant': '🤖 Биллинг ассистент',
     'kb_expansion': '📚 Расширение KB',
-    'confluence_librarian': '🛰️ Спутниковый библиотекарь',
+    'confluence_librarian': '🛰️ Спутниковый ассистент',
     'report': '💰 Расходы Иридиум',
     'revenue': '💰 Доходы',
     'analytics': '📋 Счета за период',

@@ -10,6 +10,7 @@
     "CREATE_DATE": "Дата создания клиента (если есть)"
   },
   "business_rules": [
+    "Таблица BM_CUSTOMERS не существует (ORA-00942). В схеме только CUSTOMERS.",
     "CUSTOMER_ID - основная связь клиента со всеми таблицами (SERVICES, ACCOUNTS, BM_INVOICE, ANALYTICS)",
     "ВАЖНО: В таблице CUSTOMERS НЕТ колонки CODE_1C! Код 1С получается через OUTER_IDS: SELECT oi.EXT_ID FROM OUTER_IDS oi WHERE oi.ID = CUSTOMERS.CUSTOMER_ID AND UPPER(TRIM(oi.TBL)) = 'CUSTOMERS'",
     "ВАЖНО: В таблице CUSTOMERS НЕТ колонок ORGANIZATION_NAME и PERSON_NAME! Название организации получается через BM_CUSTOMER_CONTACT (CONTACT_DICT_ID=23, MNEMONIC='description')",

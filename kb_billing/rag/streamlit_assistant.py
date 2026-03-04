@@ -6,6 +6,7 @@ import os
 # Исправление проблемы с protobuf - должно быть ДО импорта transformers
 os.environ['PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION'] = 'python'
 
+import json
 import time
 import streamlit as st
 import sys
@@ -49,9 +50,9 @@ def init_assistant():
 def show_assistant_tab():
     """Отображение закладки с ассистентом"""
     
-    st.header("🤖 Ассистент для аналитических отчетов")
+    st.header("🤖 Биллинг ассистент")
     st.markdown("""
-    Ассистент поможет вам:
+    Биллинг ассистент поможет вам:
     - 📊 Генерировать SQL запросы для аналитических отчетов
     - 🔍 Искать информацию по SBD услугам
     - 🎤 Задавать вопросы голосом
@@ -60,6 +61,9 @@ def show_assistant_tab():
     # Инициализация session_state (ДО всего остального, чтобы переключатель всегда был виден)
     if "assistant_question" not in st.session_state:
         st.session_state.assistant_question = ""
+    # Единый источник истины для поля ввода — не сбрасывается при ре-ране
+    if "assistant_question_input" not in st.session_state:
+        st.session_state.assistant_question_input = ""
     if "assistant_action" not in st.session_state:
         st.session_state.assistant_action = None  # None, "generate"
     if "last_generated_question" not in st.session_state:
@@ -260,28 +264,25 @@ def show_assistant_tab():
     
     # ========== ТЕКСТОВЫЙ РЕЖИМ - БЕЗ ФОРМЫ ==========
     else:
-        # Поле ввода вопроса - БЕЗ ФОРМЫ, чтобы не вызывать rerun при каждом изменении!
+        # Поле ввода: value только из ключа виджета, чтобы при ре-ране текст не сбрасывался
         question_input = st.text_area(
             "Введите ваш вопрос на русском языке:",
             height=150,
-            placeholder="Например: Покажи превышение трафика за октябрь 2025",
-            value=st.session_state.assistant_question,
-            key="assistant_question_input"
+            placeholder="Например: Покажи превышение трафика за октябрь 2025. Можно вводить длинные директивы.",
+            value=st.session_state.get("assistant_question_input", ""),
+            key="assistant_question_input",
+            help="Текст сохраняется при перерисовке страницы. Нажмите «Сгенерировать SQL» для отправки.",
         )
-        
-        # Сохраняем введенный текст в session_state
-        if question_input:
-            st.session_state.assistant_question = question_input
-        
+        # Не присваивать session_state.assistant_question_input после виджета — Streamlit сам обновляет по key
+
         # Кнопка генерации SQL - БЕЗ ФОРМЫ!
         generate_button = st.button("📊 Сгенерировать SQL", type="primary", use_container_width=True, key="generate_btn_text")
-        
+
         # Обработка генерации SQL
         if generate_button:
             if question_input and question_input.strip():
                 st.session_state.assistant_action = "generate"
                 st.session_state.assistant_question = question_input.strip()
-                # Очищаем предыдущие результаты при новой генерации
                 st.session_state.last_generated_question = ""
                 st.session_state.last_generated_sql = None
                 st.rerun()
@@ -344,6 +345,45 @@ def show_assistant_tab():
             # Автоматически выполняем запрос
             with st.spinner("Выполнение запроса..."):
                 execute_sql_query(generated_sql, result_key="sql_result", check_plan=True)
+            
+            # Сохранить в KB (для удачных запросов — пополнение training_data)
+            # Форма: ввод полей не вызывает rerun, только кнопка «Сохранить»
+            result_ok = st.session_state.get("sql_result") and "df" in st.session_state.get("sql_result", {}) and st.session_state["sql_result"].get("df") is not None
+            with st.expander("💾 Сохранить в KB", expanded=False):
+                st.caption("Сохраните этот вопрос и SQL в базу знаний (training_data), чтобы улучшать будущие ответы. Перед сохранением проверьте, что запрос выполнился без ошибок.")
+                with st.form("save_kb_form", clear_on_submit=False):
+                    save_question = st.text_area("Вопрос (для KB)", value=question or "", height=80, key="save_kb_question")
+                    save_sql = st.text_area("SQL (для KB)", value=generated_sql or "", height=120, key="save_kb_sql")
+                    save_context = st.text_input("Контекст (необязательно)", value="", key="save_kb_context", placeholder="Краткое описание, зачем этот запрос")
+                    save_category = st.selectbox("Категория", ["Доходы", "Клиенты", "Сервисы", "Превышение трафика", "Финансовые алерты", "Поиск", "Другое"], key="save_kb_category")
+                    submitted = st.form_submit_button("💾 Сохранить в KB")
+                if submitted:
+                    if not (save_question or "").strip() or not (save_sql or "").strip():
+                        st.warning("Заполните вопрос и SQL.")
+                    else:
+                        try:
+                            user_file = project_root / "kb_billing" / "training_data" / "user_added_examples.json"
+                            user_file.parent.mkdir(parents=True, exist_ok=True)
+                            examples = []
+                            if user_file.exists():
+                                with open(user_file, "r", encoding="utf-8") as f:
+                                    examples = json.load(f)
+                                if not isinstance(examples, list):
+                                    examples = [examples]
+                            new_example = {
+                                "question": save_question.strip(),
+                                "sql": save_sql.strip(),
+                                "context": (save_context or "").strip(),
+                                "business_entity": "user",
+                                "complexity": 2,
+                                "category": save_category if save_category != "Другое" else "Пользовательский"
+                            }
+                            examples.append(new_example)
+                            with open(user_file, "w", encoding="utf-8") as f:
+                                json.dump(examples, f, ensure_ascii=False, indent=2)
+                            st.success("✅ Пример сохранён в kb_billing/training_data/user_added_examples.json. Чтобы он попал в поиск, перезагрузите KB в Qdrant (вкладка «Спутниковый ассистент» → «Перезагрузить KB в Qdrant»).")
+                        except Exception as e:
+                            st.error(f"Ошибка сохранения: {e}")
             
             # Кнопка для выполнения со статистикой (опционально)
             if st.button("📈 Выполнить со статистикой", key="execute_with_stats_generated", use_container_width=True):

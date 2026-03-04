@@ -119,6 +119,15 @@ ssh -p 1194 root@82.114.2.2 "cd /usr/local/projects/ai_report && ./restart_strea
 SSH_CMD="ssh -p 1194" ./sync_and_update_kb.sh root@82.114.2.2
 ```
 
+**Только примеры (sql_examples.json, user_added_examples.json)** — без полной перестройки таблиц/представлений/Confluence, быстрее:
+
+```bash
+# после синхронизации deploy/ на сервер
+ssh -p 1194 root@82.114.2.2 "cd /usr/local/projects/ai_report && python3 kb_billing/rag/init_kb.py --only-examples"
+```
+
+Перезапуск Streamlit не обязателен (KB подхватывается при следующем запросе).
+
 **Обновление Oracle VIEW:** синхронизировать `deploy/` (или нужные файлы из `oracle/views/`), на сервере выполнить нужный `.sql`, при изменении кода приложения — перезапуск Streamlit (п. 3).
 
 ---
