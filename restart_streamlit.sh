@@ -73,6 +73,13 @@ if [ -d ".streamlit/cache" ]; then
     rm -rf ".streamlit/cache"/* 2>/dev/null
     echo "   ✅ Локальный кэш очищен"
 fi
+
+# Очистка __pycache__ в kb_billing/rag — иначе может подхватиться старый .pyc
+if [ -d "kb_billing/rag/__pycache__" ]; then
+    echo "   Удаление kb_billing/rag/__pycache__..."
+    rm -rf kb_billing/rag/__pycache__ 2>/dev/null
+    echo "   ✅ Кэш Python (rag) очищен"
+fi
 echo ""
 
 # Шаг 4: Ожидание перед запуском

@@ -924,6 +924,21 @@ class RAGAssistant:
                 # Добавляем предупреждение в логи
                 logger.warning("⚠️ ВНИМАНИЕ: DISTINCT был удален из LISTAGG. Если нужны уникальные значения, используй подзапрос с DISTINCT перед LISTAGG.")
             
+            # Код 1С при GROUP BY: oi.ID = s.CUSTOMER_ID в подзапросе и s.CUSTOMER_ID в GROUP BY. MAX(s.CUSTOMER_ID) в подзапросе даёт ORA-00934 — убираем и добавляем s.CUSTOMER_ID в GROUP BY
+            if re.search(r'oi\.ID\s*=\s*MAX\s*\(\s*s\.CUSTOMER_ID\s*\)', sql, re.IGNORECASE):
+                logger.warning("Убираю MAX(s.CUSTOMER_ID) из подзапроса OUTER_IDS (ORA-00934) и добавляю s.CUSTOMER_ID в GROUP BY")
+                sql = re.sub(r'oi\.ID\s*=\s*MAX\s*\(\s*s\.CUSTOMER_ID\s*\)', 'oi.ID = s.CUSTOMER_ID', sql, flags=re.IGNORECASE)
+                # Добавить s.CUSTOMER_ID в GROUP BY, если его там ещё нет
+                group_by_order = re.search(r'GROUP\s+BY\s+([\s\S]*?)\s+ORDER\s+BY', sql, re.IGNORECASE)
+                if group_by_order and 's.CUSTOMER_ID' not in group_by_order.group(1):
+                    sql = re.sub(
+                        r'(GROUP\s+BY\s+)([\s\S]*?)(\s+ORDER\s+BY)',
+                        r'\1\2, s.CUSTOMER_ID\3',
+                        sql,
+                        count=1,
+                        flags=re.IGNORECASE
+                    )
+            
             # Проверка 6: Проверка на использование несуществующих алиасов в подзапросах
             # Ищем подзапросы и проверяем, что используемые алиасы существуют в основном запросе
             # Простая проверка: если в подзапросе используется c.CUSTOMER_ID, но в основном запросе нет алиаса c

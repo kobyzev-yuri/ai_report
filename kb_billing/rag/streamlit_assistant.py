@@ -262,27 +262,33 @@ def show_assistant_tab():
             else:
                 st.warning("⚠️ Введите вопрос или транскрибируйте аудио")
     
-    # ========== ТЕКСТОВЫЙ РЕЖИМ - БЕЗ ФОРМЫ ==========
+    # ========== ТЕКСТОВЫЙ РЕЖИМ — ФОРМА (ввод не вызывает реран при наборе и Alt) ==========
     else:
-        # Поле ввода: value только из ключа виджета, чтобы при ре-ране текст не сбрасывался
-        question_input = st.text_area(
-            "Введите ваш вопрос на русском языке:",
-            height=150,
-            placeholder="Например: Покажи превышение трафика за октябрь 2025. Можно вводить длинные директивы.",
-            value=st.session_state.get("assistant_question_input", ""),
-            key="assistant_question_input",
-            help="Текст сохраняется при перерисовке страницы. Нажмите «Сгенерировать SQL» для отправки.",
+        # Шаблон для явной ссылки на пример из KB (отчёт Новосибирск AP 523, 524)
+        TEMPLATE_NOVOSIBIRSK = (
+            "Отчёт по сервисам на точках доступа AP 523, 524 (Новосибирск): "
+            "номер услуги, номер договора, название клиента, адрес клиента, адрес услуги, код 1С абонента, тип услуги"
         )
-        # Не присваивать session_state.assistant_question_input после виджета — Streamlit сам обновляет по key
+        if st.button("📌 Подставить шаблон: Отчёт Новосибирск (AP 523, 524)", key="template_novosibirsk_btn"):
+            st.session_state["assistant_question_input"] = TEMPLATE_NOVOSIBIRSK
+            st.rerun()
+        with st.form("assistant_question_form", clear_on_submit=False):
+            question_input = st.text_area(
+                "Введите ваш вопрос на русском языке:",
+                height=150,
+                placeholder="Например: Покажи превышение трафика за октябрь 2025. Можно вводить длинные директивы.",
+                value=st.session_state.get("assistant_question_input", ""),
+                key="assistant_question_form_ta",
+                help="Ввод и переключение раскладки (Alt) не перезагружают страницу. Нажмите «Сгенерировать SQL» для отправки. Можно подставить шаблон выше.",
+            )
+            generate_button = st.form_submit_button("📊 Сгенерировать SQL")
 
-        # Кнопка генерации SQL - БЕЗ ФОРМЫ!
-        generate_button = st.button("📊 Сгенерировать SQL", type="primary", use_container_width=True, key="generate_btn_text")
-
-        # Обработка генерации SQL
+        # Обработка отправки формы (не трогаем key виджета — только отдельные ключи)
         if generate_button:
             if question_input and question_input.strip():
                 st.session_state.assistant_action = "generate"
                 st.session_state.assistant_question = question_input.strip()
+                st.session_state.assistant_question_input = question_input.strip()
                 st.session_state.last_generated_question = ""
                 st.session_state.last_generated_sql = None
                 st.rerun()

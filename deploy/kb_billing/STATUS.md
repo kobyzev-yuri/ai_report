@@ -114,7 +114,7 @@ kb_billing/
 
 ## 🔗 Векторная БД
 
-Векторы хранятся в **Qdrant** (коллекция `kb_billing`). Загрузка: `kb_billing/rag/kb_loader.py` → `load_all()`. См. docs/kb-billing-vs-presales.md.
+Векторы хранятся в **Qdrant** (коллекция `kb_billing`). Загрузка: `kb_billing/rag/kb_loader.py` → `load_all()`. См. [docs/kb-billing-vs-presales.md](../docs/kb-billing-vs-presales.md).
 
 ## 📊 Статистика
 

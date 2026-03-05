@@ -50,7 +50,40 @@ loader = KBLoader()
 loader.load_all(recreate=False)  # или recreate=True для полной перезаписи
 ```
 
-Данные берутся из: `training_data/sql_examples.json`, `tables/*.json`, `views/*.json`, `metadata.json`, `confluence_docs/*.json`. См. docs/kb-billing-vs-presales.md.
+Данные берутся из: `training_data/sql_examples.json`, `tables/*.json`, `views/*.json`, `metadata.json`, `confluence_docs/*.json`. См. [docs/kb-billing-vs-presales.md](../docs/kb-billing-vs-presales.md).
+
+2. **Документация:**
+   ```python
+   # Загрузка описаний таблиц и VIEW как документации
+   for table_file in ['tables/SPNET_TRAFFIC.json', ...]:
+       with open(table_file) as f:
+           table_info = json.load(f)
+           doc = f"{table_info['description']}\n\nКлючевые поля:\n"
+           for col, desc in table_info['key_columns'].items():
+               doc += f"- {col}: {desc}\n"
+           vanna.add_documentation(doc)
+   ```
+
+3. **Q/A примеры:**
+   ```python
+   from src.tools.kb_training_client import KBTrainingClient
+   
+   client = KBTrainingClient(api_base_url="http://localhost:8000")
+   
+   # Загрузка из JSON файла
+   with open('training_data/sql_examples.json') as f:
+       examples = json.load(f)
+       for example in examples:
+           client.add_training_example(
+               question=example['question'],
+               sql=example['sql']
+           )
+   ```
+
+   Или через CLI:
+   ```bash
+   python -m src.tools.kb_training_client --file kb_billing/training_data/sql_examples.json
+   ```
 
 ### Формат JSON файлов
 
@@ -135,13 +168,9 @@ loader.load_all(recreate=False)  # или recreate=True для полной пе
 3. Добавьте Q/A примеры в `training_data/sql_examples.json`
 4. Загрузите в векторную БД через API или CLI
 
-## Связь с проектом sql4A
+## Векторная БД
 
-Эта база знаний создана в формате проекта sql4A (`/mnt/ai/cnn/sql4A`) и может быть загружена в векторную базу знаний через:
-
-- API эндпоинты (`/training/ddl`, `/training/documentation`, `/training/question_sql`)
-- CLI инструменты (`kb_training_client.py`)
-- Загрузка через `KBLoader.load_all()` (Qdrant). См. docs/kb-billing-vs-presales.md
+Загрузка и поиск — через **Qdrant** (коллекция `kb_billing`). Модули: `kb_billing/rag/kb_loader.py`, `rag_assistant.py`. Конфиг: `config.env` (QDRANT_HOST, QDRANT_PORT, QDRANT_COLLECTION). См. [docs/kb-billing-vs-presales.md](../docs/kb-billing-vs-presales.md).
 
 ## Дополнительные ресурсы
 

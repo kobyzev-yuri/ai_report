@@ -645,7 +645,7 @@ class RAGAssistant:
    - НЕ используй CUSTOMERS.CUSTOMER_NAME или CUSTOMERS.ORGANIZATION_NAME - таких колонок не существует!
    - КРИТИЧЕСКИ ВАЖНО: Если вопрос касается финансового анализа (прибыльность, убыточность, маржа, тенденции), ВСЕГДА используй готовые VIEW (V_PROFITABILITY_BY_PERIOD, V_PROFITABILITY_TREND, V_UNPROFITABLE_CUSTOMERS) вместо JOIN с CUSTOMERS или создания сложных CTE!
 11. Схема и типичные ошибки (ORA-00904, ORA-00942): опирайся на контекст из KB (таблицы, представления, usage_notes). В контексте указано: нет BM_CUSTOMERS (только CUSTOMERS); в SERVICES нет PERIOD_ID; в V_IRIDIUM_SERVICES_INFO нет TYPE_ID — TYPE_ID и имя типа из SERVICES + BM_TYPE.
-12. ВАЖНО: Таблица периодов называется BM_PERIOD (без S), а не BM_PERIODS! 
+12. ВАЖНО: Таблица периодов называется BM_PERIOD (без S), а не BM_PERIODS!
    - Используй BM_PERIOD.START_DATE (не DATE_BEG!) для получения PERIOD_YYYYMM через TO_CHAR(pm.START_DATE, 'YYYY-MM')
    - BM_PERIOD содержит колонки: PERIOD_ID, START_DATE, STOP_DATE, MONTH (не DATE_BEG и DATE_END!)
 13. ВАЖНО: Для расходов лучше использовать V_CONSOLIDATED_REPORT_WITH_BILLING вместо прямого использования STECCOM_EXPENSES:
@@ -923,6 +923,21 @@ class RAGAssistant:
                 logger.info("SQL исправлен: удален DISTINCT из LISTAGG")
                 # Добавляем предупреждение в логи
                 logger.warning("⚠️ ВНИМАНИЕ: DISTINCT был удален из LISTAGG. Если нужны уникальные значения, используй подзапрос с DISTINCT перед LISTAGG.")
+            
+            # Код 1С при GROUP BY: oi.ID = s.CUSTOMER_ID в подзапросе и s.CUSTOMER_ID в GROUP BY. MAX(s.CUSTOMER_ID) в подзапросе даёт ORA-00934 — убираем и добавляем s.CUSTOMER_ID в GROUP BY
+            if re.search(r'oi\.ID\s*=\s*MAX\s*\(\s*s\.CUSTOMER_ID\s*\)', sql, re.IGNORECASE):
+                logger.warning("Убираю MAX(s.CUSTOMER_ID) из подзапроса OUTER_IDS (ORA-00934) и добавляю s.CUSTOMER_ID в GROUP BY")
+                sql = re.sub(r'oi\.ID\s*=\s*MAX\s*\(\s*s\.CUSTOMER_ID\s*\)', 'oi.ID = s.CUSTOMER_ID', sql, flags=re.IGNORECASE)
+                # Добавить s.CUSTOMER_ID в GROUP BY, если его там ещё нет
+                group_by_order = re.search(r'GROUP\s+BY\s+([\s\S]*?)\s+ORDER\s+BY', sql, re.IGNORECASE)
+                if group_by_order and 's.CUSTOMER_ID' not in group_by_order.group(1):
+                    sql = re.sub(
+                        r'(GROUP\s+BY\s+)([\s\S]*?)(\s+ORDER\s+BY)',
+                        r'\1\2, s.CUSTOMER_ID\3',
+                        sql,
+                        count=1,
+                        flags=re.IGNORECASE
+                    )
             
             # Проверка 6: Проверка на использование несуществующих алиасов в подзапросах
             # Ищем подзапросы и проверяем, что используемые алиасы существуют в основном запросе

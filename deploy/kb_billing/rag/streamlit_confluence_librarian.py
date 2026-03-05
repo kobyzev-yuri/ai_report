@@ -114,7 +114,7 @@ def show_confluence_librarian_tab():
             librarian_question = (librarian_question or "").strip()
             st.session_state.librarian_chat.append({"role": "user", "content": librarian_question})
             st.session_state.librarian_last_chunks = None
-            st.session_state.librarian_input_ta = ""
+            st.session_state.librarian_input_ta = ""  # очистить поле после отправки
             with st.spinner("Библиотекарь думает..."):
                 try:
                     rag = RAGAssistant() if use_rag else None
@@ -137,7 +137,7 @@ def show_confluence_librarian_tab():
                     st.rerun()
                 except ValueError as e:
                     st.session_state.librarian_chat.pop()
-                    st.session_state.librarian_input_ta = librarian_question
+                    st.session_state.librarian_input_ta = librarian_question  # вернуть текст при ошибке
                     st.error(str(e))
                     st.info("Задайте GEMINI_API_KEY или GOOGLE_API_KEY в config.env.")
                 except Exception as e:

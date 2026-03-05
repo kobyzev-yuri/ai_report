@@ -1,10 +1,19 @@
 #!/bin/bash
 # Синхронизация KB файлов и обновление базы знаний БЕЗ пересоздания коллекции
+# Использование:
+#   ./sync_and_update_kb.sh [SERVER] [SSH_CMD]     — полная синхронизация и перестройка всей KB
+#   ./sync_and_update_kb.sh --only-examples [SERVER] [SSH_CMD]  — синхронизация + перезагрузка только Q/A примеров (быстро)
 
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
+
+ONLY_EXAMPLES=false
+if [ "$1" = "--only-examples" ]; then
+  ONLY_EXAMPLES=true
+  shift
+fi
 
 # Параметры подключения
 SERVER="${1:-root@82.114.2.2}"
@@ -13,7 +22,11 @@ REMOTE_DIR="/usr/local/projects/ai_report"
 LOCAL_DIR="$SCRIPT_DIR"
 
 echo "========================================"
-echo "Синхронизация KB и обновление базы знаний"
+if [ "$ONLY_EXAMPLES" = true ]; then
+  echo "Синхронизация + обновление только Q/A примеров (без перестройки таблиц/views/Confluence)"
+else
+  echo "Синхронизация KB и обновление базы знаний"
+fi
 echo "========================================"
 echo "Сервер: $SERVER"
 echo "SSH команда: $SSH_CMD"
@@ -99,13 +112,22 @@ echo "✅ Синхронизация файлов завершена"
 # Обновление KB на сервере (без пересоздания коллекции)
 echo ""
 echo "========================================"
-echo "Обновление базы знаний на сервере..."
+if [ "$ONLY_EXAMPLES" = true ]; then
+  echo "Перезагрузка только Q/A примеров на сервере..."
+else
+  echo "Обновление базы знаний на сервере..."
+fi
 echo "========================================"
 echo "Проверка доступности Qdrant..."
 $SSH_CMD "$SERVER" "curl -s http://localhost:6333/health > /dev/null 2>&1 || (echo '❌ Qdrant недоступен' && exit 1)"
 
-echo "Запуск обновления KB..."
-$SSH_CMD "$SERVER" "cd $REMOTE_DIR && python3 kb_billing/rag/init_kb.py --host localhost --port 6333 --collection kb_billing --model intfloat/multilingual-e5-base"
+if [ "$ONLY_EXAMPLES" = true ]; then
+  echo "Запуск перезагрузки только примеров (sql_examples + user_added_examples)..."
+  $SSH_CMD "$SERVER" "cd $REMOTE_DIR && python3 kb_billing/rag/init_kb.py --host localhost --port 6333 --collection kb_billing --only-examples"
+else
+  echo "Запуск обновления KB (все источники)..."
+  $SSH_CMD "$SERVER" "cd $REMOTE_DIR && python3 kb_billing/rag/init_kb.py --host localhost --port 6333 --collection kb_billing --model intfloat/multilingual-e5-base"
+fi
 
 # Информация о перезапуске Streamlit (если синхронизировали Streamlit файлы)
 if [ -f "$LOCAL_DIR/deploy/streamlit_report_oracle_backup.py" ]; then
@@ -121,11 +143,20 @@ echo "✅ Синхронизация и обновление завершены!
 echo "========================================"
 echo ""
 echo "База знаний обновлена на сервере $SERVER"
+if [ "$ONLY_EXAMPLES" = true ]; then
+  echo "Обновлены только Q/A примеры (таблицы, представления, Confluence не перестраивались)."
+fi
 echo "Новые примеры запросов доступны в RAG-ассистенте"
 if [ -f "$LOCAL_DIR/deploy/streamlit_report_oracle_backup.py" ]; then
     echo ""
     echo "⚠️  Для обновления кода приложения: SSH_CMD=\"ssh -p 1194\" ./sync_deploy.sh $SERVER"
     echo "   Затем перезапуск: ssh -p 1194 $SERVER 'cd $REMOTE_DIR && ./restart_streamlit.sh'"
+fi
+if [ "$ONLY_EXAMPLES" = false ]; then
+    echo ""
+    echo "💡 Если изменили только примеры (sql_examples.json), в следующий раз используйте:"
+    echo "   ./sync_and_update_kb.sh --only-examples $SERVER"
+    echo "   (перезагружаются только Q/A примеры, без перестройки таблиц/views — быстрее)"
 fi
 
 
