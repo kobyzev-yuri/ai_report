@@ -12,7 +12,7 @@ from pathlib import Path
 import os
 
 # Путь к базе данных
-DB_PATH = Path(__file__).parent / 'users.db'
+DB_PATH = Path(__file__).resolve().parent.parent / "users.db"
 
 # Список всех доступных вкладок в системе
 AVAILABLE_TABS = {

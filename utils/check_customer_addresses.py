@@ -6,11 +6,13 @@ import sys
 import os
 from pathlib import Path
 
-# Добавляем путь к модулям
-sys.path.insert(0, str(Path(__file__).parent / 'deploy'))
+# Чтобы при запуске из корня (python utils/check_customer_addresses.py) находился utils
+_root = Path(__file__).resolve().parent.parent
+if str(_root) not in sys.path:
+    sys.path.insert(0, str(_root))
 
 try:
-    from db_connection import get_db_connection
+    from utils.db_connection import get_db_connection
 except ImportError:
     # Прямое подключение если модуль не найден
     import cx_Oracle

@@ -68,6 +68,9 @@ test_*.py
 # Archive directory - exclude from git
 archive/
 
+# Local SQLite DB (auth)
+users.db
+
 # Secrets and configs with passwords
 config.env
 *.env

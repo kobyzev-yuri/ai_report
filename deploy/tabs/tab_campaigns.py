@@ -32,7 +32,7 @@ except ImportError:
 
 def _get_db_connection():
     """Получить подключение к Oracle"""
-    from db_connection import get_db_connection
+    from utils.db_connection import get_db_connection
     return get_db_connection()
 
 

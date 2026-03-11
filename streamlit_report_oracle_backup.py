@@ -15,10 +15,10 @@ from datetime import datetime
 import io
 from pathlib import Path
 import warnings
-from auth_db import (
-    init_db, authenticate_user, create_user, list_users, 
-    delete_user, is_superuser, update_user_permissions, 
-    get_user_permissions, AVAILABLE_TABS as _AVAILABLE_TABS
+from utils.auth_db import (
+    init_db, authenticate_user, create_user, list_users,
+    delete_user, is_superuser, update_user_permissions,
+    get_user_permissions, AVAILABLE_TABS as _AVAILABLE_TABS,
 )
 # Гарантируем наличие «Рассылка счетов» и «Кампании» в списке (на сервере может быть старый auth_db)
 AVAILABLE_TABS = dict(_AVAILABLE_TABS)
@@ -38,8 +38,8 @@ from tabs.tab_campaigns import show_tab as show_campaigns_tab
 # Подавляем предупреждение pandas о cx_Oracle (работает корректно)
 warnings.filterwarnings('ignore', message='pandas only supports SQLAlchemy')
 
-from db_connection import load_config_env, get_db_connection as get_connection
-from queries import (
+from utils.db_connection import load_config_env, get_db_connection as get_connection
+from utils.queries import (
     count_file_records, get_records_in_db, get_main_report,
     get_current_period, get_periods, get_plans,
     get_revenue_periods, get_revenue_report,

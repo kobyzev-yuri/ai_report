@@ -28,7 +28,7 @@
 
 import argparse
 import sys
-from auth_db_v2 import (
+from utils.auth_db_v2 import (
     init_db, create_user, list_users, change_password, 
     delete_user, is_superuser, update_user_permissions,
     get_user_permissions, AVAILABLE_TABS

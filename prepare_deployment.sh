@@ -44,16 +44,12 @@ cp -r oracle/functions/*.sql "$DEPLOY_DIR/oracle/functions/" 2>/dev/null || true
 cp -r oracle/data/*.sql "$DEPLOY_DIR/oracle/data/" 2>/dev/null || true
 cp oracle/README.md "$DEPLOY_DIR/oracle/" 2>/dev/null || true
 
-# 2. Python приложение
+# 2. Python приложение и utils (auth, db, queries, create_user)
 echo "  → Python приложение..."
 cp streamlit_report_oracle_backup.py "$DEPLOY_DIR/"
 cp streamlit_data_loader.py "$DEPLOY_DIR/"
-cp db_connection.py "$DEPLOY_DIR/"
-cp queries.py "$DEPLOY_DIR/"
-cp auth_db.py "$DEPLOY_DIR/"
-cp auth_db_v2.py "$DEPLOY_DIR/" 2>/dev/null || true
-cp create_user.py "$DEPLOY_DIR/"
-cp create_user_v2.py "$DEPLOY_DIR/" 2>/dev/null || true
+mkdir -p "$DEPLOY_DIR/utils"
+cp utils/*.py "$DEPLOY_DIR/utils/"
 cp python/*.py "$DEPLOY_DIR/python/" 2>/dev/null || true
 echo "  → Вкладки (tabs)..."
 cp tabs/*.py "$DEPLOY_DIR/tabs/" 2>/dev/null || true
