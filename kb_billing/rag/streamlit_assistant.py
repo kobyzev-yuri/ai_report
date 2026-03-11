@@ -387,7 +387,7 @@ def show_assistant_tab():
                             examples.append(new_example)
                             with open(user_file, "w", encoding="utf-8") as f:
                                 json.dump(examples, f, ensure_ascii=False, indent=2)
-                            st.success("✅ Пример сохранён в kb_billing/training_data/user_added_examples.json. Чтобы он попал в поиск, перезагрузите KB в Qdrant (вкладка «Спутниковый ассистент» → «Перезагрузить KB в Qdrant»).")
+                            st.success("✅ Пример сохранён в kb_billing/training_data/user_added_examples.json. Чтобы он попал в поиск, перезагрузите биллинг KB: вкладка **«KB Библиотекарь»** → «Переобучить KB с новыми примерами» (или «Только Q/A примеры» в init_kb).")
                         except Exception as e:
                             st.error(f"Ошибка сохранения: {e}")
             

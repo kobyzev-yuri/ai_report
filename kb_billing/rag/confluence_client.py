@@ -83,6 +83,26 @@ class ConfluenceClient:
             start += limit
         return result
 
+    def get_space_info(self, space_key: str) -> Optional[Dict[str, Any]]:
+        """
+        Информация о пространстве по ключу (name, type: global/personal, key).
+        Для личных пространств ключ вида ~username.
+        """
+        space_key = (space_key or "").strip()
+        if not space_key:
+            return None
+        try:
+            r = self.session.get(
+                f"{self.base_url}/rest/api/space/{space_key}",
+                timeout=self.timeout,
+            )
+            if r.status_code != 200:
+                return None
+            return r.json()
+        except Exception as e:
+            logger.debug("get_space_info %s: %s", space_key, e)
+            return None
+
     def get_pages_in_space(
         self,
         space_key: str,
@@ -117,6 +137,75 @@ class ConfluenceClient:
             if len(results) < limit:
                 break
             start += limit
+
+    def get_pages_by_cql(
+        self,
+        cql: str,
+        limit_per_page: int = 50,
+        max_results: Optional[int] = None,
+        expand: str = "version",
+    ) -> Iterator[Dict[str, Any]]:
+        """
+        Итератор по страницам по CQL-запросу (для личных пространств и сложных фильтров).
+        Пример: cql='space=~a.zhegalov and type=page'
+        Confluence Server: /rest/api/content/search?cql=... или /rest/api/content?cql=...
+        """
+        start = 0
+        total = 0
+        while True:
+            params = {"cql": cql, "limit": limit_per_page, "start": start, "expand": expand}
+            # Пробуем endpoint search (Confluence Server/Cloud)
+            r = self.session.get(
+                f"{self.base_url}/rest/api/content/search",
+                params=params,
+                timeout=self.timeout,
+            )
+            if r.status_code != 200:
+                # Fallback: часть серверов использует /rest/api/content с cql
+                r = self.session.get(
+                    f"{self.base_url}/rest/api/content",
+                    params=params,
+                    timeout=self.timeout,
+                )
+            if r.status_code != 200:
+                logger.warning("get_pages_by_cql HTTP %s: %s", r.status_code, r.text[:300])
+                return
+            data = r.json()
+            results = data.get("results", [])
+            for page in results:
+                yield page
+                total += 1
+                if max_results is not None and total >= max_results:
+                    return
+            if len(results) < limit_per_page:
+                break
+            start += len(results)
+
+    def get_child_page_ids(self, page_id: str, limit: int = 100) -> List[str]:
+        """
+        Список ID дочерних страниц (прямые дети типа page). Для рекурсивной выгрузки «страница + все ссылки с неё».
+        """
+        result: List[str] = []
+        start = 0
+        while True:
+            r = self.session.get(
+                f"{self.base_url}/rest/api/content/{page_id}/child/page",
+                params={"limit": min(limit, 50), "start": start},
+                timeout=self.timeout,
+            )
+            if r.status_code != 200:
+                logger.warning("get_child_page_ids %s: HTTP %s", page_id, r.status_code)
+                break
+            data = r.json()
+            results = data.get("results", [])
+            for item in results:
+                pid = item.get("id")
+                if pid:
+                    result.append(str(pid))
+            if len(results) < 50 or len(result) >= limit:
+                break
+            start += len(results)
+        return result[:limit]
 
     def get_page_by_id(
         self,

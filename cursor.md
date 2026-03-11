@@ -499,6 +499,10 @@ cp tabs/tab_campaigns.py deploy/tabs/tab_campaigns.py
 cp -r tabs/ deploy/tabs/
 ```
 
+### Спутниковый ассистент (Gemini): Python 3.9+
+
+Вкладка «Спутниковый ассистент» → «Ответы (инженер/абонент)» использует пакет **google-genai**, который требует **Python >= 3.9**. На сервере с системным Python 3.8 `pip install google-genai` выдаст «No matching distribution found». Решение: запускать Streamlit в окружении с Python 3.9+ (например `conda activate py11`, или `python3.9 -m venv venv && source venv/bin/activate`, затем `pip install -r requirements.txt` и запуск через этот интерпретатор). Если Python < 3.9, вкладка покажет предупреждение и не будет вызывать Gemini.
+
 ### sync_and_update_kb.sh
 
 **Что синхронизирует:**

@@ -27,6 +27,8 @@ mkdir -p "$DEPLOY_DIR/kb_billing/tables"
 mkdir -p "$DEPLOY_DIR/kb_billing/views"
 mkdir -p "$DEPLOY_DIR/kb_billing/training_data"
 mkdir -p "$DEPLOY_DIR/kb_billing/rag"
+mkdir -p "$DEPLOY_DIR/kb_billing/confluence_docs"
+mkdir -p "$DEPLOY_DIR/scripts"
 mkdir -p "$DEPLOY_DIR/docs"
 mkdir -p "$DEPLOY_DIR/data/SPNet reports"
 mkdir -p "$DEPLOY_DIR/data/STECCOMLLCRussiaSBD.AccessFees_reports"
@@ -67,6 +69,15 @@ cp run_streamlit_background.sh "$DEPLOY_DIR/"
 cp stop_streamlit.sh "$DEPLOY_DIR/"
 cp status_streamlit.sh "$DEPLOY_DIR/"
 cp restart_streamlit.sh "$DEPLOY_DIR/" 2>/dev/null || true
+
+# 4.0. Скрипты Confluence / спутниковая KB (тесты на сервере)
+echo "  → Скрипты Confluence (sync, outdated, clean, analyze)..."
+cp scripts/sync_confluence_spaces.py "$DEPLOY_DIR/scripts/" 2>/dev/null || true
+cp scripts/sync_confluence_pages.py "$DEPLOY_DIR/scripts/" 2>/dev/null || true
+cp scripts/confluence_kb_outdated.py "$DEPLOY_DIR/scripts/" 2>/dev/null || true
+cp scripts/clean_satellite_kb.py "$DEPLOY_DIR/scripts/" 2>/dev/null || true
+cp scripts/analyze_confluence_space.py "$DEPLOY_DIR/scripts/" 2>/dev/null || true
+cp scripts/test_satellite_rag_search.py "$DEPLOY_DIR/scripts/" 2>/dev/null || true
 
 # 4.1. RAG deployment скрипты
 echo "  → RAG deployment скрипты..."

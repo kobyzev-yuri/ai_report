@@ -29,18 +29,23 @@ tqdm
 
 # Confluence integration (спутниковый библиотекарь, полная индексация вложений)
 requests
+httpx
 beautifulsoup4
 pymupdf
 python-docx
+xlrd
 Pillow
 pytesseract
 
 # RAG and Vector Database
 qdrant-client>=1.7.0
 sentence-transformers>=2.2.0
+# На сервере без NVIDIA GPU сначала установите CPU-версию PyTorch, чтобы не тянуть ~1 GB CUDA:
+#   pip install torch --index-url https://download.pytorch.org/whl/cpu
+# затем: pip install -r requirements.txt
 torch>=2.0.0
 transformers>=4.30.0
 
-# Спутниковый библиотекарь — агент на Gemini (инженер спутникового сегмента, куратор KB)
-google-genai>=1.0.0
+# Спутниковый библиотекарь — Gemini через ProxyAPI.ru (httpx). Прямой Google API (опционально): google-genai>=1.0.0, Python >= 3.9.
+# google-genai>=1.0.0
 

@@ -38,7 +38,8 @@ class KBLoader:
         qdrant_host: Optional[str] = None,
         qdrant_port: Optional[int] = None,
         collection_name: Optional[str] = None,
-        embedding_model: Optional[str] = None
+        embedding_model: Optional[str] = None,
+        kb_dir: Optional[Path] = None,
     ):
         """
         Инициализация загрузчика KB (использует настройки sql4A)
@@ -48,6 +49,7 @@ class KBLoader:
             qdrant_port: Порт Qdrant сервера (по умолчанию из SQL4AConfig)
             collection_name: Имя коллекции в Qdrant (по умолчанию из SQL4AConfig)
             embedding_model: Модель для генерации эмбеддингов (по умолчанию из SQL4AConfig)
+            kb_dir: Каталог kb_billing (training_data, tables, confluence_docs). Если не задан — от __file__ (мог разъехаться с путём в UI при разделении доменов).
         """
         # Используем настройки из sql4A конфигурации
         self.qdrant_host = qdrant_host or SQL4AConfig.QDRANT_HOST
@@ -61,14 +63,15 @@ class KBLoader:
         self.model = SentenceTransformer(self.embedding_model)
         self.vector_size = self.model.get_sentence_embedding_dimension()
         
+        # Путь к директории KB: явный kb_dir (как в UI) или от расположения модуля
+        self.kb_dir = Path(kb_dir) if kb_dir is not None else Path(__file__).parent.parent
+        
         logger.info(f"Инициализация KBLoader:")
         logger.info(f"  - Qdrant: {self.qdrant_host}:{self.qdrant_port}")
         logger.info(f"  - Коллекция: {self.collection_name}")
+        logger.info(f"  - kb_dir: {self.kb_dir.resolve()}")
         logger.info(f"  - Модель эмбеддингов: {self.embedding_model}")
         logger.info(f"  - Размерность векторов: {self.vector_size}")
-        
-        # Путь к директории KB
-        self.kb_dir = Path(__file__).parent.parent
         
     def create_collection(self, recreate: bool = False):
         """Создание коллекции в Qdrant"""
@@ -178,6 +181,31 @@ class KBLoader:
             batch = points[i : i + batch_size]
             self.client.upsert(collection_name=self.collection_name, points=batch)
         logger.info("Загружено %s Q/A примеров (без перестройки остальной KB)", len(points))
+        return len(points)
+
+    def reload_confluence_only(self) -> int:
+        """Перезагрузить в Qdrant только документы Confluence (confluence_docs/*.json, в т.ч. manual_notes).
+        Удаляет точки с type=confluence_section и загружает их заново. Остальная KB (биллинг: Q/A, таблицы, представления) не трогается.
+        Возвращает количество загруженных точек."""
+        self.create_collection(recreate=False)
+        self.client.delete(
+            collection_name=self.collection_name,
+            points_selector=Filter(
+                should=[
+                    FieldCondition(key="type", match=MatchValue(value="confluence_section")),
+                ]
+            ),
+        )
+        logger.info("Удалены старые чанки Confluence из коллекции")
+        points = self.load_confluence_docs()
+        if not points:
+            logger.info("Нет документов Confluence для загрузки (confluence_docs/ пуста или только outdated)")
+            return 0
+        batch_size = 100
+        for i in range(0, len(points), batch_size):
+            batch = points[i : i + batch_size]
+            self.client.upsert(collection_name=self.collection_name, points=batch)
+        logger.info("Загружено %s чанков Confluence (без перестройки биллинг KB)", len(points))
         return len(points)
 
     def load_table_documentation(self) -> List[PointStruct]:
@@ -359,6 +387,10 @@ class KBLoader:
             parts.append(self._confluence_section_to_text(sub))
         return "\n\n".join(parts).strip()
 
+    def get_confluence_docs_dir(self) -> Path:
+        """Путь к каталогу confluence_docs (для диагностики в UI)."""
+        return self.kb_dir / "confluence_docs"
+
     def load_confluence_docs(self) -> List[PointStruct]:
         """
         Загрузка документов из Confluence (схемы сети, документация спутниковых инженеров).
@@ -366,10 +398,11 @@ class KBLoader:
         загружается отдельной точкой (confluence_section), чтобы поиск возвращал релевантные фрагменты,
         а не целую страницу. domain='satellite'.
         """
-        confluence_docs_dir = self.kb_dir / "confluence_docs"
+        confluence_docs_dir = self.get_confluence_docs_dir()
         if not confluence_docs_dir.exists():
-            logger.info("Директория confluence_docs не найдена — документы Confluence не загружаются")
+            logger.info("Директория confluence_docs не найдена — документы Confluence не загружаются: %s", confluence_docs_dir.resolve())
             return []
+        logger.info("Загрузка Confluence из %s", confluence_docs_dir.resolve())
 
         outdated_file = confluence_docs_dir / "outdated.txt"
         outdated_ids = set()
@@ -393,6 +426,7 @@ class KBLoader:
             for doc in docs:
                 source = doc.get("source") or {}
                 page_id = source.get("page_id", "")
+                page_id = str(page_id).strip() if page_id else ""
                 if page_id and page_id in outdated_ids:
                     continue
                 page_title = doc.get("title", "Без названия")
@@ -404,7 +438,18 @@ class KBLoader:
                     if not section_text:
                         continue
                     # Один чанк = одна секция (в т.ч. «Вложение: filename»)
-                    text_for_embed = f"{page_title}\n\n{section_title}\n\n{section_text}".strip()
+                    # Для вложений добавляем явную строку «Документ «название»», чтобы запросы вида «опишите Спецификация Стар-Т» находили чанк по смыслу
+                    doc_annotation = ""
+                    if section_title.startswith("Вложение:") or section_title.lower().startswith("вложение:"):
+                        name = section_title.split(":", 1)[-1].strip() if ":" in section_title else section_title
+                        # убрать расширение для краткого названия
+                        for ext in (".xlsx", ".xls", ".pdf", ".docx", ".doc", ".png", ".drawio", ".xml"):
+                            if name.lower().endswith(ext):
+                                name = name[: -len(ext)].strip()
+                                break
+                        if name:
+                            doc_annotation = f"Документ «{name}» (вложение). "
+                    text_for_embed = f"{page_title}\n\n{section_title}\n\n{doc_annotation}{section_text}".strip()
                     if len(text_for_embed) > 15000:
                         text_for_embed = text_for_embed[:15000] + "\n\n[... обрезано ...]"
                     embedding = self.model.encode(
@@ -412,23 +457,20 @@ class KBLoader:
                         normalize_embeddings=SQL4AConfig.NORMALIZE_EMBEDDINGS,
                     ).tolist()
                     point_id = hash(f"confluence_{page_id}_{idx}_{section_title or idx}") & 0x7FFFFFFFFFFFFFFF
-                    points.append(
-                        PointStruct(
-                            id=point_id,
-                            vector=embedding,
-                            payload={
-                                "type": "confluence_section",
-                                "domain": "satellite",
-                                "title": page_title,
-                                "section_title": section_title or "(без заголовка)",
-                                "content": text_for_embed[:12000],
-                                "source_url": source_url,
-                                "page_id": page_id,
-                                "last_updated": source.get("last_updated", ""),
-                                "scope": doc.get("scope", ["general"]),
-                            },
-                        )
-                    )
+                    payload = {
+                        "type": "confluence_section",
+                        "domain": "satellite",
+                        "title": page_title,
+                        "section_title": section_title or "(без заголовка)",
+                        "content": text_for_embed[:12000],
+                        "source_url": source_url,
+                        "page_id": page_id,
+                        "last_updated": source.get("last_updated", ""),
+                        "scope": doc.get("scope", ["general"]),
+                    }
+                    if source.get("engineer_comment"):
+                        payload["engineer_comment"] = source["engineer_comment"]
+                    points.append(PointStruct(id=point_id, vector=embedding, payload=payload))
         logger.info("Загружено %s чанков Confluence (сектор спутниковых систем)", len(points))
         return points
 

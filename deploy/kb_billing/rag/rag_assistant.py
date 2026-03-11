@@ -64,6 +64,39 @@ class RAGAssistant:
         logger.info(f"  - Qdrant: {self.qdrant_host}:{self.qdrant_port}")
         logger.info(f"  - Коллекция: {self.collection_name}")
         logger.info(f"  - Модель эмбеддингов: {self.embedding_model}")
+
+    def _vector_search(
+        self,
+        query_vector: List[float],
+        query_filter: Optional[Filter],
+        limit: int,
+    ):
+        """Векторный поиск: совместимость search (старый API) и query_points (qdrant-client 1.10+)."""
+        try:
+            if hasattr(self.client, "search"):
+                return self.client.search(
+                    collection_name=self.collection_name,
+                    query_vector=query_vector,
+                    query_filter=query_filter,
+                    limit=limit,
+                )
+        except Exception:
+            pass
+        # Новый API (query_points)
+        if hasattr(self.client, "query_points"):
+            resp = self.client.query_points(
+                collection_name=self.collection_name,
+                query=query_vector,
+                query_filter=query_filter,
+                limit=limit,
+                with_payload=True,
+            )
+            points = getattr(resp, "points", None) or getattr(resp, "result", None) or []
+            # Нормализуем: у каждого элемента должны быть .payload и .score
+            return points
+        raise RuntimeError(
+            "Qdrant client не поддерживает ни search, ни query_points. Обновите qdrant-client."
+        )
         
     def search_similar_examples(
         self,
@@ -103,15 +136,9 @@ class RAGAssistant:
         
         query_filter = Filter(must=filter_conditions) if filter_conditions else None
         
-        # Поиск в Qdrant
+        # Поиск в Qdrant (совместимость: search в старых версиях, query_points в новых)
         try:
-            results = self.client.search(
-                collection_name=self.collection_name,
-                query_vector=query_embedding,
-                query_filter=query_filter,
-                limit=limit
-            )
-            
+            results = self._vector_search(query_embedding, query_filter, limit)
             # Форматирование результатов
             examples = []
             for result in results:
@@ -197,46 +224,32 @@ class RAGAssistant:
         self,
         query: str,
         content_type: Optional[str] = None,
-        limit: Optional[int] = None
+        limit: Optional[int] = None,
+        page_id: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
         """
-        Семантический поиск по KB
-        
-        Args:
-            query: Поисковый запрос
-            content_type: Тип контента для фильтрации ('qa_example', 'documentation', 'ddl', 'view', 'confluence_doc')
-            limit: Количество результатов (по умолчанию из SQL4AConfig)
-        
-        Returns:
-            Список найденных документов
+        Семантический поиск по KB.
+        page_id: для confluence_section — только чанки с этой страницы (удобно для запросов по ссылке на вложение).
         """
-        # Используем настройки из sql4A
         limit = limit or SQL4AConfig.DEFAULT_SEARCH_LIMIT
-        
-        # Генерация эмбеддинга (как в sql4A - с нормализацией)
         query_embedding = self.model.encode(
-            query, 
+            query,
             normalize_embeddings=SQL4AConfig.NORMALIZE_EMBEDDINGS
         ).tolist()
-        
-        # Построение фильтра
         filter_conditions = []
         if content_type:
             filter_conditions.append(
                 FieldCondition(key="type", match=MatchValue(value=content_type))
             )
-        
+        if page_id:
+            filter_conditions.append(
+                FieldCondition(key="page_id", match=MatchValue(value=str(page_id)))
+            )
         query_filter = Filter(must=filter_conditions) if filter_conditions else None
         
-        # Поиск
+        # Поиск (совместимость: search / query_points)
         try:
-            results = self.client.search(
-                collection_name=self.collection_name,
-                query_vector=query_embedding,
-                query_filter=query_filter,
-                limit=limit
-            )
-            
+            results = self._vector_search(query_embedding, query_filter, limit)
             # Форматирование результатов
             documents = []
             for result in results:
@@ -272,7 +285,143 @@ class RAGAssistant:
         except Exception as e:
             logger.error(f"Ошибка при семантическом поиске: {e}")
             return []
-    
+
+    def get_confluence_page_ids(self, limit: int = 2000) -> List[str]:
+        """Список page_id, по которым есть чанки type=confluence_section (для диагностики поиска по URL)."""
+        try:
+            result, _ = self.client.scroll(
+                collection_name=self.collection_name,
+                scroll_filter=Filter(
+                    must=[FieldCondition(key="type", match=MatchValue(value="confluence_section"))]
+                ),
+                limit=limit,
+                with_payload=True,
+                with_vectors=False,
+            )
+            seen = set()
+            for point in result:
+                pid = point.payload.get("page_id")
+                if pid is not None:
+                    seen.add(str(pid).strip())
+            return sorted(seen)
+        except Exception as e:
+            logger.error("get_confluence_page_ids: %s", e)
+            return []
+
+    def get_confluence_chunks_by_page_id(
+        self, page_id: str, limit: int = 20
+    ) -> List[Dict[str, Any]]:
+        """Чанки Confluence по page_id. Сначала фильтр в Qdrant (type + page_id), иначе scroll всего и фильтр в коде."""
+        page_id = str(page_id).strip()
+        try:
+            # Пробуем фильтр по page_id в Qdrant (данные после перезагрузки — строка)
+            result, _ = self.client.scroll(
+                collection_name=self.collection_name,
+                scroll_filter=Filter(
+                    must=[
+                        FieldCondition(key="type", match=MatchValue(value="confluence_section")),
+                        FieldCondition(key="page_id", match=MatchValue(value=page_id)),
+                    ]
+                ),
+                limit=limit,
+                with_payload=True,
+                with_vectors=False,
+            )
+            documents = []
+            for point in result:
+                payload = point.payload or {}
+                documents.append({
+                    "type": "confluence_section",
+                    "content": payload.get("content", ""),
+                    "similarity": 1.0,
+                    "title": payload.get("title", ""),
+                    "section_title": payload.get("section_title", ""),
+                    "source_url": payload.get("source_url", ""),
+                    "page_id": payload.get("page_id", ""),
+                })
+            if documents:
+                return documents
+            # Запасной вариант: scroll без фильтра по page_id, фильтр в коде (если в payload page_id был int)
+            result, _ = self.client.scroll(
+                collection_name=self.collection_name,
+                scroll_filter=Filter(
+                    must=[FieldCondition(key="type", match=MatchValue(value="confluence_section"))]
+                ),
+                limit=5000,
+                with_payload=True,
+                with_vectors=False,
+            )
+            for point in result:
+                payload = point.payload or {}
+                pid = payload.get("page_id")
+                if pid is None:
+                    continue
+                if str(pid).strip() != page_id:
+                    continue
+                documents.append({
+                    "type": "confluence_section",
+                    "content": payload.get("content", ""),
+                    "similarity": 1.0,
+                    "title": payload.get("title", ""),
+                    "section_title": payload.get("section_title", ""),
+                    "source_url": payload.get("source_url", ""),
+                    "page_id": payload.get("page_id", ""),
+                })
+                if len(documents) >= limit:
+                    break
+            return documents
+        except Exception as e:
+            logger.error("get_confluence_chunks_by_page_id: %s", e)
+            return []
+
+    def get_confluence_chunks_by_section_title_contains(
+        self, substring: str, limit: int = 15
+    ) -> List[Dict[str, Any]]:
+        """Чанки Confluence, у которых в section_title встречается substring (для запросов «опишите документ X»)."""
+        if not (substring or "").strip():
+            return []
+        substring = substring.strip()
+        # Нормализация дефисов/минусов (разные символы в запросе и в payload)
+        def _norm(s):
+            if not s:
+                return ""
+            s = s.lower().strip()
+            for ch in ("\u2013", "\u2014", "\u2212", "\u2010", "\u2011"):
+                s = s.replace(ch, "-")
+            return s
+        sub_norm = _norm(substring)
+        try:
+            result, _ = self.client.scroll(
+                collection_name=self.collection_name,
+                scroll_filter=Filter(
+                    must=[FieldCondition(key="type", match=MatchValue(value="confluence_section"))]
+                ),
+                limit=500,
+                with_payload=True,
+                with_vectors=False,
+            )
+            documents = []
+            for point in result:
+                payload = point.payload or {}
+                stitle = (payload.get("section_title") or "")
+                if not sub_norm or sub_norm not in _norm(stitle):
+                    continue
+                documents.append({
+                    "type": "confluence_section",
+                    "content": payload.get("content", ""),
+                    "similarity": 1.0,
+                    "title": payload.get("title", ""),
+                    "section_title": stitle,
+                    "source_url": payload.get("source_url", ""),
+                    "page_id": payload.get("page_id", ""),
+                })
+                if len(documents) >= limit:
+                    break
+            return documents
+        except Exception as e:
+            logger.error("get_confluence_chunks_by_section_title_contains: %s", e)
+            return []
+
     def get_context_for_sql_generation(
         self,
         question: str,

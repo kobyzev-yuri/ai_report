@@ -20,6 +20,8 @@ logger = logging.getLogger(__name__)
 DEFAULT_MAX_ATTACHMENT_SIZE = 50 * 1024 * 1024
 # Максимальная длина извлечённого текста из одного вложения (символы)
 DEFAULT_MAX_ATTACHMENT_TEXT_LENGTH = 500_000
+# Служебные/временные форматы Confluence — не скачивать и не индексировать
+ATTACHMENT_SKIP_EXTENSIONS = {".tmp", ".render", ".tfss"}
 
 
 def _strip_html_to_text(html: str) -> str:
@@ -136,10 +138,11 @@ class ConfluenceKBGenerator:
         self.output_dir.mkdir(parents=True, exist_ok=True)
 
     def _process_attachments(
-        self, page_id: str
+        self, page_id: str, page_title: Optional[str] = None
     ) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
         """
-        Скачать вложения страницы, извлечь текст парсерами (PDF, DOCX, Draw.io, изображения OCR).
+        Скачать вложения страницы, извлечь текст парсерами (PDF, DOCX, Draw.io, изображения OCR + Gemini Vision).
+        page_title передаётся в vision-аннотацию изображений как контекст.
         Возвращает (список секций для content[], список записей для attachments_processed).
         """
         sections: List[Dict[str, Any]] = []
@@ -153,6 +156,11 @@ class ConfluenceKBGenerator:
             return sections, processed
         for att in attachments:
             title_att = att.get("title") or "вложение"
+            _ext_match = re.search(r"\.[a-z0-9]+$", (title_att or "").lower())
+            ext = _ext_match.group(0) if _ext_match else ""
+            if ext in ATTACHMENT_SKIP_EXTENSIONS:
+                processed.append({"filename": title_att, "status": "skipped", "reason": "служебный формат Confluence"})
+                continue
             size = att.get("extensions", {}).get("fileSize") or 0
             if size and size > self.max_attachment_size:
                 logger.info("Пропуск вложения %s: размер %s > %s", title_att, size, self.max_attachment_size)
@@ -182,7 +190,9 @@ class ConfluenceKBGenerator:
                 processed.append({"filename": title_att, "status": "skipped", "reason": "размер превышает лимит"})
                 continue
             content_type = (att.get("extensions") or {}).get("mediaType") or ""
-            text, err = parse_attachment(data, title_att, content_type)
+            text, err = parse_attachment(
+                data, title_att, content_type, context_text=page_title
+            )
             if err:
                 sections.append({
                     "title": f"Вложение: {title_att}",
@@ -203,13 +213,15 @@ class ConfluenceKBGenerator:
 
     def page_to_kb_doc(self, page: Dict[str, Any], base_url: str) -> Dict[str, Any]:
         """Преобразование одной страницы Confluence в документ формата KB (тело страницы + вложения)."""
-        page_id = page.get("id", "")
+        page_id = str(page.get("id", "") or "").strip()
         title = page.get("title", "Без названия")
         storage = self.client.get_page_content_storage(page)
         version_date = self.client.get_page_version_date(page)
         link = f"{base_url}/pages/viewpage.action?pageId={page_id}" if base_url else ""
         content = _parse_storage_to_content(storage)
-        attachment_sections, attachments_processed = self._process_attachments(page_id)
+        attachment_sections, attachments_processed = self._process_attachments(
+            page_id, page_title=title
+        )
         if attachment_sections:
             content = content + attachment_sections
         doc: Dict[str, Any] = {
@@ -268,30 +280,59 @@ class ConfluenceKBGenerator:
     ) -> List[Dict[str, Any]]:
         """
         Синхронизация выбранных страниц по ID или URL (из URL извлекается pageId).
-        Сохраняет в confluence_<output_suffix>.json.
+        В каждой строке можно добавить описание для удобства: «URL  описание» или «URL\tописание».
+        Сохраняет в confluence_<output_suffix>.json; описание попадает в source.engineer_comment.
         """
         import re
         base_url = base_url or self.client.base_url
-        ids: List[str] = []
+        # Парсим строки: url_or_id [табуляция или два+ пробела] описание
+        parsed: List[Tuple[str, Optional[str]]] = []
         for raw in page_ids:
             raw = raw.strip()
             if not raw:
                 continue
-            # Число — это ID
-            if raw.isdigit():
-                ids.append(raw)
-                continue
-            # Иначе считаем URL и вытаскиваем pageId=
-            m = re.search(r"pageId=(\d+)", raw, re.IGNORECASE)
-            if m:
-                ids.append(m.group(1))
+            if "\t" in raw:
+                url_part, desc = raw.split("\t", 1)
+                url_part, desc = url_part.strip(), (desc or "").strip() or None
+            elif re.search(r"  +", raw):
+                parts = re.split(r"  +", raw, maxsplit=1)
+                url_part = (parts[0] or "").strip()
+                desc = (parts[1] or "").strip() or None if len(parts) > 1 else None
             else:
-                logger.warning("Не удалось извлечь pageId из строки: %s", raw[:80])
+                url_part, desc = raw, None
+            if not url_part:
+                continue
+            # Извлечь pageId из url_part
+            if url_part.isdigit():
+                parsed.append((url_part, desc))
+                continue
+            m = re.search(r"pageId=(\d+)", url_part, re.IGNORECASE)
+            if m:
+                parsed.append((m.group(1), desc))
+                continue
+            m_att = re.search(r"/download/attachments/(\d+)(?:/|$|\?)", url_part, re.IGNORECASE)
+            if m_att:
+                parsed.append((m_att.group(1), desc))
+                continue
+            m_pages = re.search(r"/pages/(\d+)(?:/|$|\?)", url_part, re.IGNORECASE)
+            if m_pages:
+                parsed.append((m_pages.group(1), desc))
+                continue
+            logger.warning("Не удалось извлечь pageId из строки: %s", url_part[:80])
+        # Дедупликация с сохранением порядка; при повторе page_id оставляем первое описание
+        seen: set = set()
+        unique_list: List[Tuple[str, Optional[str]]] = []
+        for page_id, desc in parsed:
+            if page_id not in seen:
+                seen.add(page_id)
+                unique_list.append((page_id, desc))
         docs: List[Dict[str, Any]] = []
-        for page_id in ids:
+        for page_id, engineer_comment in unique_list:
             try:
                 page = self.client.get_page_by_id(page_id)
                 doc = self.page_to_kb_doc(page, base_url)
+                if engineer_comment:
+                    (doc.setdefault("source", {}))["engineer_comment"] = engineer_comment
                 docs.append(doc)
             except Exception as e:
                 logger.warning("Ошибка обработки страницы %s: %s", page_id, e)

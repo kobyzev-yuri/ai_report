@@ -1,7 +1,10 @@
 #!/usr/bin/env python3
 """
-Парсеры вложений Confluence: извлечение текста из PDF, DOCX, Draw.io (схемы сети),
-изображений (OCR) для полной индексации контента в KB.
+Парсеры вложений Confluence: интеллектуальная обработка через Gemini (без OCR).
+- PDF: текст страниц + картинки в PDF описываются через Gemini Vision.
+- Draw.io: из формата извлекается структура, описание и смысловые блоки — через Gemini.
+- Изображения: только Gemini Vision (описание и смысловые блоки).
+- DOCX: извлечение текста как прежде.
 """
 import base64
 import io
@@ -21,6 +24,11 @@ DOCX_MIME = (
     "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
     "application/msword",
 )
+XLS_EXT = (".xls",)
+XLS_MIME = ("application/vnd.ms-excel",)
+# .xlsx — опционально, через openpyxl
+XLSX_EXT = (".xlsx",)
+XLSX_MIME = ("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",)
 DRAWIO_EXT = (".drawio", ".drawio.xml", ".xml")
 # Draw.io в Confluence часто как application/xml или octet-stream
 IMAGE_EXT = (".png", ".jpg", ".jpeg", ".gif", ".bmp", ".tiff", ".tif", ".webp")
@@ -34,9 +42,14 @@ def _normalize_ext(filename: str) -> str:
     return filename[p:].lower() if p >= 0 else ""
 
 
-def extract_text_from_pdf(data: bytes, filename: str = "") -> Tuple[str, Optional[str]]:
+def extract_text_from_pdf(
+    data: bytes,
+    filename: str = "",
+    context_text: Optional[str] = None,
+) -> Tuple[str, Optional[str]]:
     """
-    Извлечь текст из PDF. Возвращает (plain_text, error_message).
+    PDF: извлечь текст страниц и картинки. Картинки описываются через Gemini Vision;
+    текст страниц остаётся как есть.
     """
     try:
         import fitz  # PyMuPDF
@@ -44,15 +57,128 @@ def extract_text_from_pdf(data: bytes, filename: str = "") -> Tuple[str, Optiona
         return "", "PyMuPDF не установлен: pip install pymupdf"
     try:
         doc = fitz.open(stream=data, filetype="pdf")
-        parts = []
-        for page in doc:
-            parts.append(page.get_text())
+        parts: list = []
+        for page_num in range(len(doc)):
+            page = doc[page_num]
+            page_text = page.get_text().strip()
+            if page_text:
+                parts.append("Стр. %s:\n%s" % (page_num + 1, page_text))
+            # Картинки на странице — описание через Gemini Vision
+            try:
+                from kb_billing.rag.vision_annotation import describe_image, is_vision_available
+                if is_vision_available():
+                    for xref in page.get_images():
+                        if not isinstance(xref, (list, tuple)):
+                            continue
+                        img_xref = xref[0]
+                        try:
+                            img_info = doc.extract_image(img_xref)
+                            img_bytes = img_info.get("image")
+                            ext = (img_info.get("ext") or "png").lower()
+                            mime = "image/png" if ext == "png" else "image/jpeg"
+                            if ext == "webp":
+                                mime = "image/webp"
+                            if img_bytes:
+                                ctx = (context_text or "") + " PDF: %s, стр. %s" % (filename or "?", page_num + 1)
+                                desc = describe_image(img_bytes, mime_type=mime, context_text=ctx.strip())
+                                if desc:
+                                    parts.append("Изображение на стр. %s:\n%s" % (page_num + 1, desc))
+                        except Exception as e:
+                            logger.debug("Извлечение изображения из PDF: %s", e)
+            except Exception as e:
+                logger.warning("Vision для PDF-изображений не удался: %s", e)
         doc.close()
-        text = "\n\n".join(p.strip() for p in parts if p.strip())
-        return text.strip() or "(документ без извлекаемого текста)", None
+        text = "\n\n".join(parts) if parts else "(документ без текста и без описанных изображений)"
+        return text.strip(), None
     except Exception as e:
         logger.warning("PDF parse %s: %s", filename or "?", e)
         return "", str(e)
+
+
+def extract_text_from_xls(data: bytes, filename: str = "") -> Tuple[str, Optional[str]]:
+    """
+    Извлечь текст из XLS (Excel 97–2003): названия листов и содержимое ячеек.
+    Для контекста в KB — списки устройств, конфигурации, таблицы.
+    """
+    try:
+        import xlrd
+    except ImportError:
+        return "", "xlrd не установлен: pip install xlrd"
+    try:
+        book = xlrd.open_workbook(file_contents=data)
+    except Exception as e:
+        logger.warning("XLS open %s: %s", filename or "?", e)
+        return "", str(e)
+    parts = []
+    max_cells = 50000  # ограничение на число ячеек, чтобы не раздувать чанк
+    total_cells = 0
+    for sheet_idx in range(book.nsheets):
+        sheet = book.sheet_by_index(sheet_idx)
+        name = sheet.name or f"Лист{sheet_idx + 1}"
+        parts.append(f"Лист: {name}")
+        for row_idx in range(sheet.nrows):
+            if total_cells >= max_cells:
+                parts.append("[... таблица обрезана по лимиту ячеек ...]")
+                break
+            row_vals = []
+            for col_idx in range(sheet.ncols):
+                cell = sheet.cell(row_idx, col_idx)
+                if cell.ctype == xlrd.XL_CELL_EMPTY:
+                    row_vals.append("")
+                elif cell.ctype == xlrd.XL_CELL_TEXT:
+                    row_vals.append(cell.value.strip() if cell.value else "")
+                elif cell.ctype == xlrd.XL_CELL_NUMBER:
+                    if cell.value == int(cell.value):
+                        row_vals.append(str(int(cell.value)))
+                    else:
+                        row_vals.append(str(cell.value))
+                elif cell.ctype == xlrd.XL_CELL_DATE:
+                    row_vals.append(str(cell.value))
+                else:
+                    row_vals.append(str(cell.value) if cell.value else "")
+                total_cells += 1
+            line = " | ".join(row_vals).strip()
+            if line:
+                parts.append(line)
+        if total_cells >= max_cells:
+            break
+    text = "\n".join(parts).strip() or "(таблица пуста)"
+    return text, None
+
+
+def extract_text_from_xlsx(data: bytes, filename: str = "") -> Tuple[str, Optional[str]]:
+    """
+    Извлечь текст из XLSX (Excel 2007+). Аналогично XLS — листы и ячейки для контекста KB.
+    """
+    try:
+        import openpyxl
+    except ImportError:
+        return "", "openpyxl не установлен: pip install openpyxl"
+    try:
+        wb = openpyxl.load_workbook(io.BytesIO(data), read_only=True, data_only=True)
+    except Exception as e:
+        logger.warning("XLSX open %s: %s", filename or "?", e)
+        return "", str(e)
+    parts = []
+    max_cells = 50000
+    total_cells = 0
+    for name in wb.sheetnames:
+        parts.append(f"Лист: {name}")
+        sheet = wb[name]
+        for row in sheet.iter_rows(values_only=True):
+            if total_cells >= max_cells:
+                parts.append("[... таблица обрезана по лимиту ячеек ...]")
+                break
+            row_vals = [str(c) if c is not None else "" for c in row]
+            line = " | ".join(row_vals).strip()
+            if line:
+                parts.append(line)
+            total_cells += len(row_vals)
+        if total_cells >= max_cells:
+            break
+    wb.close()
+    text = "\n".join(parts).strip() or "(таблица пуста)"
+    return text, None
 
 
 def extract_text_from_docx(data: bytes, filename: str = "") -> Tuple[str, Optional[str]]:
@@ -101,12 +227,14 @@ def _drawio_decompress(diagram_content: str) -> Optional[str]:
         return None
 
 
-def extract_text_from_drawio(data: bytes, filename: str = "") -> Tuple[str, Optional[str]]:
+def extract_text_from_drawio(
+    data: bytes,
+    filename: str = "",
+    context_text: Optional[str] = None,
+) -> Tuple[str, Optional[str]]:
     """
-    Извлечь текст из схемы Draw.io (.drawio, .drawio.xml) — схемы сети в формате draw.io.
-    Парсит XML (в т.ч. сжатый mxfile/diagram), собирает все атрибуты value и текст из mxCell —
-    подписи узлов, названия блоков, соединений. Для индексации схем сети в KB.
-    Возвращает (plain_text, error_message).
+    Draw.io: извлечь структуру (подписи, узлы) из формата, затем описание и смысловые блоки через Gemini.
+    Если Gemini недоступен — возвращается сырой извлечённый текст.
     """
     try:
         text = data.decode("utf-8", errors="replace")
@@ -173,33 +301,66 @@ def extract_text_from_drawio(data: bytes, filename: str = "") -> Tuple[str, Opti
             seen.add(t)
             unique.append(t)
     result = "\n".join(unique)
-    return result or "(схема без текстовых подписей)", None
-
-
-def extract_text_from_image(data: bytes, filename: str = "") -> Tuple[str, Optional[str]]:
-    """
-    Извлечь текст из изображения (OCR) и/или аннотировать схему/диаграмму.
-    Сейчас: OCR через pytesseract при наличии; в будущем — опционально vision API для описания схем.
-    Возвращает (plain_text, error_message).
-    """
+    raw_text = result or "(схема без текстовых подписей)"
     try:
-        import pytesseract
-        from PIL import Image
-    except ImportError:
-        return "", "Для OCR нужны: pip install pytesseract pillow; установите tesseract-ocr в системе"
-    try:
-        img = Image.open(io.BytesIO(data))
-        if img.mode not in ("RGB", "L"):
-            img = img.convert("RGB")
-        text = pytesseract.image_to_string(img, lang="rus+eng")
-        text = (text or "").strip()
-        if text:
-            return text, None
-        # Нет текста по OCR — можно оставить пометку для будущей аннотации диаграмм
-        return "[Изображение/схема — текст по OCR не извлечён; для аннотации диаграмм подключите vision API]", None
+        from kb_billing.rag.vision_annotation import describe_drawio_content, is_vision_available
+        if is_vision_available():
+            description = describe_drawio_content(raw_text, context_text=context_text)
+            if description:
+                return description, None
     except Exception as e:
-        logger.warning("Image OCR %s: %s", filename or "?", e)
-        return "", str(e)
+        logger.warning("Gemini описание draw.io не удалось: %s", e)
+    return raw_text, None
+
+
+def _mime_for_image(filename: str, data: bytes) -> str:
+    """Определить MIME по имени или по magic bytes."""
+    ext = (filename or "").lower()
+    if ext.endswith(".png"):
+        return "image/png"
+    if ext.endswith(".webp"):
+        return "image/webp"
+    if ext.endswith(".gif"):
+        return "image/gif"
+    if ext.endswith((".jpg", ".jpeg")):
+        return "image/jpeg"
+    if ext.endswith((".tiff", ".tif")):
+        return "image/tiff"
+    if len(data) >= 8 and data[:8] == b"\x89PNG\r\n\x1a\n":
+        return "image/png"
+    if len(data) >= 12 and data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+        return "image/webp"
+    if len(data) >= 2 and data[:2] in (b"\xff\xd8", b"\xFF\xD8"):
+        return "image/jpeg"
+    return "image/png"
+
+
+def extract_text_from_image(
+    data: bytes,
+    filename: str = "",
+    context_text: Optional[str] = None,
+) -> Tuple[str, Optional[str]]:
+    """
+    Интеллектуальное описание изображения/схемы только через Gemini Vision (без OCR).
+    Возвращает описание и смысловые блоки или placeholder при недоступности Vision.
+    """
+    try:
+        from kb_billing.rag.vision_annotation import describe_image, is_vision_available
+        if not is_vision_available():
+            return "[Изображение/схема — задайте GEMINI_API_KEY или OPENAI_API_KEY в config.env для аннотации через Gemini Vision]", None
+        mime = _mime_for_image(filename, data)
+        description = describe_image(
+            data,
+            mime_type=mime,
+            filename=filename,
+            context_text=context_text,
+        )
+        if description:
+            return description, None
+        return "[Изображение/схема — Gemini Vision не вернул описание]", None
+    except Exception as e:
+        logger.warning("Vision аннотация изображения не удалась: %s", e)
+        return "[Изображение/схема — ошибка аннотации: %s]" % (e,), None
 
 
 def parse_attachment(
@@ -208,26 +369,38 @@ def parse_attachment(
     content_type: Optional[str] = None,
     *,
     skip_images_without_ocr: bool = True,
+    context_text: Optional[str] = None,
 ) -> Tuple[str, Optional[str]]:
     """
-    Универсальный парсер: по имени файла и/или content_type выбирает парсер,
-    извлекает текст. Возвращает (plain_text, error_message).
-    skip_images_without_ocr: если True и OCR недоступен — не возвращать ошибку, а короткую пометку.
+    Универсальный парсер: PDF (текст + картинки через Vision), DOCX, draw.io (описание через Gemini),
+    изображения (только Gemini Vision). context_text — контекст страницы для Gemini.
+    skip_images_without_ocr: если True и для изображения Vision недоступен — не ошибка, а короткая пометка.
     """
     ext = _normalize_ext(filename)
     ct = (content_type or "").strip().lower()
 
     if ext in PDF_EXT or ct in PDF_MIME:
-        return extract_text_from_pdf(data, filename)
+        return extract_text_from_pdf(data, filename, context_text=context_text)
     if ext in DOCX_EXT or ct in DOCX_MIME:
         return extract_text_from_docx(data, filename)
-    # Draw.io — схемы сети (.drawio, .drawio.xml); .xml только если имя похоже на drawio
+    if ext in XLS_EXT or ct in XLS_MIME:
+        return extract_text_from_xls(data, filename)
+    if ext in XLSX_EXT or ct in XLSX_MIME:
+        return extract_text_from_xlsx(data, filename)
+    # Draw.io — по расширению или по содержимому (в Confluence часто без расширения: "Gazcom VNO NMS access")
     if ext in (".drawio", ".drawio.xml") or (ext == ".xml" and "drawio" in (filename or "").lower()):
-        return extract_text_from_drawio(data, filename)
+        return extract_text_from_drawio(data, filename, context_text=context_text)
+    # Draw.io без расширения (в Confluence: "Gazcom VNO NMS access"): по mediaType или по содержимому
+    if (not ext or ext == ".xml") and (
+        "xml" in ct or "octet-stream" in ct or not ct
+    ):
+        peek = (data[: 2048] if len(data) > 2048 else data).decode("utf-8", errors="ignore")
+        if "<mxfile" in peek or "<mxGraphModel" in peek or (peek.lstrip().startswith("<?xml") and "mxfile" in peek):
+            return extract_text_from_drawio(data, filename, context_text=context_text)
     if ext in IMAGE_EXT or (ct and ct.startswith("image/")):
-        text, err = extract_text_from_image(data, filename)
+        text, err = extract_text_from_image(data, filename, context_text=context_text)
         if err and skip_images_without_ocr:
-            return "[Вложение: изображение/диаграмма — OCR не выполнен]", None
+            return "[Вложение: изображение — задайте GEMINI_API_KEY для аннотации через Gemini Vision]", None
         return text, err
 
     # Текстовые типы — как есть (если в будущем добавим)
@@ -236,4 +409,9 @@ def parse_attachment(
             return data.decode("utf-8", errors="replace").strip(), None
         except Exception:
             pass
+    # Последняя попытка: по содержимому draw.io без расширения и без подходящего mediaType
+    if len(data) >= 50:
+        peek = (data[: 2048] if len(data) > 2048 else data).decode("utf-8", errors="ignore")
+        if "<mxfile" in peek or "<mxGraphModel" in peek:
+            return extract_text_from_drawio(data, filename, context_text=context_text)
     return "", f"Неподдерживаемый тип вложения: {filename} ({content_type or '?'})"

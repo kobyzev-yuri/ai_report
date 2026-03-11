@@ -5,9 +5,34 @@
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
+# Окружение: активировать venv с Python 3.9+ если есть (google-genai / Спутниковый ассистент)
+if [ -f "venv39/bin/activate" ]; then
+    set -a
+    source "venv39/bin/activate"
+    set +a
+    STREAMLIT_CMD="python -m streamlit"
+elif [ -f "venv311/bin/activate" ]; then
+    set -a
+    source "venv311/bin/activate"
+    set +a
+    STREAMLIT_CMD="python -m streamlit"
+elif [ -f "venv/bin/activate" ]; then
+    set -a
+    source "venv/bin/activate"
+    set +a
+    STREAMLIT_CMD="python -m streamlit"
+else
+    STREAMLIT_CMD="streamlit"
+fi
+
 # Всегда Oracle на порту 8504
 APP_FILE="streamlit_report_oracle_backup.py"
 PORT=8504
+
+# Рабочий каталог = корень проекта (здесь kb_billing/, config.env). Confluence KB читается из kb_billing/confluence_docs/
+if [ ! -d "$SCRIPT_DIR/kb_billing/confluence_docs" ]; then
+    echo "⚠️  Каталог kb_billing/confluence_docs не найден (запуск не из корня проекта?)."
+fi
 
 # Загрузка конфигурации из config.env
 if [ -f "$SCRIPT_DIR/config.env" ]; then
@@ -54,12 +79,13 @@ echo "========================================"
 echo ""
 echo "Файл: $APP_FILE"
 echo "Порт: $PORT"
+echo "Запуск: $STREAMLIT_CMD"
 echo "Логи: $LOG_FILE"
 echo "PID файл: $PID_FILE"
 echo ""
 
 # Запуск в фоне
-nohup streamlit run "$APP_FILE" ${STREAMLIT_ARGS} > "$LOG_FILE" 2>&1 &
+nohup $STREAMLIT_CMD run "$APP_FILE" ${STREAMLIT_ARGS} > "$LOG_FILE" 2>&1 &
 STREAMLIT_PID=$!
 
 # Сохраняем PID

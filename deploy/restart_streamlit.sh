@@ -106,8 +106,19 @@ else
     
     BASE_URL_PATH="/ai_report"
     STREAMLIT_ARGS="--server.port $PORT --server.headless true --server.baseUrlPath=${BASE_URL_PATH} --server.enableCORS false --server.enableXsrfProtection false"
-    
-    nohup streamlit run streamlit_report_oracle_backup.py ${STREAMLIT_ARGS} > "$LOG_FILE" 2>&1 &
+    if [ -f "venv39/bin/activate" ]; then
+        set -a; source "venv39/bin/activate"; set +a
+        STREAMLIT_CMD="python -m streamlit"
+    elif [ -f "venv311/bin/activate" ]; then
+        set -a; source "venv311/bin/activate"; set +a
+        STREAMLIT_CMD="python -m streamlit"
+    elif [ -f "venv/bin/activate" ]; then
+        set -a; source "venv/bin/activate"; set +a
+        STREAMLIT_CMD="python -m streamlit"
+    else
+        STREAMLIT_CMD="streamlit"
+    fi
+    nohup $STREAMLIT_CMD run streamlit_report_oracle_backup.py ${STREAMLIT_ARGS} > "$LOG_FILE" 2>&1 &
     STREAMLIT_PID=$!
     echo $STREAMLIT_PID > "$PID_FILE"
     
