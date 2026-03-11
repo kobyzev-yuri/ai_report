@@ -88,8 +88,14 @@ SSH_CMD="ssh -p 1194" ./sync_and_update_kb.sh root@82.114.2.2
 | Этап | Действие |
 |------|----------|
 | Локально | Правки в корне → запуск Streamlit локально, проверка вкладок и логики |
-| Пакет | `./prepare_deployment.sh` → проверка `deploy/` (наличие tabs, auth, KB) |
+| Пакет | `./prepare_deployment.sh` → проверка `deploy/` (наличие tabs, auth, KB, tests/) |
 | Сервер | Синхронизация → `./restart_streamlit.sh` на сервере → проверка в браузере и по логам |
+
+Тест биллинг-ассистента (топ-5 доходных клиентов) — **запускать на сервере** (нужны Qdrant, config.env с OPENAI_API_KEY, обученная KB):
+
+```bash
+ssh -p 1194 root@82.114.2.2 "cd /usr/local/projects/ai_report && python3 -m tests.test_billing_assistant_top5"
+```
 
 Проверка здоровья на сервере:
 

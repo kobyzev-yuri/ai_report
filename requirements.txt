@@ -40,6 +40,8 @@ pytesseract
 # RAG and Vector Database
 qdrant-client>=1.7.0
 sentence-transformers>=2.2.0
+# Биллинг-ассистент: генерация SQL через LLM (OpenAI-совместимый API, в т.ч. proxyapi.ru)
+openai>=1.0.0
 # На сервере без NVIDIA GPU сначала установите CPU-версию PyTorch, чтобы не тянуть ~1 GB CUDA:
 #   pip install torch --index-url https://download.pytorch.org/whl/cpu
 # затем: pip install -r requirements.txt

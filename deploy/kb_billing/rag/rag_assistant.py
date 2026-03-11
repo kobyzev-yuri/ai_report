@@ -1195,7 +1195,7 @@ class RAGAssistant:
             logger.error(f"Ошибка при генерации SQL через LLM: {e}")
             import traceback
             logger.error(traceback.format_exc())
-            return None
+            raise  # пробрасываем, чтобы UI показал реальное сообщение об ошибке
 
 
 if __name__ == "__main__":

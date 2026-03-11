@@ -271,6 +271,7 @@ def show_assistant_tab():
         )
         if st.button("📌 Подставить шаблон: Отчёт Новосибирск (AP 523, 524)", key="template_novosibirsk_btn"):
             st.session_state["assistant_question_input"] = TEMPLATE_NOVOSIBIRSK
+            st.session_state["assistant_question_form_ta"] = TEMPLATE_NOVOSIBIRSK  # ключ виджета text_area в форме
             st.rerun()
         with st.form("assistant_question_form", clear_on_submit=False):
             question_input = st.text_area(
@@ -315,32 +316,56 @@ def show_assistant_tab():
                 # Получение контекста
                 context = assistant.get_context_for_sql_generation(question, max_examples=5)
                 
-                # Попытка генерации SQL через LLM
-                api_key = os.getenv("OPENAI_API_KEY")
-                # Поддержка обоих вариантов: OPENAI_BASE_URL (как в sql4A) и OPENAI_API_BASE
-                api_base = os.getenv("OPENAI_BASE_URL") or os.getenv("OPENAI_API_BASE")
-                
+                # Если в KB есть пример с тем же вопросом — берём его SQL без вызова LLM (шаблон «Отчёт Новосибирск» и др.)
                 generated_sql = None
-                if api_key:
-                    try:
-                        generated_sql = assistant.generate_sql_with_llm(
-                            question=question,
-                            context=context,
-                            api_key=api_key,
-                            api_base=api_base
-                        )
-                        # Сохраняем сгенерированный SQL и вопрос
-                        if generated_sql:
-                            st.session_state.last_generated_sql = generated_sql
-                            st.session_state.last_generated_question = question
-                            # Очищаем ошибку, если SQL успешно сгенерирован
-                            if "sql_generation_error" in st.session_state:
-                                del st.session_state["sql_generation_error"]
-                    except Exception as e:
-                        error_msg = str(e)
-                        st.session_state["sql_generation_error"] = error_msg
-                        st.session_state.last_generated_sql = None
-                        st.session_state.last_generated_question = None
+                examples = (context or {}).get("examples") or []
+                question_stripped = (question or "").strip()
+                for ex in examples:
+                    if (ex.get("question") or "").strip() == question_stripped and (ex.get("sql") or "").strip():
+                        generated_sql = (ex.get("sql") or "").strip()
+                        break
+                if generated_sql:
+                    # Взяли SQL из примера KB — обновляем session_state как при успешной генерации
+                    st.session_state.last_generated_sql = generated_sql
+                    st.session_state.last_generated_question = question
+                    if "sql_generation_error" in st.session_state:
+                        del st.session_state["sql_generation_error"]
+                
+                if not generated_sql:
+                    # Попытка генерации SQL через LLM
+                    api_key = os.getenv("OPENAI_API_KEY")
+                    # Поддержка обоих вариантов: OPENAI_BASE_URL (как в sql4A) и OPENAI_API_BASE
+                    api_base = os.getenv("OPENAI_BASE_URL") or os.getenv("OPENAI_API_BASE")
+                    
+                    if api_key:
+                        try:
+                            generated_sql = assistant.generate_sql_with_llm(
+                                question=question,
+                                context=context,
+                                api_key=api_key,
+                                api_base=api_base
+                            )
+                            # Сохраняем сгенерированный SQL и вопрос
+                            if generated_sql:
+                                st.session_state.last_generated_sql = generated_sql
+                                st.session_state.last_generated_question = question
+                                # Очищаем ошибку, если SQL успешно сгенерирован
+                                if "sql_generation_error" in st.session_state:
+                                    del st.session_state["sql_generation_error"]
+                        except Exception as e:
+                            error_msg = str(e)
+                            st.session_state["sql_generation_error"] = error_msg
+                            st.session_state.last_generated_sql = None
+                            st.session_state.last_generated_question = None
+                        else:
+                            # LLM вернул None без исключения (например, нет пакета openai или пустой ответ)
+                            if not generated_sql:
+                                st.session_state["sql_generation_error"] = (
+                                    "Генерация вернула пустой результат. Возможные причины: не установлен пакет openai (pip install openai), "
+                                    "или LLM не вернул SQL. Проверьте логи в терминале, где запущен Streamlit."
+                                )
+                                st.session_state.last_generated_sql = None
+                                st.session_state.last_generated_question = None
         
         # Если SQL сгенерирован, показываем и автоматически выполняем
         if generated_sql:
@@ -439,6 +464,10 @@ def show_assistant_tab():
             else:
                 error_msg = st.session_state.get("sql_generation_error", "Не удалось сгенерировать SQL запрос")
                 st.error(f"❌ {error_msg}")
+                # Подробности ошибки и подсказка, где смотреть логи
+                with st.expander("📋 Подробности ошибки / лог", expanded=bool(st.session_state.get("sql_generation_error"))):
+                    st.text(st.session_state.get("sql_generation_error") or "Текст ошибки не сохранён. Проверьте вывод в терминале, где запущен Streamlit.")
+                    st.caption("Полный traceback также пишется в консоль/терминал, где запущено приложение (например, логи streamlit или systemd).")
             
             # Предлагаем ввести SQL вручную
             st.markdown("---")

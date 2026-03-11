@@ -41,12 +41,12 @@ sqlplus $ORACLE_USER/$ORACLE_PASSWORD@$ORACLE_SERVICE @install_all_views.sql
 - ✅ Python приложение (Streamlit + загрузчики данных)
 - ✅ База знаний (KB) для AI агента
 - ✅ Скрипты управления (запуск/остановка/статус)
+- ✅ Тесты (tests/) — запуск на сервере: `python -m tests.test_billing_assistant_top5`
 - ✅ Минимальная документация
 
 ## Что НЕ включено
 
 - ❌ Архивы (archive/)
-- ❌ Тесты (tests/)
 - ❌ Временные файлы (__pycache__/, *.pyc)
 - ❌ Данные (data/ - загружаются через интерфейс)
 - ❌ Oracle тестовые/отладочные скрипты (testing/, test/, queries/)

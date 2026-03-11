@@ -33,6 +33,7 @@ mkdir -p "$DEPLOY_DIR/docs"
 mkdir -p "$DEPLOY_DIR/data/SPNet reports"
 mkdir -p "$DEPLOY_DIR/data/STECCOMLLCRussiaSBD.AccessFees_reports"
 mkdir -p "$DEPLOY_DIR/tabs"
+mkdir -p "$DEPLOY_DIR/tests"
 
 echo "📋 Копирование файлов..."
 
@@ -74,6 +75,13 @@ cp scripts/confluence_kb_outdated.py "$DEPLOY_DIR/scripts/" 2>/dev/null || true
 cp scripts/clean_satellite_kb.py "$DEPLOY_DIR/scripts/" 2>/dev/null || true
 cp scripts/analyze_confluence_space.py "$DEPLOY_DIR/scripts/" 2>/dev/null || true
 cp scripts/test_satellite_rag_search.py "$DEPLOY_DIR/scripts/" 2>/dev/null || true
+
+# 4.0.1. Тесты (запуск на сервере: python -m tests.test_billing_assistant_top5)
+echo "  → Тесты (tests/)..."
+cp tests/__init__.py "$DEPLOY_DIR/tests/" 2>/dev/null || true
+cp tests/*.py "$DEPLOY_DIR/tests/" 2>/dev/null || true
+# убираем __init__.py из списка если скопировали его отдельно и он попал в *.py
+[ -f "$DEPLOY_DIR/tests/__init__.py" ] || touch "$DEPLOY_DIR/tests/__init__.py"
 
 # 4.1. RAG deployment скрипты
 echo "  → RAG deployment скрипты..."
@@ -189,12 +197,12 @@ sqlplus $ORACLE_USER/$ORACLE_PASSWORD@$ORACLE_SERVICE @install_all_views.sql
 - ✅ Python приложение (Streamlit + загрузчики данных)
 - ✅ База знаний (KB) для AI агента
 - ✅ Скрипты управления (запуск/остановка/статус)
+- ✅ Тесты (tests/) — запуск на сервере: `python -m tests.test_billing_assistant_top5`
 - ✅ Минимальная документация
 
 ## Что НЕ включено
 
 - ❌ Архивы (archive/)
-- ❌ Тесты (tests/)
 - ❌ Временные файлы (__pycache__/, *.pyc)
 - ❌ Данные (data/ - загружаются через интерфейс)
 - ❌ Oracle тестовые/отладочные скрипты (testing/, test/, queries/)
