@@ -5,7 +5,8 @@
   "database": "Oracle (production)",
   "key_columns": {
     "SERVICE_ID": "SERVICE_ID главной услуги SBD (TYPE_ID = 9002). ВАЖНО: Это уникальный идентификатор услуги, а не тип услуги. Для фильтрации SBD сервисов используй REVENUE_SBD_TOTAL > 0 или REVENUE_SBD_TRAFFIC > 0 или REVENUE_SBD_ABON > 0. НЕ используй SERVICE_ID = 9002 - это неправильно!",
-    "CONTRACT_ID": "Базовый SUB-XXXXX (без -clone-...) - ключевая связь для сопоставления с затратами",
+    "ACCOUNT_ID": "ID договора СТЭККОМ (связь с ACCOUNTS.ACCOUNT_ID). Для отчётов «договор» = ACCOUNTS.DESCRIPTION — джойнь с ACCOUNTS и выводи acc.DESCRIPTION.",
+    "CONTRACT_ID": "Базовый SUB-XXXXX (без -clone-...) — контракт Иридиум (login), ключевая связь для сопоставления с затратами. НЕ путать с договором СТЭККОМ (ACCOUNTS.DESCRIPTION).",
     "IMEI": "IMEI устройства",
     "CUSTOMER_NAME": "Имя клиента",
     "CODE_1C": "Код 1С клиента",
@@ -34,6 +35,12 @@
   ],
   "relationships": [
     {
+      "table": "ACCOUNTS",
+      "type": "JOIN",
+      "on": "V_REVENUE_FROM_INVOICES.ACCOUNT_ID = ACCOUNTS.ACCOUNT_ID",
+      "note": "Для отчётов по договору СТЭККОМ: выводить ACCOUNTS.DESCRIPTION AS \"Договор\""
+    },
+    {
       "table": "SERVICES",
       "type": "JOIN",
       "on": "V_REVENUE_FROM_INVOICES.SERVICE_ID = SERVICES.SERVICE_ID",
@@ -47,13 +54,16 @@
   ],
   "usage_notes": [
     "Используется для получения доходов из счетов-фактур",
+    "ВАЖНО: В счетах-фактурах данные только по закрытым периодам (как правило предыдущий месяц). REVENUE_SBD_TRAFFIC — доход только от превышения трафика (overage), не полный объём трафика. Для запросов «трафик за текущий месяц» или «из таблицы аналитикс» использовать ANALYTICS (TRAF, TOTAL_TRAF), а не V_REVENUE_FROM_INVOICES.",
+    "Для отчётов «топ выгодных клиентов» или «доходы по договорам»: группировать по ACCOUNT_ID (договор СТЭККОМ), JOIN ACCOUNTS acc ON v.ACCOUNT_ID = acc.ACCOUNT_ID, выводить acc.DESCRIPTION AS \"Договор\". НЕ группировать по CONTRACT_ID — это контракт Иридиум (SUB-...).",
     "Для фильтрации клиентов с SBD сервисами: WHERE REVENUE_SBD_TOTAL > 0",
     "Для фильтрации по периоду: WHERE PERIOD_YYYYMM = '2025-11'",
     "Для фильтрации по году: WHERE PERIOD_YYYYMM LIKE '2025-%' или WHERE SUBSTR(PERIOD_YYYYMM, 1, 4) = '2025'",
     "ВАЖНО: Для получения простого списка клиентов с счетами-фактурами НЕ используй V_REVENUE_FROM_INVOICES - это неэффективно! Вместо этого используй таблицу BM_INVOICE напрямую, так как там есть CUSTOMER_ID и PERIOD_ID. Пример: WHERE EXISTS (SELECT 1 FROM BM_INVOICE inv JOIN BM_PERIODS p ON inv.PERIOD_ID = p.PERIOD_ID WHERE inv.CUSTOMER_ID = cc.CUSTOMER_ID AND TO_CHAR(p.DATE_BEG, 'YYYY') = '2025' AND ROWNUM = 1). V_REVENUE_FROM_INVOICES предназначен для анализа доходов с детализацией по типам услуг (SBD, SUSPEND, мониторинг и т.д.), а не для простого списка клиентов.",
     "ВАЖНО: SERVICE_ID - это уникальный идентификатор услуги, а не тип услуги. Для фильтрации SBD используй REVENUE_SBD_TOTAL > 0",
     "Пример правильного запроса для поиска клиентов с SBD сервисами: SELECT DISTINCT CUSTOMER_NAME, CODE_1C FROM V_REVENUE_FROM_INVOICES WHERE PERIOD_YYYYMM = '2025-11' AND (REVENUE_SBD_TOTAL > 0 OR REVENUE_SBD_TRAFFIC > 0 OR REVENUE_SBD_ABON > 0)",
-    "Доходы по клиентам за отчётный период (на основании счетов-фактуры): обязательно GROUP BY PERIOD_YYYYMM, CUSTOMER_NAME, CODE_1C и SUM(REVENUE_TOTAL). Пример: SELECT PERIOD_YYYYMM AS \"Отчетный Период\", CUSTOMER_NAME AS \"Клиент\", CODE_1C AS \"Код 1С\", SUM(REVENUE_TOTAL) AS \"Доходы (RUB)\" FROM V_REVENUE_FROM_INVOICES WHERE PERIOD_YYYYMM = '2025-01' GROUP BY PERIOD_YYYYMM, CUSTOMER_NAME, CODE_1C ORDER BY CUSTOMER_NAME"
+    "Доходы по клиентам за отчётный период (на основании счетов-фактуры): обязательно GROUP BY PERIOD_YYYYMM, CUSTOMER_NAME, CODE_1C и SUM(REVENUE_TOTAL). Пример: SELECT PERIOD_YYYYMM AS \"Отчетный Период\", CUSTOMER_NAME AS \"Клиент\", CODE_1C AS \"Код 1С\", SUM(REVENUE_TOTAL) AS \"Доходы (RUB)\" FROM V_REVENUE_FROM_INVOICES WHERE PERIOD_YYYYMM = '2025-01' GROUP BY PERIOD_YYYYMM, CUSTOMER_NAME, CODE_1C ORDER BY CUSTOMER_NAME",
+    "ЗАДВОЕНИЕ IMEI: В VIEW может быть несколько строк на один IMEI (разные SERVICE_ID — основная и старая/клон). Чтобы отчёт за период был без задвоения — ориентироваться на CLOSE_DATE сервиса: включать только услуги, у которых CLOSE_DATE позже конца периода счёта-фактуры либо его нет (активный сервис). JOIN SERVICES s ON v.SERVICE_ID = s.SERVICE_ID AND (s.CLOSE_DATE IS NULL OR s.CLOSE_DATE > LAST_DAY(TO_DATE(v.PERIOD_YYYYMM||'-01','YYYY-MM-DD'))). NULL = активный сервис. Альтернатива: GROUP BY IMEI, CONTRACT_ID, PERIOD_YYYYMM с SUM(REVENUE_*)."
   ]
 }
 

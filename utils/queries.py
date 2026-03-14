@@ -10,16 +10,22 @@ import streamlit as st
 from datetime import datetime
 
 def count_file_records(file_path):
-    """Подсчет количества записей в файле (CSV или XLSX)"""
+    """Подсчет количества записей в файле (CSV или XLSX). Для CSV — pandas с разными sep/encoding, как в загрузчиках."""
     try:
-        if str(file_path).lower().endswith('.csv'):
-            # Для CSV читаем количество строк (минус заголовок)
-            import csv
-            with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
-                return sum(1 for line in f) - 1
-        elif str(file_path).lower().endswith('.xlsx'):
-            # Для Excel используем pandas
-            df = pd.read_excel(file_path)
+        path = Path(file_path) if not isinstance(file_path, Path) else file_path
+        if str(path).lower().endswith('.csv'):
+            for enc in ['utf-8', 'latin-1', 'cp1252', 'iso-8859-1']:
+                for sep in [';', '\t', ',']:
+                    try:
+                        df = pd.read_csv(path, sep=sep, encoding=enc, dtype=str, na_filter=False, quotechar='"')
+                        if len(df.columns) > 1 and len(df) >= 0:
+                            return len(df)
+                    except Exception:
+                        continue
+            with open(path, 'r', encoding='utf-8', errors='ignore') as f:
+                return max(0, sum(1 for _ in f) - 1)
+        elif str(path).lower().endswith('.xlsx'):
+            df = pd.read_excel(path)
             return len(df)
     except Exception as e:
         print(f"Ошибка подсчета строк в файле {file_path}: {e}")
@@ -166,9 +172,10 @@ def get_current_period(get_connection):
     finally:
         if conn: conn.close()
 
-def get_periods(get_connection):
-    """Получение списка периодов из BM_PERIOD"""
-    conn = get_connection()
+@st.cache_data(ttl=300)
+def get_periods(_get_connection):
+    """Получение списка периодов из BM_PERIOD (кэш 5 мин, меньше rerun при входе)."""
+    conn = _get_connection()
     if not conn:
         return []
     try:
@@ -205,9 +212,10 @@ def get_plans(_get_connection):
     finally:
         if conn: conn.close()
 
-def get_revenue_periods(get_connection):
-    """Получение списка периодов из доходов"""
-    conn = get_connection()
+@st.cache_data(ttl=300)
+def get_revenue_periods(_get_connection):
+    """Получение списка периодов из доходов (кэш 5 мин)."""
+    conn = _get_connection()
     if not conn:
         return []
     try:

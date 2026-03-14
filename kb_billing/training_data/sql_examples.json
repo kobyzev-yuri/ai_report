@@ -437,6 +437,14 @@
     "category": "Трафик"
   },
   {
+    "question": "Отчёт по IMEI с десятью устройствами с самым большим трафиком SBD за текущий месяц из таблицы аналитикс",
+    "sql": "SELECT a.VSAT AS IMEI, SUM(a.TRAF) AS \"Трафик SBD\", SUM(a.TOTAL_TRAF) AS \"Всего трафик\" FROM ANALYTICS a JOIN SERVICES s ON a.SERVICE_ID = s.SERVICE_ID JOIN BM_PERIOD p ON a.PERIOD_ID = p.PERIOD_ID WHERE s.TYPE_ID = 9002 AND TO_CHAR(p.START_DATE, 'YYYY-MM') = TO_CHAR(SYSDATE, 'YYYY-MM') GROUP BY a.VSAT ORDER BY SUM(a.TRAF) DESC FETCH FIRST 10 ROWS ONLY",
+    "context": "Топ 10 устройств (IMEI) по трафику SBD за текущий месяц — источник ТОЛЬКО ANALYTICS (полный трафик TRAF/TOTAL_TRAF). НЕ использовать V_REVENUE_FROM_INVOICES: там только закрытые периоды и только доход от превышения (overage). В ANALYTICS есть данные за текущий месяц и по тестовым устройствам.",
+    "business_entity": "traffic",
+    "complexity": 2,
+    "category": "Трафик"
+  },
+  {
     "question": "Найди трафик по IMEI 300234069606340",
     "sql": "SELECT a.VSAT AS IMEI, s.LOGIN AS CONTRACT_ID, TO_CHAR(p.START_DATE, 'YYYY-MM') AS PERIOD_YYYYMM, SUM(a.TRAF) AS TRAFFIC, SUM(a.TOTAL_TRAF) AS TOTAL_TRAFFIC, SUM(a.CBYTE) AS TRAFFIC_BYTES FROM ANALYTICS a JOIN SERVICES s ON a.SERVICE_ID = s.SERVICE_ID LEFT JOIN BM_PERIOD p ON a.PERIOD_ID = p.PERIOD_ID WHERE a.VSAT = '300234069606340' AND s.TYPE_ID = 9002 GROUP BY a.VSAT, s.LOGIN, TO_CHAR(p.START_DATE, 'YYYY-MM') ORDER BY TO_CHAR(p.START_DATE, 'YYYY-MM') DESC",
     "context": "Поиск трафика из ANALYTICS по IMEI. ВАЖНО: ANALYTICS обновляется несколько раз в день и содержит самые свежие данные. НЕ нужно фильтровать по INVOICE_ITEM_ID.",
@@ -512,6 +520,22 @@
     "question": "Покажи доходы за октябрь в счетах-фактурах",
     "sql": "SELECT PERIOD_YYYYMM, CONTRACT_ID, IMEI, CUSTOMER_NAME, REVENUE_SBD_TRAFFIC, REVENUE_SBD_ABON, REVENUE_SBD_TOTAL, REVENUE_TOTAL FROM V_REVENUE_FROM_INVOICES WHERE PERIOD_YYYYMM = '2025-10' ORDER BY REVENUE_TOTAL DESC",
     "context": "Доходы за период из счетов-фактур",
+    "business_entity": "revenue",
+    "complexity": 2,
+    "category": "Доходы"
+  },
+  {
+    "question": "Доходы за октябрь по IMEI без задвоения строк",
+    "sql": "SELECT v.PERIOD_YYYYMM AS \"Период\", v.CONTRACT_ID, v.IMEI, v.CUSTOMER_NAME, v.CODE_1C, v.REVENUE_SBD_TRAFFIC, v.REVENUE_SBD_ABON, v.REVENUE_SBD_TOTAL, v.REVENUE_TOTAL FROM V_REVENUE_FROM_INVOICES v JOIN SERVICES s ON v.SERVICE_ID = s.SERVICE_ID AND (s.CLOSE_DATE IS NULL OR s.CLOSE_DATE > LAST_DAY(TO_DATE(v.PERIOD_YYYYMM||'-01','YYYY-MM-DD'))) WHERE v.PERIOD_YYYYMM = '2025-10' ORDER BY v.REVENUE_TOTAL DESC",
+    "context": "Задвоение IMEI убирать по CLOSE_DATE: включать только услуги, у которых CLOSE_DATE позже конца периода счёта-фактуры либо его нет (активный сервис). JOIN SERVICES ... AND (s.CLOSE_DATE IS NULL OR s.CLOSE_DATE > LAST_DAY(TO_DATE(v.PERIOD_YYYYMM||'-01','YYYY-MM-DD'))). Альтернатива: GROUP BY IMEI, CONTRACT_ID, PERIOD_YYYYMM с SUM(REVENUE_*).",
+    "business_entity": "revenue",
+    "complexity": 2,
+    "category": "Доходы"
+  },
+  {
+    "question": "5 самых доходных клиентов за февраль 2026 года",
+    "sql": "SELECT v.CUSTOMER_NAME AS \"Клиент\", acc.DESCRIPTION AS \"Договор\", SUM(v.REVENUE_TOTAL) AS \"Доход (руб)\" FROM V_REVENUE_FROM_INVOICES v JOIN ACCOUNTS acc ON v.ACCOUNT_ID = acc.ACCOUNT_ID WHERE v.PERIOD_YYYYMM = '2026-02' GROUP BY v.CUSTOMER_NAME, v.ACCOUNT_ID, acc.DESCRIPTION ORDER BY SUM(v.REVENUE_TOTAL) DESC FETCH FIRST 5 ROWS ONLY",
+    "context": "Топ выгодных клиентов за период по доходам из счетов-фактур. Договор в отчёте — договор СТЭККОМ (ACCOUNTS.DESCRIPTION), не контракт Иридиум (CONTRACT_ID). Джойн V_REVENUE_FROM_INVOICES с ACCOUNTS по ACCOUNT_ID, группировка по клиенту и договору СТЭККОМ.",
     "business_entity": "revenue",
     "complexity": 2,
     "category": "Доходы"

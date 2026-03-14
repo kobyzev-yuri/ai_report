@@ -670,6 +670,7 @@ class RAGAssistant:
      * SUM() для суммируемых полей
      * COUNT() для подсчета записей
    - Отчет должен быть понятным для финансиста - всегда показывай клиента, договор и устройство (если нет агрегации)
+   - 🚨 ДОГОВОР В ОТЧЁТАХ ПО ДОХОДАМ (счета-фактуры): когда в запросе фигурирует «договор» в смысле отчёта для директора/финансиста — имеется в виду ДОГОВОР СТЭККОМ (номер договора в биллинге), а НЕ контракт Иридиум (SUB-...). Договор СТЭККОМ = ACCOUNTS.DESCRIPTION. В V_REVENUE_FROM_INVOICES есть ACCOUNT_ID — обязательно JOIN ACCOUNTS acc ON v.ACCOUNT_ID = acc.ACCOUNT_ID и выводи acc.DESCRIPTION AS \"Договор\" (или \"Номер договора\"). Группировка по выгодности: по v.CUSTOMER_NAME, v.ACCOUNT_ID и acc.DESCRIPTION, SUM(v.REVENUE_TOTAL), ORDER BY SUM(v.REVENUE_TOTAL) DESC. НЕ группируй по CONTRACT_ID для отчётов «топ выгодных клиентов» по счетам-фактурам — CONTRACT_ID это контракт Иридиум (login), а не договор СТЭККОМ.
 
 4. ПЕРИОДЫ (КРИТИЧЕСКИ ВАЖНО - СТРОГО СЛЕДУЙ ЗАПРОСУ ПОЛЬЗОВАТЕЛЯ!):
    🚨 ВАЖНО: Если пользователь спрашивает про КВАРТАЛ - генерируй запрос ТОЛЬКО для квартала, НЕ для года!
@@ -739,6 +740,7 @@ class RAGAssistant:
 6. Для IMEI используй точное совпадение: IMEI = '300234069606340'
 7. Для расходов используй V_CONSOLIDATED_REPORT_WITH_BILLING с полями CALCULATED_OVERAGE, SPNET_TOTAL_AMOUNT, FEES_TOTAL
 8. Для доходов используй V_REVENUE_FROM_INVOICES с полями REVENUE_SBD_TRAFFIC, REVENUE_SBD_ABON, REVENUE_TOTAL и т.д.
+   - 🚨 ТРАФИК И ПЕРИОД: V_REVENUE_FROM_INVOICES — это данные из счетов-фактур. В счетах-фактурах периоды только закрытые (как правило предыдущий месяц); REVENUE_SBD_TRAFFIC — это доход только от превышения трафика (overage), не полный объём трафика. Для запросов «трафик из analytics» / «из таблицы аналитикс» / «текущий месяц трафик» / «топ устройств по трафику SBD» ВСЕГДА используй таблицу ANALYTICS (поля TRAF, TOTAL_TRAF), JOIN SERVICES WHERE s.TYPE_ID = 9002, JOIN BM_PERIOD для периода. Текущий месяц: TO_CHAR(p.START_DATE, 'YYYY-MM') = TO_CHAR(SYSDATE, 'YYYY-MM'). В ANALYTICS — полный трафик SBD и данные по текущему месяцу; в ANALYTICS есть и тестовые устройства (не только по договорам).
 9. КРИТИЧЕСКИ ВАЖНО - СТРОГИЙ ЗАПРЕТ: Для финансового анализа прибыльности ВСЕГДА используй готовые VIEW вместо создания сложных CTE или JOIN. НИКОГДА не создавай запросы с JOIN V_CONSOLIDATED_REPORT_WITH_BILLING + V_REVENUE_FROM_INVOICES + BM_CURRENCY_RATE!
    - V_PROFITABILITY_BY_PERIOD - базовая прибыльность по периодам (содержит: PERIOD, CUSTOMER_NAME, CODE_1C, EXPENSES_USD, EXPENSES_RUB, REVENUE_RUB, PROFIT_RUB, MARGIN_PCT, COST_PCT, STATUS)
    - V_PROFITABILITY_TREND - тенденции прибыльности с LAG (содержит все поля из V_PROFITABILITY_BY_PERIOD + PREV_PROFIT_RUB, PROFIT_CHANGE, PROFIT_CHANGE_PCT, TREND)
@@ -794,6 +796,7 @@ class RAGAssistant:
    - НЕ используй CUSTOMERS.CUSTOMER_NAME или CUSTOMERS.ORGANIZATION_NAME - таких колонок не существует!
    - КРИТИЧЕСКИ ВАЖНО: Если вопрос касается финансового анализа (прибыльность, убыточность, маржа, тенденции), ВСЕГДА используй готовые VIEW (V_PROFITABILITY_BY_PERIOD, V_PROFITABILITY_TREND, V_UNPROFITABLE_CUSTOMERS) вместо JOIN с CUSTOMERS или создания сложных CTE!
 11. Схема и типичные ошибки (ORA-00904, ORA-00942): опирайся на контекст из KB (таблицы, представления, usage_notes). В контексте указано: нет BM_CUSTOMERS (только CUSTOMERS); в SERVICES нет PERIOD_ID; в V_IRIDIUM_SERVICES_INFO нет TYPE_ID — TYPE_ID и имя типа из SERVICES + BM_TYPE.
+    Типы устройств/услуг по BM_TYPE (CLASS, MNEMONIC, NAME): определяй TYPE_ID по формулировке пользователя. Передача данных (интернет, данные) → dialup 1, leased 10–16, iridium_oport 9000, iridium_sbd 9002. Телефония (телефон, звонки) → pstn 50, voip 2/3/4, iridium_pstn 9001, iridium_csd 9003. SBD / Stectrace / СтэкТрейс / трекинг / мониторинг Иридиум → 9002 SBD, 9014 СтэкТрейс (iridium_msg), 9004 трекинг, 9005 мониторинг, 9008 приостановка SBD, 9013 блокировка мониторинга. Для вывода названия типа: JOIN BM_TYPE bt ON s.TYPE_ID = bt.TYPE_ID, выводи bt.NAME.
 12. ВАЖНО: Таблица периодов называется BM_PERIOD (без S), а не BM_PERIODS!
    - Используй BM_PERIOD.START_DATE (не DATE_BEG!) для получения PERIOD_YYYYMM через TO_CHAR(pm.START_DATE, 'YYYY-MM')
    - BM_PERIOD содержит колонки: PERIOD_ID, START_DATE, STOP_DATE, MONTH (не DATE_BEG и DATE_END!)
@@ -903,6 +906,17 @@ class RAGAssistant:
 - Если вопрос про МЕСЯЦ (октябрь, ноябрь и т.д.) → генерируй запрос ТОЛЬКО для месяца, НЕ для квартала или года!
 - Если вопрос про ГОД → генерируй запрос ТОЛЬКО для года, НЕ для квартала!
 - Строго следуй запросу пользователя по периоду!
+
+🚨 ДОГОВОР В ОТЧЁТАХ ПО ДОХОДАМ (топ выгодных клиентов, доходы по договорам):
+- «Договор» для отчёта = договор СТЭККОМ (ACCOUNTS.DESCRIPTION), НЕ контракт Иридиум (CONTRACT_ID/SUB-...).
+- Джойнь V_REVENUE_FROM_INVOICES с ACCOUNTS: JOIN ACCOUNTS acc ON v.ACCOUNT_ID = acc.ACCOUNT_ID. Выводи acc.DESCRIPTION AS \"Договор\". Группируй по v.CUSTOMER_NAME, v.ACCOUNT_ID, acc.DESCRIPTION.
+
+🚨 ТРАФИК ИЗ ANALYTICS vs СЧЕТА-ФАКТУРЫ:
+- Если в вопросе «из таблицы аналитикс» / «из analytics» / «текущий месяц трафик» / «топ устройств по трафику SBD» — источник ТОЛЬКО ANALYTICS (TRAF, TOTAL_TRAF), JOIN SERVICES s ON a.SERVICE_ID = s.SERVICE_ID WHERE s.TYPE_ID = 9002, JOIN BM_PERIOD p ON a.PERIOD_ID = p.PERIOD_ID. Текущий месяц: TO_CHAR(p.START_DATE, 'YYYY-MM') = TO_CHAR(SYSDATE, 'YYYY-MM'). НЕ используй V_REVENUE_FROM_INVOICES для трафика по текущему месяцу или «из analytics» — там только закрытые периоды и только доход от превышения (overage), не полный трафик.
+
+🚨 ТИП УСТРОЙСТВА/УСЛУГИ (BM_TYPE): По формулировке пользователя выбирай TYPE_ID из BM_TYPE. Передача данных / интернет → 1, 10–16, 9000, 9002. Телефония / телефон → 50, 2–4, 9001, 9003. SBD / Stectrace / СтэкТрейс / трекинг / мониторинг → 9002 (SBD), 9014 (СтэкТрейс), 9004 (трек.), 9005 (монитор.). Имя типа: JOIN BM_TYPE bt ON s.TYPE_ID = bt.TYPE_ID, bt.NAME.
+
+🚨 ЗАДВОЕНИЕ IMEI В ОТЧЁТЕ О ДОХОДАХ: Ориентироваться на CLOSE_DATE сервиса — включать только услуги, у которых CLOSE_DATE позже конца периода счёта-фактуры либо его нет (активный сервис). JOIN SERVICES s ON v.SERVICE_ID = s.SERVICE_ID AND (s.CLOSE_DATE IS NULL OR s.CLOSE_DATE > LAST_DAY(TO_DATE(v.PERIOD_YYYYMM||'-01','YYYY-MM-DD'))). Альтернатива: GROUP BY IMEI, CONTRACT_ID, PERIOD_YYYYMM с SUM(REVENUE_*).
 
 🚨🚨🚨 КРИТИЧЕСКИ ВАЖНО: НЕ ИСПОЛЬЗУЙ DISTINCT В LISTAGG! 🚨🚨🚨
 - ❌ НЕПРАВИЛЬНО (ВЫЗОВЕТ ОШИБКУ ORA-30482!): LISTAGG(DISTINCT ..., ', ')

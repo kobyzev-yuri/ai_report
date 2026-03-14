@@ -37,8 +37,14 @@
       "on": "BM_TYPE.TYPE_ID = SERVICES.TYPE_ID"
     }
   ],
+  "type_categories": {
+    "передача данных (data)": "TYPE_ID: 1 dialup, 10-16 leased*, 9000 iridium_oport (Open Port), 9002 iridium_sbd (SBD). Фильтр: s.TYPE_ID IN (1, 10, 11, 12, 13, 14, 15, 16, 9000, 9002)",
+    "телефония": "TYPE_ID: 2 voip, 3 voip_in, 4 voip_out, 50 pstn, 56 pstn_profile, 9001 iridium_pstn (Телефония Иридиум), 9003 iridium_csd (Global Телефония/CSD). Фильтр: s.TYPE_ID IN (2, 3, 4, 50, 56, 9001, 9003)",
+    "SBD / Stectrace / трекинг / мониторинг (Иридиум M2M)": "TYPE_ID: 9002 iridium_sbd (Услуга SBD), 9014 iridium_msg (СтэкТрейс), 9004 iridium_tracking (Платформа трекинг), 9005 iridium_monitoring (Платформа мониторинг), 9008 iridium_sbd_suspend, 9013 gsm_block. Для «SBD» или «трафик SBD» — 9002; для «СтэкТрейс»/Stectrace — 9014; для трекинга — 9004; для мониторинга — 9005."
+  },
   "usage_notes": [
-    "Используется для фильтрации услуг по типу",
+    "Используется для фильтрации услуг по типу. Определяй TYPE_ID по формулировке пользователя: «передача данных» / «данные» → leased, dialup, iridium_oport, iridium_sbd; «телефония» / «телефон» → pstn, voip, iridium_pstn, iridium_csd; «SBD» / «Stectrace» / «СтэкТрейс» / «топ по трафику SBD» → 9002 (и при необходимости 9004, 9005, 9014).",
+    "Справочник BM_TYPE: TYPE_ID, CLASS, MNEMONIC, NAME. NAME — название на русском (например «Услуга SBD», «Телефония Иридиум», «СтэкТрейс», «Платформа трекинг»). JOIN: SERVICES s JOIN BM_TYPE bt ON s.TYPE_ID = bt.TYPE_ID; для вывода имени типа — bt.NAME.",
     "Для Iridium M2M используются типы: 9002, 9005, 9008, 9013, 9014",
     "MNEMONIC используется для программной идентификации типа услуги",
     "ВАЖНО: Для расчета абонплаты SBD (9002) и suspend (9008) нужно отслеживать изменения статуса в BM_ACTION_LOG:",

@@ -66,6 +66,10 @@ cp run_streamlit_background.sh "$DEPLOY_DIR/"
 cp stop_streamlit.sh "$DEPLOY_DIR/"
 cp status_streamlit.sh "$DEPLOY_DIR/"
 cp restart_streamlit.sh "$DEPLOY_DIR/" 2>/dev/null || true
+cp run_voice_chat_background.sh "$DEPLOY_DIR/" 2>/dev/null || true
+cp stop_voice_chat.sh "$DEPLOY_DIR/" 2>/dev/null || true
+cp status_voice_chat.sh "$DEPLOY_DIR/" 2>/dev/null || true
+cp restart_voice_chat.sh "$DEPLOY_DIR/" 2>/dev/null || true
 
 # 4.0. Скрипты Confluence / спутниковая KB (тесты на сервере)
 echo "  → Скрипты Confluence (sync, outdated, clean, analyze)..."
@@ -75,6 +79,8 @@ cp scripts/confluence_kb_outdated.py "$DEPLOY_DIR/scripts/" 2>/dev/null || true
 cp scripts/clean_satellite_kb.py "$DEPLOY_DIR/scripts/" 2>/dev/null || true
 cp scripts/analyze_confluence_space.py "$DEPLOY_DIR/scripts/" 2>/dev/null || true
 cp scripts/test_satellite_rag_search.py "$DEPLOY_DIR/scripts/" 2>/dev/null || true
+cp scripts/test_revenue_feb_no_duplicate_imei.py "$DEPLOY_DIR/scripts/" 2>/dev/null || true
+cp scripts/test_revenue_feb_no_duplicate_imei.sql "$DEPLOY_DIR/scripts/" 2>/dev/null || true
 
 # 4.0.1. Тесты (запуск на сервере: python -m tests.test_billing_assistant_top5)
 echo "  → Тесты (tests/)..."
@@ -82,6 +88,15 @@ cp tests/__init__.py "$DEPLOY_DIR/tests/" 2>/dev/null || true
 cp tests/*.py "$DEPLOY_DIR/tests/" 2>/dev/null || true
 # убираем __init__.py из списка если скопировали его отдельно и он попал в *.py
 [ -f "$DEPLOY_DIR/tests/__init__.py" ] || touch "$DEPLOY_DIR/tests/__init__.py"
+
+# 4.0.2. Голосовой диалог (voice_chat) — Flask-интерфейс с логином, диалог + транскрипция
+echo "  → Голосовой диалог (voice_chat/)..."
+mkdir -p "$DEPLOY_DIR/voice_chat/templates" "$DEPLOY_DIR/voice_chat/static"
+cp voice_chat/__init__.py "$DEPLOY_DIR/voice_chat/" 2>/dev/null || true
+cp voice_chat/app.py "$DEPLOY_DIR/voice_chat/" 2>/dev/null || true
+cp voice_chat/templates/*.html "$DEPLOY_DIR/voice_chat/templates/" 2>/dev/null || true
+cp voice_chat/README.md "$DEPLOY_DIR/voice_chat/" 2>/dev/null || true
+touch "$DEPLOY_DIR/voice_chat/static/.gitkeep" 2>/dev/null || true
 
 # 4.1. RAG deployment скрипты
 echo "  → RAG deployment скрипты..."
