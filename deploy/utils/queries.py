@@ -231,7 +231,7 @@ def get_revenue_periods(_get_connection):
         if conn: conn.close()
 
 def get_revenue_report(get_connection, period_filter=None, contract_id_filter=None, imei_filter=None, customer_name_filter=None, code_1c_filter=None):
-    """Получение отчета по доходам"""
+    """Получение отчета по доходам. Без задвоения IMEI: только услуги с CLOSE_DATE > конец периода или NULL."""
     conn = get_connection()
     if not conn:
         return None
@@ -251,7 +251,11 @@ def get_revenue_report(get_connection, period_filter=None, contract_id_filter=No
         conds.append(f"v.CODE_1C LIKE '%{code_1c_filter.strip()}%'")
     
     where = " AND ".join(conds) if conds else "1=1"
-    query = f"SELECT * FROM V_REVENUE_FROM_INVOICES v WHERE {where} ORDER BY v.PERIOD_YYYYMM DESC, v.CONTRACT_ID"
+    # JOIN с SERVICES: только услуги, активные в периоде (CLOSE_DATE > конец месяца или NULL), чтобы не было задвоения по клонам
+    query = f"""SELECT v.* FROM V_REVENUE_FROM_INVOICES v
+JOIN SERVICES s ON v.SERVICE_ID = s.SERVICE_ID
+  AND (s.CLOSE_DATE IS NULL OR s.CLOSE_DATE > LAST_DAY(TO_DATE(v.PERIOD_YYYYMM||'-01','YYYY-MM-DD')))
+WHERE {where} ORDER BY v.PERIOD_YYYYMM DESC, v.CONTRACT_ID"""
     
     try:
         return pd.read_sql_query(query, conn)

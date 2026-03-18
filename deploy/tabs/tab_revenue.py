@@ -14,6 +14,7 @@ def show_tab(get_connection, get_revenue_report,
     """
     st.header("💰 Доходы из счетов-фактур")
     st.markdown("Отчет по доходам из счетов-фактур (BM_INVOICE_ITEM). Все суммы в рублях.")
+    st.caption("В отчёте: Абон. плата (SBD) = REVENUE_SBD_ABON; Stectrace (сообщения в штуках) = Сообщения Абонплата (REVENUE_MSG_ABON). Строки без задвоения IMEI (учтены только услуги, активные в выбранном периоде).")
     
     period_filter = selected_period
     contract_id_filter = contract_id_filter if contract_id_filter else None

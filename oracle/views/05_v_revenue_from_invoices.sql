@@ -11,7 +11,7 @@ SET SQLBLANKLINES ON
 SET DEFINE OFF
 
 CREATE OR REPLACE VIEW V_REVENUE_FROM_INVOICES AS
-WITH -- Сначала находим все услуги SBD (9002) с SUB-XXXXX - это основная услуга
+WITH -- Главная услуга: SBD (9002) или Stectrace (9014) с SUB-XXXXX — одна и та же услуга Иридиум, разный учёт (КБ или сообщения)
 main_sbd_services AS (
     SELECT DISTINCT
         s.SERVICE_ID,
@@ -20,7 +20,7 @@ main_sbd_services AS (
         s.ACCOUNT_ID,
         s.CUSTOMER_ID
     FROM SERVICES s
-    WHERE s.TYPE_ID = 9002  -- SBD услуга
+    WHERE s.TYPE_ID IN (9002, 9014)  -- SBD (учёт по КБ) и Stectrace (учёт по сообщениям)
       AND s.LOGIN LIKE 'SUB-%'
 ),
 -- Теперь находим все invoice items для всех Iridium услуг
@@ -46,12 +46,11 @@ base_contracts AS (
         COALESCE(ii.ACC_CURRENCY_ID, i.CURRENCY_ID) AS ACC_CURRENCY_ID,
         -- Суммы в валюте лицевого счета (валюта учета)
         ii.ACC_MONEY,
-        -- BASE_CONTRACT_ID: для 9002 берем из LOGIN, для остальных - из связанной услуги 9002 по VSAT
+        -- BASE_CONTRACT_ID: для 9002 и 9014 (главные) — из LOGIN; для 9005, 9008, 9013 — из связанной главной (9002 или 9014) по VSAT
         CASE 
-            WHEN s.TYPE_ID = 9002 THEN
+            WHEN s.TYPE_ID IN (9002, 9014) THEN
                 REGEXP_REPLACE(COALESCE(ii.LOGIN, s.LOGIN), '-clone-.*', '')
             ELSE
-                -- Для сопутствующих услуг (9005, 9008, 9013) ищем связанную услугу 9002 по VSAT
                 (SELECT REGEXP_REPLACE(ms.BASE_CONTRACT_ID, '-clone-.*', '')
                  FROM main_sbd_services ms
                  WHERE ms.IMEI = s.VSAT
@@ -67,28 +66,16 @@ base_contracts AS (
       -- Для 9005, 9008, 9013: связаны по VSAT с услугой 9002
       -- Для 9014: может быть SUB-XXXXX или связана по VSAT
       AND (
-          -- Услуги SBD (9002) с SUB-XXXXX
-          (s.TYPE_ID = 9002 AND (ii.LOGIN LIKE 'SUB-%' OR s.LOGIN LIKE 'SUB-%'))
+          -- Главные услуги SBD (9002) и Stectrace (9014) с SUB-XXXXX
+          (s.TYPE_ID IN (9002, 9014) AND (ii.LOGIN LIKE 'SUB-%' OR s.LOGIN LIKE 'SUB-%'))
           OR
-          -- Сопутствующие услуги (9005, 9008, 9013) - связаны по VSAT с услугой 9002
+          -- Сопутствующие (9005, 9008, 9013) — связаны по VSAT с главной (9002 или 9014)
           (s.TYPE_ID IN (9005, 9008, 9013) 
            AND EXISTS (
                SELECT 1 
                FROM main_sbd_services ms
                WHERE ms.IMEI = s.VSAT
                  AND ms.ACCOUNT_ID = s.ACCOUNT_ID
-           ))
-          OR
-          -- Услуги сообщений (9014) - могут быть с SUB-XXXXX или связаны по VSAT
-          (s.TYPE_ID = 9014 
-           AND (
-               (ii.LOGIN LIKE 'SUB-%' OR s.LOGIN LIKE 'SUB-%')
-               OR EXISTS (
-                   SELECT 1 
-                   FROM main_sbd_services ms
-                   WHERE ms.IMEI = s.VSAT
-                     AND ms.ACCOUNT_ID = s.ACCOUNT_ID
-               )
            ))
       )
 ),
@@ -276,7 +263,7 @@ SELECT
     COUNT(DISTINCT bc.INVOICE_ITEM_ID) AS INVOICE_ITEMS_COUNT
     
 FROM base_contracts bc
--- Джойним с главной услугой SBD для получения SERVICE_ID, IMEI, ACCOUNT_ID, CUSTOMER_ID
+-- Джойним с главной услугой (9002 или 9014) для получения SERVICE_ID, IMEI, ACCOUNT_ID, CUSTOMER_ID
 JOIN main_sbd_services ms 
     ON bc.BASE_CONTRACT_ID = ms.BASE_CONTRACT_ID
     AND bc.IMEI = ms.IMEI
@@ -327,11 +314,11 @@ ORDER BY
 /
 
 -- Комментарии
-COMMENT ON TABLE V_REVENUE_FROM_INVOICES IS 'Отчет по доходам из счетов-фактур (BM_INVOICE_ITEM). Группировка по базовому SUB- (без -clone-...) и периоду. Разделение доходов по типам услуг (SBD, SUSPEND, мониторинг, блокировка, сообщения) с разделением на трафик и абонплату. Одна строка на SUB- + период. Сопутствующие услуги (9005, 9008, 9013) связаны с основной услугой 9002 по VSAT=IMEI.'
+COMMENT ON TABLE V_REVENUE_FROM_INVOICES IS 'Отчет по доходам из счетов-фактур (BM_INVOICE_ITEM). В Иридиуме одна услуга SBD; у нас главная услуга строки — 9002 (учёт по КБ) или 9014 Stectrace (учёт по сообщениям). Сопутствующие (9005, 9008, 9013) связаны с главной по VSAT=IMEI. Одна строка на (контракт/IMEI, период).'
 /
 COMMENT ON COLUMN V_REVENUE_FROM_INVOICES.CONTRACT_ID IS 'Базовый SUB-XXXXX (без -clone-...) - ключевая связь для сопоставления с затратами'
 /
-COMMENT ON COLUMN V_REVENUE_FROM_INVOICES.SERVICE_ID IS 'SERVICE_ID главной услуги SBD (TYPE_ID = 9002)'
+COMMENT ON COLUMN V_REVENUE_FROM_INVOICES.SERVICE_ID IS 'SERVICE_ID главной услуги (TYPE_ID = 9002 SBD или 9014 Stectrace)'
 /
 COMMENT ON COLUMN V_REVENUE_FROM_INVOICES.REVENUE_SBD_TRAFFIC IS 'Доходы от трафика превышения SBD (IRIDIUM_SBD, kb_traffic_pay, IRIDIUM_SBD_MBOX, sbd_reg, woufzwv). В счетах-фактурах показывается только трафик, превышающий включенный в абонплату (overage). Итого для всех тарифов.'
 /
