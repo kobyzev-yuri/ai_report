@@ -7,6 +7,30 @@ import io
 from typing import Optional, Tuple
 
 
+def _convert_to_wav_if_needed(audio_bytes: bytes, filename_hint: str = "audio.webm") -> Tuple[bytes, str]:
+    """
+    Конвертирует webm/ogg в WAV для совместимости с Whisper API (proxyapi и др.).
+    Если pydub/ffmpeg недоступны или конвертация не удалась — возвращает исходные байты и расширение.
+    """
+    try:
+        from pydub import AudioSegment
+    except ImportError:
+        return audio_bytes, (filename_hint.rsplit(".", 1)[-1] if "." in filename_hint else "webm")
+
+    try:
+        if filename_hint.lower().endswith(".webm") or not filename_hint:
+            seg = AudioSegment.from_file(io.BytesIO(audio_bytes), format="webm")
+        elif filename_hint.lower().endswith(".ogg"):
+            seg = AudioSegment.from_file(io.BytesIO(audio_bytes), format="ogg")
+        else:
+            return audio_bytes, filename_hint.rsplit(".", 1)[-1] if "." in filename_hint else "webm"
+        out = io.BytesIO()
+        seg.export(out, format="wav")
+        return out.getvalue(), "wav"
+    except Exception:
+        return audio_bytes, filename_hint.rsplit(".", 1)[-1] if "." in filename_hint else "webm"
+
+
 def transcribe_audio(
     audio_file: bytes,
     api_key: Optional[str] = None,
@@ -48,11 +72,12 @@ def transcribe_audio(
             client_kwargs["base_url"] = os.getenv("OPENAI_API_BASE")
         
         client = OpenAI(**client_kwargs)
-        
-        # Подготовка файла для API
-        audio_io = io.BytesIO(audio_file)
-        audio_io.name = "audio.webm"
-        
+
+        # Конвертация webm/ogg в wav при необходимости (избегаем "Cannot extract audio duration" от API)
+        audio_to_send, ext = _convert_to_wav_if_needed(audio_file, "audio.webm")
+        audio_io = io.BytesIO(audio_to_send)
+        audio_io.name = f"audio.{ext}"
+
         # Транскрибация через Whisper API (работает через proxyapi.ru)
         transcript = client.audio.transcriptions.create(
             model=model,

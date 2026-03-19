@@ -6,7 +6,7 @@
   "key_columns": {
     "SERVICE_ID": "SERVICE_ID главной услуги (TYPE_ID = 9002 SBD или 9014 Stectrace — одна и та же услуга Иридиум, разный учёт: по КБ или по сообщениям). Уникальный идентификатор услуги. Для фильтрации по SBD/Stectrace: REVENUE_SBD_TOTAL > 0 или REVENUE_MSG_ABON > 0 или JOIN SERVICES WHERE s.TYPE_ID IN (9002, 9014).",
     "ACCOUNT_ID": "ID договора СТЭККОМ (связь с ACCOUNTS.ACCOUNT_ID). Для отчётов «договор» = ACCOUNTS.DESCRIPTION — джойнь с ACCOUNTS и выводи acc.DESCRIPTION.",
-    "CONTRACT_ID": "Базовый SUB-XXXXX (без -clone-...) — контракт Иридиум (login), ключевая связь для сопоставления с затратами. НЕ путать с договором СТЭККОМ (ACCOUNTS.DESCRIPTION).",
+    "CONTRACT_ID": "Базовый SUB-XXXXX (без -clone-...) — контракт Иридиум (login). Если по IMEI в периоде только приостановка (9008) без главной 9002/9014 — CONTRACT_ID = IMEI (число). НЕ путать с договором СТЭККОМ (ACCOUNTS.DESCRIPTION).",
     "IMEI": "IMEI устройства",
     "CUSTOMER_NAME": "Имя клиента",
     "CODE_1C": "Код 1С клиента",
@@ -26,7 +26,7 @@
   "business_rules": [
     "В Иридиуме одна услуга SBD; у нас она продаётся с учётом за КБ (9002) либо за сообщение (9014 Stectrace). Главная услуга в строке отчёта — 9002 или 9014; сопутствующие (приостановка, мониторинг, блокировка) — 9008, 9005, 9013.",
     "VIEW должен быть определён так, чтобы главной услугой строки могла быть как 9002 (SBD), так и 9014 (Stectrace): в источник VIEW входят услуги с TYPE_ID IN (9002, 9014) как возможная главная; к строке добавляются доходы по сопутствующим (9005, 9008, 9013) по тому же IMEI/контракту.",
-    "SERVICE_ID в VIEW — SERVICE_ID главной услуги (TYPE_ID = 9002 или 9014). Сопутствующие услуги (приостановка, мониторинг, блокировка) привязаны к той же строке по IMEI/контракту.",
+    "SERVICE_ID в VIEW — SERVICE_ID главной услуги (TYPE_ID = 9002 или 9014) либо приостановки (9008), если по IMEI+ACCOUNT нет главной 9002/9014; тогда CONTRACT_ID в строке = IMEI (число), строка всё равно должна быть в отчёте по IMEI с REVENUE_SUSPEND_ABON.",
     "Для фильтрации клиентов с SBD сервисами используй REVENUE_SBD_TOTAL > 0 или REVENUE_SBD_TRAFFIC > 0 или REVENUE_SBD_ABON > 0",
     "НЕ используй SERVICE_ID = 9002 для фильтрации - это неправильно! SERVICE_ID - это уникальный идентификатор услуги, а не тип услуги",
     "TYPE_ID = 9002 - это тип услуги SBD, но в VIEW нет колонки TYPE_ID",
@@ -65,7 +65,8 @@
     "Пример правильного запроса для поиска клиентов с SBD сервисами: SELECT DISTINCT CUSTOMER_NAME, CODE_1C FROM V_REVENUE_FROM_INVOICES WHERE PERIOD_YYYYMM = '2025-11' AND (REVENUE_SBD_TOTAL > 0 OR REVENUE_SBD_TRAFFIC > 0 OR REVENUE_SBD_ABON > 0)",
     "Доходы по клиентам за отчётный период (на основании счетов-фактуры): обязательно GROUP BY PERIOD_YYYYMM, CUSTOMER_NAME, CODE_1C и SUM(REVENUE_TOTAL). Пример: SELECT PERIOD_YYYYMM AS \"Отчетный Период\", CUSTOMER_NAME AS \"Клиент\", CODE_1C AS \"Код 1С\", SUM(REVENUE_TOTAL) AS \"Доходы (RUB)\" FROM V_REVENUE_FROM_INVOICES WHERE PERIOD_YYYYMM = '2025-01' GROUP BY PERIOD_YYYYMM, CUSTOMER_NAME, CODE_1C ORDER BY CUSTOMER_NAME",
     "VIEW в Oracle: одна и та же услуга SBD в Иридиуме; у нас главная услуга в отчёте — либо 9002 (учёт по КБ), либо 9014 (учёт по сообщениям, Stectrace). В определении VIEW в качестве источника строк (главная услуга на контракт/период) должны входить оба типа: 9002 и 9014. Сопутствующие (приостановка, мониторинг, блокировка) учитываются как раньше. Иначе выручка по Stectrace (9014) в отчёт не попадёт.",
-    "ЗАДВОЕНИЕ IMEI: В VIEW может быть несколько строк на один IMEI (разные SERVICE_ID — основная и старая/клон). Чтобы отчёт за период был без задвоения — ориентироваться на CLOSE_DATE сервиса: включать только услуги, у которых CLOSE_DATE позже конца периода счёта-фактуры либо его нет (активный сервис). JOIN SERVICES s ON v.SERVICE_ID = s.SERVICE_ID AND (s.CLOSE_DATE IS NULL OR s.CLOSE_DATE > LAST_DAY(TO_DATE(v.PERIOD_YYYYMM||'-01','YYYY-MM-DD'))). NULL = активный сервис. Альтернатива: GROUP BY IMEI, CONTRACT_ID, PERIOD_YYYYMM с SUM(REVENUE_*)."
+    "ЗАДВОЕНИЕ IMEI: В VIEW может быть несколько строк на один IMEI (разные SERVICE_ID — основная и старая/клон). Чтобы отчёт за период был без задвоения — ориентироваться на CLOSE_DATE сервиса: включать только услуги, у которых CLOSE_DATE позже конца периода счёта-фактуры либо его нет (активный сервис). JOIN SERVICES s ON v.SERVICE_ID = s.SERVICE_ID AND (s.CLOSE_DATE IS NULL OR s.CLOSE_DATE > LAST_DAY(TO_DATE(v.PERIOD_YYYYMM||'-01','YYYY-MM-DD'))). NULL = активный сервис. Альтернатива: GROUP BY IMEI, CONTRACT_ID, PERIOD_YYYYMM с SUM(REVENUE_*).",
+    "Приостановка без главной: если в периоде по IMEI есть только начисления по приостановке (9008), а главной услуги SBD/Stectrace (9002/9014) по этому IMEI+ACCOUNT нет — строка в отчёте всё равно выводится: CONTRACT_ID = IMEI, REVENUE_SUSPEND_ABON заполнен, остальные доходы 0."
   ]
 }
 

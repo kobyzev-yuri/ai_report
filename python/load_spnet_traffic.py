@@ -168,6 +168,33 @@ class SPNetDataLoader:
                 logger.error(f"Не удалось прочитать файл {file_path}")
                 return 0
             
+            # Нормализация колонок и сопоставление с ожидаемыми именами (новые форматы Иридиум)
+            df.columns = [str(c).strip() for c in df.columns]
+            def _norm(s):
+                return str(s).upper().replace(' ', '').replace('-', '').replace('/', '').replace('(', '').replace(')', '').replace('_', '')
+            spnet_expected = [
+                'Total Rows', 'Contract ID', 'IMEI', 'SIM (ICCID)', 'Service', 'Usage Type', 'Usage',
+                'Usage Unit', 'Total Amount', 'Bill Month', 'Plan Name', 'IMSI', 'MSISDN',
+                'Actual Usage', 'Call/Session Count', 'SP Account No', 'SP Name', 'SP Reference'
+            ]
+            col_map = {}
+            for col in df.columns:
+                n = _norm(col)
+                for exp in spnet_expected:
+                    if _norm(exp) == n:
+                        col_map[exp] = col
+                        break
+            def _get(row, key):
+                if key in row and row[key] is not None and str(row[key]).strip() != '':
+                    return row[key]
+                alt = col_map.get(key)
+                if alt and alt in row and row[alt] is not None and str(row[alt]).strip() != '':
+                    return row[alt]
+                return row.get(key)
+            
+            # Идемпотентность: удаляем старые записи этого файла перед загрузкой
+            self._delete_records_by_source_file('SPNET_TRAFFIC', Path(file_path).name)
+            
             df['source_file'] = Path(file_path).name
             df['load_date'] = datetime.now()
             df['created_by'] = 'SPNET_LOADER'
@@ -176,24 +203,24 @@ class SPNetDataLoader:
             records = []
             for _, row in df.iterrows():
                 record = {
-                    'total_rows': self.parse_number(row.get('Total Rows', None)),
-                    'contract_id': str(row.get('Contract ID', '')).strip() if row.get('Contract ID') else None,
-                    'imei': str(row.get('IMEI', '')).strip() if row.get('IMEI') else None,
-                    'sim_iccid': str(row.get('SIM (ICCID)', '')).strip() if row.get('SIM (ICCID)') else None,
-                    'service': str(row.get('Service', '')).strip() if row.get('Service') else None,
-                    'usage_type': str(row.get('Usage Type', '')).strip() if row.get('Usage Type') else None,
-                    'usage_bytes': self.parse_number(row.get('Usage', None)),
-                    'usage_unit': str(row.get('Usage Unit', '')).strip() if row.get('Usage Unit') else None,
-                    'total_amount': self.parse_number(row.get('Total Amount', None)),
-                    'bill_month': self.parse_bill_month(row.get('Bill Month', None)),
-                    'plan_name': str(row.get('Plan Name', '')).strip() if row.get('Plan Name') else None,
-                    'imsi': str(row.get('IMSI', '')).strip() if row.get('IMSI') else None,
-                    'msisdn': str(row.get('MSISDN', '')).strip() if row.get('MSISDN') else None,
-                    'actual_usage': self.parse_number(row.get('Actual Usage', None)),
-                    'call_session_count': self.parse_number(row.get('Call/Session Count', None)),
-                    'sp_account_no': self.parse_number(row.get('SP Account No', None)),
-                    'sp_name': str(row.get('SP Name', '')).strip() if row.get('SP Name') else None,
-                    'sp_reference': str(row.get('SP Reference', '')).strip() if row.get('SP Reference') else None,
+                    'total_rows': self.parse_number(_get(row, 'Total Rows')),
+                    'contract_id': str(_get(row, 'Contract ID') or '').strip() or None,
+                    'imei': str(_get(row, 'IMEI') or '').strip() or None,
+                    'sim_iccid': str(_get(row, 'SIM (ICCID)') or '').strip() or None,
+                    'service': str(_get(row, 'Service') or '').strip() or None,
+                    'usage_type': str(_get(row, 'Usage Type') or '').strip() or None,
+                    'usage_bytes': self.parse_number(_get(row, 'Usage')),
+                    'usage_unit': str(_get(row, 'Usage Unit') or '').strip() or None,
+                    'total_amount': self.parse_number(_get(row, 'Total Amount')),
+                    'bill_month': self.parse_bill_month(_get(row, 'Bill Month')),
+                    'plan_name': str(_get(row, 'Plan Name') or '').strip() or None,
+                    'imsi': str(_get(row, 'IMSI') or '').strip() or None,
+                    'msisdn': str(_get(row, 'MSISDN') or '').strip() or None,
+                    'actual_usage': self.parse_number(_get(row, 'Actual Usage')),
+                    'call_session_count': self.parse_number(_get(row, 'Call/Session Count')),
+                    'sp_account_no': self.parse_number(_get(row, 'SP Account No')),
+                    'sp_name': str(_get(row, 'SP Name') or '').strip() or None,
+                    'sp_reference': str(_get(row, 'SP Reference') or '').strip() or None,
                     'source_file': row.get('source_file', None),
                     'load_date': row.get('load_date', None),
                     'created_by': row.get('created_by', None)
@@ -206,6 +233,26 @@ class SPNetDataLoader:
         except Exception as e:
             logger.error(f"Ошибка при загрузке файла {file_path}: {e}")
             raise
+    
+    def _delete_records_by_source_file(self, table_name, source_file):
+        """Удаляет из таблицы все записи с данным SOURCE_FILE (идемпотентная перезагрузка)."""
+        if not self.connection or not source_file:
+            return
+        cursor = self.connection.cursor()
+        try:
+            cursor.execute(
+                f"DELETE FROM {table_name} WHERE UPPER(SOURCE_FILE) = UPPER(:1)",
+                (source_file,)
+            )
+            deleted = cursor.rowcount
+            self.connection.commit()
+            if deleted > 0:
+                logger.info(f"Удалено {deleted} старых записей по файлу {source_file} перед загрузкой")
+        except Exception as e:
+            self.connection.rollback()
+            logger.warning(f"Не удалось удалить старые записи по {source_file}: {e}")
+        finally:
+            cursor.close()
     
     def insert_records(self, records):
         """Вставка записей в Oracle с проверкой на дубликаты"""

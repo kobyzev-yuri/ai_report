@@ -312,7 +312,7 @@ def show_tab(get_connection, count_file_records, get_records_in_db):
                     }
                     loader = SPNetDataLoader(oracle_config)
                     if loader.connect_to_oracle():
-                        loader.data_dir = str(SPNET_DIR)
+                        loader.gdrive_path = str(SPNET_DIR)
                         log_capture = io.StringIO()
                         old_stdout = sys.stdout
                         old_stderr = sys.stderr
@@ -376,14 +376,17 @@ def show_tab(get_connection, count_file_records, get_records_in_db):
                     import traceback
                     all_logs.append(("Access Fees", False, f"❌ Ошибка: {e}\n{traceback.format_exc()}"))
         
-        # Показываем результаты
+        # Краткий результат без закладок с логами — не мешает сразу снова нажать Import
         for file_type, success, log_output in all_logs:
             if success:
                 st.success(f"✅ Импорт {file_type} завершен успешно!")
             else:
                 st.error(f"❌ Ошибка импорта {file_type}")
-            if log_output:
-                st.text_area(f"{file_type} Log", log_output, height=150, key=f'log_{file_type.lower().replace(" ", "_")}')
+            if log_output and not success:
+                st.text_area(f"Лог {file_type}", log_output, height=120, key=f'log_{file_type.lower().replace(" ", "_")}')
+            elif log_output and success:
+                with st.expander("Подробности (лог)", expanded=False):
+                    st.text(log_output)
     
     st.markdown("---")
     st.caption("💡 **Tip:** After importing, refresh the Report tab to see updated data")

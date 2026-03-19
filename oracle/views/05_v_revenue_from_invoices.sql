@@ -11,7 +11,7 @@ SET SQLBLANKLINES ON
 SET DEFINE OFF
 
 CREATE OR REPLACE VIEW V_REVENUE_FROM_INVOICES AS
-WITH -- Главная услуга: SBD (9002) или Stectrace (9014) с SUB-XXXXX — одна и та же услуга Иридиум, разный учёт (КБ или сообщения)
+WITH -- Главная услуга: SBD (9002) или Stectrace (9014) с SUB-XXXXX; плюс приостановка (9008) без главной — строка по IMEI всё равно должна быть в отчёте
 main_sbd_services AS (
     SELECT DISTINCT
         s.SERVICE_ID,
@@ -20,13 +20,29 @@ main_sbd_services AS (
         s.ACCOUNT_ID,
         s.CUSTOMER_ID
     FROM SERVICES s
-    WHERE s.TYPE_ID IN (9002, 9014)  -- SBD (учёт по КБ) и Stectrace (учёт по сообщениям)
+    WHERE s.TYPE_ID IN (9002, 9014)
       AND s.LOGIN LIKE 'SUB-%'
+    UNION ALL
+    -- Приостановка (9008): когда по IMEI+ACCOUNT нет главной 9002/9014, строка в отчёте по IMEI всё равно нужна (REVENUE_SUSPEND_ABON)
+    SELECT DISTINCT
+        s.SERVICE_ID,
+        s.VSAT AS BASE_CONTRACT_ID,
+        s.VSAT AS IMEI,
+        s.ACCOUNT_ID,
+        s.CUSTOMER_ID
+    FROM SERVICES s
+    WHERE s.TYPE_ID = 9008
+      AND s.VSAT IS NOT NULL
+      AND NOT EXISTS (
+          SELECT 1 FROM SERVICES m
+          WHERE m.TYPE_ID IN (9002, 9014)
+            AND m.VSAT = s.VSAT
+            AND m.ACCOUNT_ID = s.ACCOUNT_ID
+      )
 ),
 -- Теперь находим все invoice items для всех Iridium услуг
--- Для 9002: BASE_CONTRACT_ID = SUB-XXXXX
--- Для 9005, 9008, 9013: BASE_CONTRACT_ID берется из связанной услуги 9002 по VSAT=IMEI
--- Для 9014: BASE_CONTRACT_ID = SUB-XXXXX (если есть) или из связанной услуги 9002
+-- Для 9002/9014: BASE_CONTRACT_ID = SUB-XXXXX
+-- Для 9005, 9008, 9013: BASE_CONTRACT_ID из main_sbd_services по VSAT=IMEI (при отсутствии 9002/9014 для 9008 — IMEI)
 base_contracts AS (
     SELECT DISTINCT
         ii.INVOICE_ITEM_ID,

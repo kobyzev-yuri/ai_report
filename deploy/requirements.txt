@@ -10,6 +10,10 @@ openpyxl
 
 # Web interface
 streamlit
+# Голосовой диалог (voice_chat) — минимальный Flask-интерфейс с логином
+flask>=2.0.0
+# Конвертация webm → wav для транскрибации (нужен ffmpeg в системе: apt install ffmpeg)
+pydub>=0.25.0
 
 # CLI tools for database interaction
 click

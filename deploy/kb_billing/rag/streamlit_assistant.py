@@ -18,7 +18,6 @@ project_root = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(project_root))
 
 from kb_billing.rag.rag_assistant import RAGAssistant
-from kb_billing.rag.voice_transcription import transcribe_audio, validate_audio_file
 import pandas as pd
 import re
 import cx_Oracle
@@ -71,7 +70,7 @@ def show_assistant_tab():
     if "last_generated_sql" not in st.session_state:
         st.session_state.last_generated_sql = None
     if "input_mode" not in st.session_state:
-        st.session_state.input_mode = "text"  # "text" или "voice"
+        st.session_state.input_mode = "text"
     if "transcription_text" not in st.session_state:
         st.session_state.transcription_text = ""
     if "transcribe_clicked" not in st.session_state:
@@ -79,29 +78,9 @@ def show_assistant_tab():
     
     st.markdown("---")
     
-    # Переключатель режима ввода - ОЧЕНЬ ЗАМЕТНЫЙ, сразу после заголовка
-    st.markdown("#### 💬 Режим ввода вопроса")
-    
-    # Используем колонки для лучшей видимости
-    col_mode1, col_mode2 = st.columns([1, 2])
-    
-    with col_mode1:
-        input_mode = st.radio(
-            "",
-            ["text", "voice"],
-            format_func=lambda x: "📝 Текст" if x == "text" else "🎤 Голос",
-            key="input_mode_radio",
-            horizontal=True,
-            index=0 if st.session_state.get("input_mode", "text") == "text" else 1
-        )
-        st.session_state.input_mode = input_mode
-    
-    with col_mode2:
-        if input_mode == "voice":
-            st.success("🎤 **Голосовой режим активен** - используйте микрофон для записи вопроса")
-        else:
-            st.info("📝 **Текстовый режим** - введите вопрос вручную")
-    
+    # Только текстовый ввод. Голос с распознаванием в браузере — в отдельном интерфейсе (voice_chat)
+    st.markdown("#### 💬 Ввод вопроса")
+    st.caption("💡 Голосовой ввод (распознавание в браузере, без сервера) доступен в отдельном интерфейсе **«Голосовой диалог»** (Flask, с кнопкой «Говорить»).")
     st.markdown("---")
     
     # Инициализация ассистента (кэшируется, не вызывает rerun)
@@ -112,189 +91,38 @@ def show_assistant_tab():
         # Показываем форму даже если ассистент не инициализирован, чтобы пользователь мог попробовать
         assistant = None
     
-    # Используем значение из session_state для надежности
-    current_mode = st.session_state.get("input_mode", "text")
-    
-    # ========== ГОЛОСОВОЙ РЕЖИМ - МИКРОФОН ВНЕ ФОРМЫ ==========
-    if current_mode == "voice":
-        st.markdown("**🎤 Запишите голос или загрузите аудиофайл:**")
-        
-        # Инициализируем переменные
-        audio_data = None
-        uploaded_file = None
-        
-        # Проверяем наличие библиотеки заранее
-        try:
-            from streamlit_audio_recorder import audio_recorder
-            audio_recorder_available = True
-        except ImportError:
-            audio_recorder_available = False
-            st.warning("⚠️ **Библиотека для записи голоса не установлена**")
-            st.info("💡 Для записи голоса установите на сервере: `pip install streamlit-audio-recorder`")
-        
-        # Отображаем микрофон и загрузку файла
-        col1, col2 = st.columns([1, 1])
-        
-        with col1:
-            st.markdown("**🎤 Запись голоса:**")
-            if audio_recorder_available:
-                st.caption("Нажмите кнопку микрофона для начала записи")
-                
-                # Индикатор состояния записи
-                recording_status = st.empty()
-                
-                try:
-                    audio_bytes = audio_recorder(
-                        text="🎤 Нажмите для записи",
-                        recording_text="🔴 Идет запись... (остановится автоматически через 2 сек тишины)",
-                        neutral_color="#6c757d",
-                        recording_color="#e74c3c",
-                        icon_name="microphone",
-                        icon_size="2x",
-                        pause_threshold=2.0,
-                        sample_rate=44100
-                    )
-                    
-                    # Определяем состояние записи по наличию аудио
-                    if audio_bytes:
-                        recording_status.success("✅ Запись завершена!")
-                        st.audio(audio_bytes, format="audio/wav")
-                        audio_data = audio_bytes
-                    else:
-                        recording_status.info("💡 Нажмите кнопку микрофона выше для начала записи")
-                except Exception as e:
-                    st.error(f"❌ Ошибка при записи: {str(e)}")
-                    recording_status.error("❌ Ошибка при записи голоса")
-            else:
-                st.info("💡 Установите библиотеку для записи голоса")
-                    
-        with col2:
-            st.markdown("**📁 Или загрузите файл:**")
-            uploaded_file = st.file_uploader(
-                "Загрузить аудиофайл",
-                type=["wav", "mp3", "m4a", "webm", "ogg"],
-                help="Поддерживаемые форматы: WAV, MP3, M4A, WebM, OGG (максимум 25 МБ)",
-                key="audio_upload_voice",
-                label_visibility="visible"
-            )
-            
-            if uploaded_file is not None:
-                st.success(f"✅ Файл загружен: {uploaded_file.name}")
-                if audio_data is None:
-                    audio_data = uploaded_file.read()
-            elif audio_data is None:
-                st.info("💡 Или загрузите аудиофайл с компьютера")
-        
-        # Финальная проверка: используем запись, если есть, иначе загруженный файл
-        if audio_data is None and uploaded_file is not None:
-            audio_data = uploaded_file.read()
-        
-        # Сохраняем аудио в session_state
-        if audio_data:
-            import hashlib
-            audio_hash = hashlib.md5(audio_data).hexdigest()
-            st.session_state.pending_audio_data = audio_data
-            st.session_state.pending_audio_hash = audio_hash
-            
-            is_valid, error_msg = validate_audio_file(audio_data)
-            if not is_valid:
-                st.error(f"❌ {error_msg}")
-            else:
-                st.success("✅ Аудио готово к транскрибации. Нажмите кнопку '🎤 Транскрибировать' ниже.")
-        else:
-            if "pending_audio_data" in st.session_state:
-                del st.session_state.pending_audio_data
-        
-        st.markdown("---")
-        
-        # Поле для транскрипции или ручного ввода - БЕЗ ФОРМЫ!
-        question_input = st.text_area(
-            "Транскрипция (или введите текст вручную):",
-            height=150,
-            value=st.session_state.transcription_text or st.session_state.assistant_question or "",
-            placeholder="Транскрипция появится здесь после записи или загрузки аудио...",
-            key="transcription_display"
-        )
-        
-        # Сохраняем введенный текст
-        if question_input:
-            st.session_state.assistant_question = question_input
-        
-        st.caption("💡 Совет: Запишите голос или загрузите файл, затем нажмите '🎤 Транскрибировать' для распознавания")
-        
-        # Кнопки для голосового режима - БЕЗ ФОРМЫ!
-        col_btn1, col_btn2 = st.columns(2)
-        with col_btn1:
-            transcribe_button = st.button("🎤 Транскрибировать", use_container_width=True, key="transcribe_btn")
-        with col_btn2:
-            generate_button = st.button("📊 Сгенерировать SQL", type="primary", use_container_width=True, key="generate_btn_voice")
-        
-        # Обработка транскрибации
-        if transcribe_button:
-            if "pending_audio_data" in st.session_state:
-                audio_data = st.session_state.pending_audio_data
-                with st.spinner("🎤 Транскрибация аудио..."):
-                    transcription, transcribe_error = transcribe_audio(
-                        audio_data,
-                        api_key=os.getenv("OPENAI_API_KEY"),
-                        api_base=None
-                    )
-                    
-                    if transcription:
-                        st.session_state.transcription_text = transcription
-                        st.session_state.assistant_question = transcription
-                        st.success("✅ Аудио успешно распознано!")
-                        st.rerun()
-                    else:
-                        st.error(f"❌ {transcribe_error}")
-            else:
-                st.warning("⚠️ Сначала запишите голос или загрузите аудиофайл")
-        
-        # Обработка генерации SQL
-        if generate_button:
-            if question_input and question_input.strip():
-                st.session_state.assistant_action = "generate"
-                st.session_state.assistant_question = question_input.strip()
-                st.session_state.transcription_text = question_input.strip()
-                st.session_state.last_generated_question = ""
-                st.session_state.last_generated_sql = None
-                st.rerun()
-            else:
-                st.warning("⚠️ Введите вопрос или транскрибируйте аудио")
-    
     # ========== ТЕКСТОВЫЙ РЕЖИМ — ФОРМА (ввод не вызывает реран при наборе и Alt) ==========
-    else:
-        # Шаблон для явной ссылки на пример из KB (отчёт Новосибирск AP 523, 524)
-        TEMPLATE_NOVOSIBIRSK = (
-            "Отчёт по сервисам на точках доступа AP 523, 524 (Новосибирск): "
-            "номер услуги, номер договора, название клиента, адрес клиента, адрес услуги, код 1С абонента, тип услуги"
+    # Шаблон для явной ссылки на пример из KB (отчёт Новосибирск AP 523, 524)
+    TEMPLATE_NOVOSIBIRSK = (
+        "Отчёт по сервисам на точках доступа AP 523, 524 (Новосибирск): "
+        "номер услуги, номер договора, название клиента, адрес клиента, адрес услуги, код 1С абонента, тип услуги"
+    )
+    if st.button("📌 Подставить шаблон: Отчёт Новосибирск (AP 523, 524)", key="template_novosibirsk_btn"):
+        st.session_state["assistant_question_input"] = TEMPLATE_NOVOSIBIRSK
+        st.session_state["assistant_question_form_ta"] = TEMPLATE_NOVOSIBIRSK  # ключ виджета text_area в форме
+        st.rerun()
+    with st.form("assistant_question_form", clear_on_submit=False):
+        question_input = st.text_area(
+            "Введите ваш вопрос на русском языке:",
+            height=150,
+            placeholder="Например: Покажи превышение трафика за октябрь 2025. Можно вводить длинные директивы.",
+            value=st.session_state.get("assistant_question_input", ""),
+            key="assistant_question_form_ta",
+            help="Ввод и переключение раскладки (Alt) не перезагружают страницу. Нажмите «Сгенерировать SQL» для отправки. Можно подставить шаблон выше.",
         )
-        if st.button("📌 Подставить шаблон: Отчёт Новосибирск (AP 523, 524)", key="template_novosibirsk_btn"):
-            st.session_state["assistant_question_input"] = TEMPLATE_NOVOSIBIRSK
-            st.session_state["assistant_question_form_ta"] = TEMPLATE_NOVOSIBIRSK  # ключ виджета text_area в форме
-            st.rerun()
-        with st.form("assistant_question_form", clear_on_submit=False):
-            question_input = st.text_area(
-                "Введите ваш вопрос на русском языке:",
-                height=150,
-                placeholder="Например: Покажи превышение трафика за октябрь 2025. Можно вводить длинные директивы.",
-                value=st.session_state.get("assistant_question_input", ""),
-                key="assistant_question_form_ta",
-                help="Ввод и переключение раскладки (Alt) не перезагружают страницу. Нажмите «Сгенерировать SQL» для отправки. Можно подставить шаблон выше.",
-            )
-            generate_button = st.form_submit_button("📊 Сгенерировать SQL")
+        generate_button = st.form_submit_button("📊 Сгенерировать SQL")
 
-        # Обработка отправки формы (не трогаем key виджета — только отдельные ключи)
-        if generate_button:
-            if question_input and question_input.strip():
-                st.session_state.assistant_action = "generate"
-                st.session_state.assistant_question = question_input.strip()
-                st.session_state.assistant_question_input = question_input.strip()
-                st.session_state.last_generated_question = ""
-                st.session_state.last_generated_sql = None
-                st.rerun()
-            else:
-                st.warning("⚠️ Введите вопрос")
+    # Обработка отправки формы (не трогаем key виджета — только отдельные ключи)
+    if generate_button:
+        if question_input and question_input.strip():
+            st.session_state.assistant_action = "generate"
+            st.session_state.assistant_question = question_input.strip()
+            st.session_state.assistant_question_input = question_input.strip()
+            st.session_state.last_generated_question = ""
+            st.session_state.last_generated_sql = None
+            st.rerun()
+        else:
+            st.warning("⚠️ Введите вопрос")
     
     # Используем сохраненное значение вопроса
     question = st.session_state.assistant_question

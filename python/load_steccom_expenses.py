@@ -171,6 +171,38 @@ class STECCOMDataLoader:
                 logger.error(f"Не удалось прочитать файл {file_path}")
                 return 0
             
+            # Нормализация названий колонок (пробелы, регистр) для совместимости с разными форматами
+            df.columns = [str(c).strip() for c in df.columns]
+            
+            # Сопоставление возможных имён колонок с ожидаемыми (новые файлы могут отличаться)
+            def _norm(s):
+                return str(s).upper().replace(' ', '').replace('-', '').replace('/', '').replace('_', '')
+            expected = [
+                'Invoice Date', 'Company Name', 'Company Number', 'Settling Period',
+                'Fee Type', 'Contract ID', 'IMSI/ISDNA', 'ICC-ID/IMEI', 'Activation Date',
+                'Transaction Date', 'Service', 'Rate Type', 'Plan/Discount', 'Description',
+                'Prorated Days', 'Amount', 'Group'
+            ]
+            col_aliases = {}
+            for col in df.columns:
+                n = _norm(col)
+                for exp in expected:
+                    if _norm(exp) == n:
+                        col_aliases[exp] = col
+                        break
+            
+            def _get(row, key):
+                if key in row:
+                    v = row[key]
+                    if v is not None and str(v).strip() != '':
+                        return v
+                alt = col_aliases.get(key)
+                if alt and alt in row:
+                    v = row[alt]
+                    if v is not None and str(v).strip() != '':
+                        return v
+                return row.get(key)
+            
             # Если данные в одной колонке, пытаемся разделить
             if len(df.columns) == 2:
                 main_col = df.columns[0]
@@ -190,34 +222,37 @@ class STECCOMDataLoader:
             df['load_date'] = datetime.now()
             df['created_by'] = 'STECCOM_LOADER'
             
+            # Идемпотентность: удаляем старые записи этого файла, чтобы повторная загрузка не дублировала данные
+            self._delete_records_by_source_file('STECCOM_EXPENSES', Path(file_path).name)
+            
             # Подготавливаем данные для вставки (исключаем только BROADBAND)
             records = []
             skipped_broadband = 0
             for _, row in df.iterrows():
                 # Пропускаем записи с SERVICE = 'BROADBAND'
-                service = str(row.get('Service', '')).strip().upper() if row.get('Service') else ''
+                service = str(_get(row, 'Service') or '').strip().upper()
                 if service == 'BROADBAND':
                     skipped_broadband += 1
                     continue
                 
                 record = {
-                    'invoice_date': self.parse_date(row.get('Invoice Date')),
-                    'company_name': row.get('Company Name'),
-                    'company_number': self.parse_number(row.get('Company Number')),
-                    'settling_period': self.parse_number(row.get('Settling Period')),
-                    'fee_type': row.get('Fee Type'),
-                    'contract_id': row.get('Contract ID'),
-                    'imsi_isdna': row.get('IMSI/ISDNA'),
-                    'icc_id_imei': row.get('ICC-ID/IMEI'),
-                    'activation_date': self.parse_date(row.get('Activation Date')),
-                    'transaction_date': self.parse_date(row.get('Transaction Date')),
-                    'service': row.get('Service'),
-                    'rate_type': row.get('Rate Type'),
-                    'plan_discount': row.get('Plan/Discount'),
-                    'description': row.get('Description'),
-                    'prorated_days': self.parse_number(row.get('Prorated Days')),
-                    'amount': self.parse_amount(row.get('Amount')),
-                    'group_name': row.get('Group'),
+                    'invoice_date': self.parse_date(_get(row, 'Invoice Date')),
+                    'company_name': _get(row, 'Company Name'),
+                    'company_number': self.parse_number(_get(row, 'Company Number')),
+                    'settling_period': self.parse_number(_get(row, 'Settling Period')),
+                    'fee_type': _get(row, 'Fee Type'),
+                    'contract_id': _get(row, 'Contract ID'),
+                    'imsi_isdna': _get(row, 'IMSI/ISDNA'),
+                    'icc_id_imei': _get(row, 'ICC-ID/IMEI'),
+                    'activation_date': self.parse_date(_get(row, 'Activation Date')),
+                    'transaction_date': self.parse_date(_get(row, 'Transaction Date')),
+                    'service': _get(row, 'Service'),
+                    'rate_type': _get(row, 'Rate Type'),
+                    'plan_discount': _get(row, 'Plan/Discount'),
+                    'description': _get(row, 'Description'),
+                    'prorated_days': self.parse_number(_get(row, 'Prorated Days')),
+                    'amount': self.parse_amount(_get(row, 'Amount')),
+                    'group_name': _get(row, 'Group'),
                     'source_file': row.get('source_file'),
                     'load_date': row.get('load_date'),
                     'created_by': row.get('created_by')
@@ -227,7 +262,7 @@ class STECCOMDataLoader:
             if skipped_broadband > 0:
                 logger.info(f"Пропущено {skipped_broadband} записей с SERVICE = 'BROADBAND'")
             
-            # Вставляем данные в Oracle
+            # Вставляем данные в Oracle (удаление по SOURCE_FILE уже выполнено выше)
             return self.insert_records(records)
             
         except Exception as e:
@@ -299,6 +334,26 @@ class STECCOMDataLoader:
             return float(clean_amount) if clean_amount else None
         except:
             return None
+    
+    def _delete_records_by_source_file(self, table_name, source_file):
+        """Удаляет из таблицы все записи с данным SOURCE_FILE (для идемпотентной перезагрузки)."""
+        if not self.connection or not source_file:
+            return
+        cursor = self.connection.cursor()
+        try:
+            cursor.execute(
+                f"DELETE FROM {table_name} WHERE UPPER(SOURCE_FILE) = UPPER(:1)",
+                (source_file,)
+            )
+            deleted = cursor.rowcount
+            self.connection.commit()
+            if deleted > 0:
+                logger.info(f"Удалено {deleted} старых записей по файлу {source_file} перед загрузкой")
+        except Exception as e:
+            self.connection.rollback()
+            logger.warning(f"Не удалось удалить старые записи по {source_file}: {e}")
+        finally:
+            cursor.close()
     
     def insert_records(self, records):
         """Вставка записей в Oracle"""
