@@ -251,11 +251,23 @@ def get_revenue_report(get_connection, period_filter=None, contract_id_filter=No
         conds.append(f"v.CODE_1C LIKE '%{code_1c_filter.strip()}%'")
     
     where = " AND ".join(conds) if conds else "1=1"
-    # JOIN с SERVICES: только услуги, активные в периоде (CLOSE_DATE > конец месяца или NULL), чтобы не было задвоения по клонам
+    # Без задвоения: главная услуга активна в периоде ИЛИ есть другая услуга по IMEI с начислениями в периоде (напр. 9008)
     query = f"""SELECT v.* FROM V_REVENUE_FROM_INVOICES v
-JOIN SERVICES s ON v.SERVICE_ID = s.SERVICE_ID
+LEFT JOIN SERVICES s ON v.SERVICE_ID = s.SERVICE_ID
   AND (s.CLOSE_DATE IS NULL OR s.CLOSE_DATE > LAST_DAY(TO_DATE(v.PERIOD_YYYYMM||'-01','YYYY-MM-DD')))
-WHERE {where} ORDER BY v.PERIOD_YYYYMM DESC, v.CONTRACT_ID"""
+WHERE {where}
+  AND (
+    s.SERVICE_ID IS NOT NULL
+    OR EXISTS (
+      SELECT 1 FROM BM_INVOICE_ITEM ii2
+      JOIN SERVICES s2 ON ii2.SERVICE_ID = s2.SERVICE_ID
+      JOIN BM_PERIOD p ON ii2.PERIOD_ID = p.PERIOD_ID
+      WHERE s2.VSAT = v.IMEI
+        AND TO_CHAR(p.START_DATE,'YYYY-MM') = v.PERIOD_YYYYMM
+        AND (s2.CLOSE_DATE IS NULL OR s2.CLOSE_DATE > LAST_DAY(TO_DATE(v.PERIOD_YYYYMM||'-01','YYYY-MM-DD')))
+    )
+  )
+ORDER BY v.PERIOD_YYYYMM DESC, v.CONTRACT_ID"""
     
     try:
         return pd.read_sql_query(query, conn)
