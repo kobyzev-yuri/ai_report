@@ -21,11 +21,20 @@ AVAILABLE_TABS = {
     'confluence_librarian': '🛰️ Спутниковый ассистент',
     'report': '💰 Расходы Иридиум',
     'revenue': '💰 Доходы',
+    'bills': '📄 Рассылка счетов',
     'analytics': '📋 Счета за период',
     'loader': '📥 Data Loader',
-    'bills': '📄 Рассылка счетов',
     'campaigns': '📧 Кампании',
 }
+
+_FALLBACK_TAB_LABELS = {
+    "bills": "📄 Рассылка счетов",
+    "campaigns": "📧 Кампании",
+}
+for _fk, _fl in _FALLBACK_TAB_LABELS.items():
+    if _fk not in AVAILABLE_TABS:
+        AVAILABLE_TABS[_fk] = _fl
+
 
 def get_db_connection():
     """Создать подключение к базе данных SQLite"""

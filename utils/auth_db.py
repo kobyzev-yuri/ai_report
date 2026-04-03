@@ -15,17 +15,43 @@ import os
 DB_PATH = Path(__file__).resolve().parent.parent / "users.db"
 
 # Список всех доступных вкладок в системе
+# Порядок ключей = порядок вкладок в Streamlit. «Рассылка счетов» (bills) сразу после «Доходы»,
+# иначе при 9+ вкладках уезжает вправо и кажется, что её «нет в интерфейсе».
 AVAILABLE_TABS = {
     'assistant': '🤖 Биллинг ассистент',
     'kb_expansion': '📚 Расширение KB',
     'confluence_librarian': '🛰️ Спутниковый ассистент',
     'report': '💰 Расходы Иридиум',
     'revenue': '💰 Доходы',
+    'bills': '📄 Рассылка счетов',
     'analytics': '📋 Счета за период',
     'loader': '📥 Data Loader',
-    'bills': '📄 Рассылка счетов',
     'campaigns': '📧 Кампании',
 }
+
+# На старых деплоях словарь мог быть без новых ключей; иначе JSON с "bills" режется в sanitize.
+_FALLBACK_TAB_LABELS = {
+    "bills": "📄 Рассылка счетов",
+    "campaigns": "📧 Кампании",
+}
+for _fk, _fl in _FALLBACK_TAB_LABELS.items():
+    if _fk not in AVAILABLE_TABS:
+        AVAILABLE_TABS[_fk] = _fl
+
+
+def sanitize_allowed_tab_keys(tab_list):
+    """Оставить только известные ключи вкладок, без пробелов и дублей (устойчиво к битому JSON)."""
+    if not tab_list or not isinstance(tab_list, (list, tuple, set)):
+        return []
+    valid = set(AVAILABLE_TABS.keys())
+    seen = set()
+    out = []
+    for x in tab_list:
+        k = str(x).strip()
+        if k in valid and k not in seen:
+            seen.add(k)
+            out.append(k)
+    return out
 
 def get_db_connection():
     """Создать подключение к базе данных SQLite"""
@@ -124,6 +150,8 @@ def create_user(username, password, is_superuser=False, allowed_tabs=None, creat
         if not isinstance(allowed_tabs, list):
             return False, "allowed_tabs должен быть списком"
         
+        allowed_tabs = sanitize_allowed_tab_keys(allowed_tabs)
+        
         # Проверяем, что все вкладки существуют
         invalid_tabs = [tab for tab in allowed_tabs if tab not in AVAILABLE_TABS]
         if invalid_tabs:
@@ -184,6 +212,8 @@ def authenticate_user(username, password):
         # Суперпользователи имеют доступ ко всем вкладкам
         if is_superuser:
             allowed_tabs = list(AVAILABLE_TABS.keys())
+        else:
+            allowed_tabs = sanitize_allowed_tab_keys(allowed_tabs)
         
         if verify_password(password, password_hash):
             # Обновить время последнего входа
@@ -225,6 +255,8 @@ def update_user_permissions(username, allowed_tabs):
         # Валидация allowed_tabs
         if not isinstance(allowed_tabs, list):
             return False, "allowed_tabs должен быть списком"
+        
+        allowed_tabs = sanitize_allowed_tab_keys(allowed_tabs)
         
         # Проверяем, что все вкладки существуют
         invalid_tabs = [tab for tab in allowed_tabs if tab not in AVAILABLE_TABS]
@@ -276,7 +308,7 @@ def get_user_permissions(username):
         if allowed_tabs_json:
             try:
                 allowed_tabs = json.loads(allowed_tabs_json)
-                return True, allowed_tabs
+                return True, sanitize_allowed_tab_keys(allowed_tabs)
             except json.JSONDecodeError:
                 return True, ['report', 'revenue']  # Базовые права по умолчанию
         else:

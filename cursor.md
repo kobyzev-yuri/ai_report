@@ -529,7 +529,8 @@ cp -r tabs/ deploy/tabs/
 
 1. **Синхронизация deploy/ на сервер**
    ```bash
-   cd /home/cnn/ai_report
+   # Корень клона на вашей машине (пример: /media/cnn/home/cnn/ai_report — путь не зашит в коде проекта)
+   cd /media/cnn/home/cnn/ai_report
    rsync -avz -e "ssh -p 1194" --exclude='data/' --exclude='*.log' --exclude='__pycache__/' \
      deploy/ root@82.114.2.2:/usr/local/projects/ai_report/
    ```

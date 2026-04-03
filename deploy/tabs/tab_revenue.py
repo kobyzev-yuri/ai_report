@@ -5,17 +5,21 @@ import streamlit as st
 import pandas as pd
 from datetime import datetime
 from tabs.common import export_to_csv, export_to_excel
+from tabs.report_filters import render_report_filters
 
-def show_tab(get_connection, get_revenue_report,
-             selected_period, contract_id_filter, imei_filter,
-             customer_name_filter, code_1c_filter):
+
+def show_tab(get_connection, get_revenue_report, get_periods, get_plans):
     """
-    Отображение закладки отчета по доходам
+    Отображение закладки отчета по доходам.
+    Фильтры — в теле вкладки.
     """
     st.header("💰 Доходы из счетов-фактур")
     st.markdown("Отчет по доходам из счетов-фактур (BM_INVOICE_ITEM). Все суммы в рублях.")
-    st.caption("В отчёте: Абон. плата (SBD) = REVENUE_SBD_ABON; Stectrace (сообщения в штуках) = Сообщения Абонплата (REVENUE_MSG_ABON). Строки без задвоения IMEI (учтены только услуги, активные в выбранном периоде).")
-    
+    st.caption("В отчёте: SBD = REVENUE_SBD_*; Stectrace = REVENUE_MSG_ABON; мониторинг (9004/9005/9010) = REVENUE_MONITORING_ABON. Одна строка на (SUB-/контракт, IMEI, период); при смене SUB на том же IMEI в периоде возможны две строки. Фильтр по активной главной услуге в периоде.")
+
+    selected_period, _selected_plan, contract_id_filter, imei_filter, customer_name_filter, code_1c_filter = (
+        render_report_filters(get_connection, get_periods, get_plans, include_plan=False)
+    )
     period_filter = selected_period
     contract_id_filter = contract_id_filter if contract_id_filter else None
     imei_filter = imei_filter if imei_filter else None
@@ -103,7 +107,7 @@ def show_tab(get_connection, get_revenue_report,
                 st.metric("SUSPEND Абонплата", f"{df_revenue['REVENUE_SUSPEND_ABON'].sum():,.2f}")
             # Мониторинг Абонплата
             if 'REVENUE_MONITORING_ABON' in df_revenue.columns:
-                st.metric("Мониторинг Абонплата", f"{df_revenue['REVENUE_MONITORING_ABON'].sum():,.2f}")
+                st.metric("Мониторинг Абонплата (9004/9005/9010)", f"{df_revenue['REVENUE_MONITORING_ABON'].sum():,.2f}")
             # Блокировка мониторинга
             if 'REVENUE_MONITORING_BLOCK_ABON' in df_revenue.columns:
                 st.metric("Блокировка мониторинга", f"{df_revenue['REVENUE_MONITORING_BLOCK_ABON'].sum():,.2f}")

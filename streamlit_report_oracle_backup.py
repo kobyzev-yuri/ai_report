@@ -13,19 +13,22 @@ import pandas as pd
 import cx_Oracle
 from datetime import datetime
 import io
-from pathlib import Path
 import warnings
 from utils.auth_db import (
     init_db, authenticate_user, create_user, list_users,
     delete_user, is_superuser, update_user_permissions,
-    get_user_permissions, AVAILABLE_TABS as _AVAILABLE_TABS,
+    get_user_permissions, AVAILABLE_TABS,
 )
-# Гарантируем наличие «Рассылка счетов» и «Кампании» в списке (на сервере может быть старый auth_db)
-AVAILABLE_TABS = dict(_AVAILABLE_TABS)
-if 'bills' not in AVAILABLE_TABS:
-    AVAILABLE_TABS['bills'] = '📄 Рассылка счетов'
-if 'campaigns' not in AVAILABLE_TABS:
-    AVAILABLE_TABS['campaigns'] = '📧 Кампании'
+# Важно: не делать dict(AVAILABLE_TABS) — это копия. sanitize_allowed_tab_keys и
+# get_user_permissions читают тот же объект в auth_db; если дописать bills только
+# в копию, ключ из users.db отбрасывается при старом auth_db без bills, и вкладка
+# не появляется в интерфейсе.
+for _tab_key, _tab_label in (
+    ("bills", "📄 Рассылка счетов"),
+    ("campaigns", "📧 Кампании"),
+):
+    if _tab_key not in AVAILABLE_TABS:
+        AVAILABLE_TABS[_tab_key] = _tab_label
 
 # Импорт модулей закладок
 from tabs.tab_report import show_tab as show_report_tab
@@ -253,6 +256,8 @@ def main():
         st.session_state.authenticated = False
         st.session_state.username = None
         st.session_state.is_superuser = False
+        for _k in ("main_nav_tab_key", "main_nav_sidebar_radio"):
+            st.session_state.pop(_k, None)
         st.rerun()
     
     st.sidebar.markdown("---")
@@ -261,110 +266,99 @@ def main():
     if not ORACLE_PASSWORD:
         st.error("⚠️ **Конфигурация не загружена!**")
         st.stop()
-    
-    # Заголовок
-    st.title("📊 Iridium M2M KB Assistant")
-    st.markdown("---")
-    
-    # Фильтры в боковой панели
-    with st.sidebar:
-        st.header("⚙️ Filters")
-        
-        periods_data = get_periods(get_connection)
-        if not periods_data:
-            st.error("⚠️ Не удалось загрузить периоды.")
-            st.stop()
-        
-        period_display_list = sorted(list(set(d for d, _ in periods_data if d)), reverse=True)
-        period_options = ["All Periods"] + period_display_list
-        
-        if 'selected_period_index' not in st.session_state:
-            st.session_state.selected_period_index = 0
-            
-        selected_period_display = st.selectbox(
-            "Отчетный Период", 
-            period_options,
-            index=min(st.session_state.selected_period_index, len(period_options)-1),
-            key='period_selectbox'
-        )
-        selected_period = None if selected_period_display == "All Periods" else selected_period_display
-        
-        # Фильтр по планам
-        plans = get_plans(get_connection)
-        plan_options = ["All Plans"] + plans
-        selected_plan = st.selectbox("Plan", plan_options, key='plan_selectbox')
-        
-        st.markdown("---")
-        st.subheader("🔍 Additional Filters")
-        contract_id_filter = st.text_input("Contract ID (SUB-*)", key='contract_id_filter')
-        imei_filter = st.text_input("IMEI", key='imei_filter')
-        customer_name_filter = st.text_input("Organization/Person", key='customer_name_filter')
-        code_1c_filter = st.text_input("Code 1C", key='code_1c_filter')
-        
-        st.markdown("---")
-        if st.button("🔌 Test Connection", key='test_connection_btn'):
-            test_conn = get_connection()
-            if test_conn:
-                st.success("✅ Подключение успешно!")
-                test_conn.close()
-            else:
-                st.error("❌ Ошибка подключения.")
-    
-    # Получаем разрешенные вкладки
-    allowed_tabs_keys = st.session_state.get('allowed_tabs', [])
-    if st.session_state.get('is_superuser', False):
-        # Суперпользователи видят все табы
+
+    # Разрешённые вкладки (до фильтров — нужно для навигации в сайдбаре)
+    if st.session_state.get("is_superuser", False):
         allowed_tabs_keys = list(AVAILABLE_TABS.keys())
-    elif not allowed_tabs_keys:
-        # Если у пользователя нет прав, не показываем табы
-        allowed_tabs_keys = []
-    
-    # Формируем список закладок
-    tab_configs = []
-    for key, name in AVAILABLE_TABS.items():
-        if key in allowed_tabs_keys:
-            tab_configs.append((key, name))
-            
+    else:
+        un = st.session_state.get("username")
+        ok, tabs = get_user_permissions(un) if un else (False, [])
+        allowed_tabs_keys = tabs if ok else []
+        st.session_state.allowed_tabs = allowed_tabs_keys
+
+    tab_configs = [
+        (key, name)
+        for key, name in AVAILABLE_TABS.items()
+        if key in allowed_tabs_keys
+    ]
     if not tab_configs:
         st.error("❌ У вас нет доступа ни к одной вкладке.")
         st.stop()
-    
-    tab_names = [name for _, name in tab_configs]
-    tabs = st.tabs(tab_names)
-    
-    # Рендеринг вкладок
-    for (tab_key, _), tab_obj in zip(tab_configs, tabs):
-        with tab_obj:
-            if tab_key == 'report':
-                show_report_tab(get_connection, get_main_report, selected_period, selected_plan, contract_id_filter, imei_filter, customer_name_filter, code_1c_filter)
-            elif tab_key == 'revenue':
-                show_revenue_tab(get_connection, get_revenue_report, selected_period, contract_id_filter, imei_filter, customer_name_filter, code_1c_filter)
-            elif tab_key == 'analytics':
-                show_analytics_tab(get_connection, get_analytics_invoice_period_report, get_analytics_duplicates, selected_period, contract_id_filter, imei_filter, customer_name_filter, code_1c_filter, remove_analytics_duplicates)
-            elif tab_key == 'loader':
-                show_loader_tab(get_connection, count_file_records, get_records_in_db)
-            elif tab_key == 'bills':
-                show_bills_tab()
-            elif tab_key == 'campaigns':
-                show_campaigns_tab()
-            elif tab_key == 'assistant':
-                try:
-                    from kb_billing.rag.streamlit_assistant import show_assistant_tab
-                    show_assistant_tab()
-                except Exception as e:
-                    st.error(f"Ошибка ассистента: {e}")
-            elif tab_key == 'kb_expansion':
-                try:
-                    from kb_billing.rag.streamlit_kb_expansion import show_kb_expansion_tab
-                    show_kb_expansion_tab()
-                except Exception as e:
-                    st.error(f"Ошибка расширения KB: {e}")
-            elif tab_key == 'confluence_librarian':
-                try:
-                    from kb_billing.rag.streamlit_confluence_librarian import show_confluence_librarian_tab
-                    show_confluence_librarian_tab()
-                except Exception as e:
-                    st.error(f"Ошибка спутникового библиотекаря: {e}")
+
+    _nav_keys = [k for k, _ in tab_configs]
+    _nav_labels = [n for _, n in tab_configs]
+    if (
+        "main_nav_tab_key" not in st.session_state
+        or st.session_state.main_nav_tab_key not in _nav_keys
+    ):
+        st.session_state.main_nav_tab_key = _nav_keys[0]
+
+    if (
+        "main_nav_sidebar_radio" not in st.session_state
+        or st.session_state.main_nav_sidebar_radio not in _nav_labels
+    ):
+        st.session_state.main_nav_sidebar_radio = _nav_labels[
+            _nav_keys.index(st.session_state.main_nav_tab_key)
+        ]
+
+    st.sidebar.markdown("### 📑 Раздел")
+    st.sidebar.caption("Выбор раздела — здесь, без горизонтальной полосы вкладок.")
+    _picked = st.sidebar.radio(
+        "Раздел приложения",
+        options=_nav_labels,
+        key="main_nav_sidebar_radio",
+    )
+    st.session_state.main_nav_tab_key = _nav_keys[_nav_labels.index(_picked)]
+
+    # Заголовок
+    st.title("📊 Iridium M2M KB Assistant")
+    st.markdown("---")
+
+    tab_key = st.session_state.main_nav_tab_key
+    if tab_key == "report":
+        show_report_tab(get_connection, get_main_report, get_periods, get_plans)
+    elif tab_key == "revenue":
+        show_revenue_tab(get_connection, get_revenue_report, get_periods, get_plans)
+    elif tab_key == "analytics":
+        show_analytics_tab(
+            get_connection,
+            get_analytics_invoice_period_report,
+            get_analytics_duplicates,
+            get_periods,
+            get_plans,
+            remove_analytics_duplicates,
+        )
+    elif tab_key == "loader":
+        show_loader_tab(get_connection, count_file_records, get_records_in_db)
+    elif tab_key == "bills":
+        show_bills_tab()
+    elif tab_key == "campaigns":
+        show_campaigns_tab()
+    elif tab_key == "assistant":
+        try:
+            from kb_billing.rag.streamlit_assistant import show_assistant_tab
+
+            show_assistant_tab()
+        except Exception as e:
+            st.error(f"Ошибка ассистента: {e}")
+    elif tab_key == "kb_expansion":
+        try:
+            from kb_billing.rag.streamlit_kb_expansion import show_kb_expansion_tab
+
+            show_kb_expansion_tab()
+        except Exception as e:
+            st.error(f"Ошибка расширения KB: {e}")
+    elif tab_key == "confluence_librarian":
+        try:
+            from kb_billing.rag.streamlit_confluence_librarian import (
+                show_confluence_librarian_tab,
+            )
+
+            show_confluence_librarian_tab()
+        except Exception as e:
+            st.error(f"Ошибка спутникового библиотекаря: {e}")
+    else:
+        st.error(f"Неизвестный раздел: {tab_key!r}. Обновите страницу или обратитесь к администратору.")
 
 if __name__ == "__main__":
     main()

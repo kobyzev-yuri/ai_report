@@ -28,8 +28,8 @@ curl http://localhost:6333/health
 ## Шаг 3: Инициализация KB
 
 ```bash
-# Загрузка всех данных KB в Qdrant
-cd /mnt/ai/cnn/ai_report
+# Загрузка всех данных KB в Qdrant (выполняйте из корня репозитория, где лежит папка kb_billing)
+cd /media/cnn/home/cnn/ai_report   # пример пути на вашей машине
 python kb_billing/rag/init_kb.py
 
 # С пересозданием коллекции (если нужно)
@@ -126,8 +126,8 @@ python kb_billing/rag/init_kb.py --recreate
 ### Ошибка импорта модулей
 
 ```bash
-# Убедитесь, что вы в корневой директории проекта
-cd /mnt/ai/cnn/ai_report
+# Убедитесь, что вы в корневой директории проекта (корень клона ai_report)
+cd /media/cnn/home/cnn/ai_report   # пример; замените на свой путь
 
 # Проверьте установку зависимостей
 pip list | grep -E "qdrant|sentence-transformers"

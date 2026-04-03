@@ -119,8 +119,8 @@ ORDER BY BILL_MONTH DESC;
 
 ALERT_FILE="/tmp/iridium_alerts_$(date +%Y%m%d).txt"
 
-# Run finance alerts
-sqlplus -s billing7/billing@bm7 @/mnt/ai/cnn/ai_report/oracle/queries/finance_alerts.sql > "$ALERT_FILE"
+# Run finance alerts (из корня репозитория ai_report)
+sqlplus -s billing7/billing@bm7 @"$(pwd)/oracle/queries/finance_alerts.sql" > "$ALERT_FILE"
 
 # Check if there are any alerts
 if grep -q "ALERT" "$ALERT_FILE"; then

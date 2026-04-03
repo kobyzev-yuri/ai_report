@@ -251,27 +251,37 @@ def get_revenue_report(get_connection, period_filter=None, contract_id_filter=No
         conds.append(f"v.CODE_1C LIKE '%{code_1c_filter.strip()}%'")
     
     where = " AND ".join(conds) if conds else "1=1"
-    # Без задвоения: показываем строку, если главная услуга (v.SERVICE_ID) активна в периоде ИЛИ
-    # есть любая другая услуга по этому IMEI с начислениями в этом периоде, активная в периоде (напр. только приостановка 9008)
-    query = f"""SELECT v.* FROM V_REVENUE_FROM_INVOICES v
-LEFT JOIN SERVICES s ON v.SERVICE_ID = s.SERVICE_ID
-  AND (s.CLOSE_DATE IS NULL OR s.CLOSE_DATE > LAST_DAY(TO_DATE(v.PERIOD_YYYYMM||'-01','YYYY-MM-DD')))
-WHERE {where}
-  AND (
-    s.SERVICE_ID IS NOT NULL
-    OR EXISTS (
-      SELECT 1 FROM BM_INVOICE_ITEM ii2
-      JOIN SERVICES s2 ON ii2.SERVICE_ID = s2.SERVICE_ID
-      JOIN BM_PERIOD p ON ii2.PERIOD_ID = p.PERIOD_ID
-      WHERE s2.VSAT = v.IMEI
-        AND TO_CHAR(p.START_DATE,'YYYY-MM') = v.PERIOD_YYYYMM
-        AND (s2.CLOSE_DATE IS NULL OR s2.CLOSE_DATE > LAST_DAY(TO_DATE(v.PERIOD_YYYYMM||'-01','YYYY-MM-DD')))
+    # Без задвоения: 1) показываем строку если главная услуга активна ИЛИ есть активная услуга с начислениями в периоде;
+    # 2) на (IMEI, CONTRACT_ID, PERIOD) оставляем одну строку — приоритет у строки, где главная услуга активна (не клон)
+    query = f"""SELECT * FROM (
+  SELECT v.*,
+    ROW_NUMBER() OVER (
+      PARTITION BY v.IMEI, v.CONTRACT_ID, v.PERIOD_YYYYMM
+      ORDER BY CASE WHEN s.SERVICE_ID IS NOT NULL THEN 0 ELSE 1 END, v.SERVICE_ID
+    ) AS rn
+  FROM V_REVENUE_FROM_INVOICES v
+  LEFT JOIN SERVICES s ON v.SERVICE_ID = s.SERVICE_ID
+    AND (s.CLOSE_DATE IS NULL OR s.CLOSE_DATE > LAST_DAY(TO_DATE(v.PERIOD_YYYYMM||'-01','YYYY-MM-DD')))
+  WHERE {where}
+    AND (
+      s.SERVICE_ID IS NOT NULL
+      OR EXISTS (
+        SELECT 1 FROM BM_INVOICE_ITEM ii2
+        JOIN SERVICES s2 ON ii2.SERVICE_ID = s2.SERVICE_ID
+        JOIN BM_PERIOD p ON ii2.PERIOD_ID = p.PERIOD_ID
+        WHERE NVL(NULLIF(TRIM(TO_CHAR(s2.VSAT)), ''), NULLIF(TRIM(TO_CHAR(s2.LOGIN)), '')) = TRIM(TO_CHAR(v.IMEI))
+          AND TO_CHAR(p.START_DATE,'YYYY-MM') = v.PERIOD_YYYYMM
+          AND (s2.CLOSE_DATE IS NULL OR s2.CLOSE_DATE > LAST_DAY(TO_DATE(v.PERIOD_YYYYMM||'-01','YYYY-MM-DD')))
+      )
     )
-  )
-ORDER BY v.PERIOD_YYYYMM DESC, v.CONTRACT_ID"""
+) WHERE rn = 1
+ORDER BY PERIOD_YYYYMM DESC, CONTRACT_ID"""
     
     try:
-        return pd.read_sql_query(query, conn)
+        df = pd.read_sql_query(query, conn)
+        if df is not None and not df.empty and "RN" in df.columns:
+            df = df.drop(columns=["RN"])
+        return df
     except Exception as e:
         st.error(f"Ошибка получения отчета по доходам: {e}")
         return None

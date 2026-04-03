@@ -6,6 +6,8 @@ from pathlib import Path
 from datetime import datetime
 import os
 import shutil
+import subprocess
+import tempfile
 import zipfile
 import io
 
@@ -29,10 +31,81 @@ def _ensure_dir(path: Path) -> None:
     path.mkdir(parents=True, exist_ok=True)
 
 
+def _count_files_in_tree(root: Path) -> int:
+    if not root.exists():
+        return 0
+    return sum(len(files) for _, _, files in os.walk(root))
+
+
+def _extract_rar_archive(data: bytes, filename: str, target_dir: Path) -> str:
+    """
+    Распаковать RAR в target_dir/<имя_без_rar>/.
+    Пробует: unrar → 7z → unar → библиотеку rarfile (нужен UnRAR в системе).
+    """
+    stem = Path(filename).stem
+    subdir_name = stem or f"rar_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+    out_dir = target_dir / subdir_name
+    if out_dir.exists():
+        shutil.rmtree(out_dir)
+    _ensure_dir(out_dir)
+
+    with tempfile.NamedTemporaryFile(suffix=".rar", delete=False) as tmp:
+        tmp.write(data)
+        tmp_path = tmp.name
+
+    errors: list[str] = []
+    try:
+        cmd_tries: list[tuple[str, list[str]]] = []
+        if shutil.which("unrar"):
+            cmd_tries.append(
+                ("unrar", ["unrar", "x", "-o+", tmp_path, str(out_dir) + os.sep])
+            )
+        if shutil.which("7z"):
+            cmd_tries.append(
+                ("7z", ["7z", "x", f"-o{out_dir}", "-y", tmp_path])
+            )
+        if shutil.which("unar"):
+            cmd_tries.append(
+                ("unar", ["unar", "-o", str(out_dir), "-f", tmp_path])
+            )
+
+        for label, cmd in cmd_tries:
+            r = subprocess.run(cmd, capture_output=True, text=True)
+            if r.returncode == 0:
+                n = _count_files_in_tree(out_dir)
+                return f"RAR `{filename}` → распакован в `{out_dir}` ({n} файлов, {label})"
+            err = (r.stderr or r.stdout or "").strip() or f"код выхода {r.returncode}"
+            errors.append(f"{label}: {err[:500]}")
+
+        try:
+            import rarfile
+
+            with rarfile.RarFile(tmp_path) as rf:
+                rf.extractall(out_dir)
+            n = _count_files_in_tree(out_dir)
+            return f"RAR `{filename}` → распакован в `{out_dir}` ({n} файлов, rarfile)"
+        except ImportError:
+            errors.append("rarfile: пакет не установлен (pip install rarfile)")
+        except Exception as e:
+            errors.append(f"rarfile: {e}")
+
+        raise RuntimeError(
+            "Не удалось распаковать RAR. Установите на сервере один из инструментов: "
+            "`unrar` (пакет unrar или unrar-free), `p7zip-full` (команда 7z), `unar` "
+            "или `pip install rarfile` вместе с бинарником UnRAR. "
+            + (" Подробности: " + " | ".join(errors) if errors else "")
+        )
+    finally:
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+
+
 def _save_uploaded_file(file, target_dir: Path) -> str:
     """
     Сохранить один загруженный объект:
-    - если ZIP — распаковать в поддиректорию
+    - ZIP / RAR — распаковать в поддиректорию
     - иначе сохранить как обычный файл
     Возвращает текстовый отчет.
     """
@@ -41,8 +114,14 @@ def _save_uploaded_file(file, target_dir: Path) -> str:
     filename = Path(file.name).name
     data = file.read()
 
+    lower = filename.lower()
+
+    # RAR: внешний unrar / 7z / unar или rarfile
+    if lower.endswith(".rar"):
+        return _extract_rar_archive(data, filename, target_dir)
+
     # ZIP-архив: распаковываем, сохраняя структуру директорий
-    if filename.lower().endswith(".zip"):
+    if lower.endswith(".zip"):
         subdir_name = filename[:-4] or f"zip_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
         extract_dir = target_dir / subdir_name
         _ensure_dir(extract_dir)
@@ -50,11 +129,7 @@ def _save_uploaded_file(file, target_dir: Path) -> str:
         with zipfile.ZipFile(io.BytesIO(data)) as zf:
             zf.extractall(extract_dir)
 
-        # Подсчитаем количество файлов
-        file_count = 0
-        for root, _, files in os.walk(extract_dir):
-            file_count += len(files)
-
+        file_count = _count_files_in_tree(extract_dir)
         return f"ZIP `{filename}` → распакован в `{extract_dir}` ({file_count} файлов)"
 
     # Обычный файл (PDF/HTML/и т.п.)
@@ -82,9 +157,9 @@ def show_tab():
         Эта вкладка позволяет оператору перенести **пакет счетов из 1С** в директорию `bills`,
         откуда их дальше забирает система рассылки.
 
-        **Как использовать:** сформируйте в 1С папку со счетами и актами (PDF/HTML и т.п.), упакуйте в **ZIP‑архив**
-        и загрузите архив здесь — он распакуется в `bills`. После работы с рассылкой можно **очистить папку** `bills`;
-        в следующем месяце загрузите новый ZIP в пустую папку.
+        **Как использовать:** сформируйте в 1С папку со счетами и актами (PDF/HTML и т.п.), упакуйте в **ZIP** или **RAR**
+        и загрузите архив — он распакуется в подпапку внутри `bills`. Для RAR на сервере нужен `unrar`, `7z`, `unar` или пакет `rarfile` + UnRAR.
+        После работы с рассылкой можно **очистить папку** `bills`.
         """
     )
 
@@ -103,10 +178,10 @@ def show_tab():
     st.subheader("📤 Перенос счетов (загрузка файлов)")
 
     uploaded_files = st.file_uploader(
-        "Загрузите ZIP‑архив со счетами (или несколько ZIP/файлов)",
+        "Загрузите ZIP / RAR со счетами (или несколько архивов и файлов)",
         accept_multiple_files=True,
         type=None,
-        help="ZIP распаковывается в папку bills с сохранением структуры. Отдельные файлы сохраняются в bills.",
+        help="ZIP и RAR распаковываются в подпапки bills. Остальные файлы сохраняются в bills как есть.",
         key="bills_uploader",
     )
 
@@ -136,7 +211,7 @@ def show_tab():
     options = []
 
     if not subdirs:
-        st.info("Папка `bills` пуста. Загрузите ZIP со счетами и актами — он распакуется сюда.")
+        st.info("Папка `bills` пуста. Загрузите ZIP или RAR со счетами — архив распакуется сюда.")
         # Показываем блок «Очистить всю папку» ниже (пустая папка — нечего очищать)
     else:
         rows = []

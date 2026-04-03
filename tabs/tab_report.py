@@ -5,24 +5,17 @@ import streamlit as st
 import pandas as pd
 from datetime import datetime
 from tabs.common import export_to_csv, export_to_excel
+from tabs.report_filters import render_report_filters
 
-def show_tab(get_connection, get_main_report, 
-             selected_period, selected_plan, 
-             contract_id_filter, imei_filter, 
-             customer_name_filter, code_1c_filter):
+
+def show_tab(get_connection, get_main_report, get_periods, get_plans):
     """
-    Отображение закладки отчета по расходам
-    
-    Args:
-        get_connection: Функция получения подключения к БД
-        get_main_report: Функция получения основного отчета
-        selected_period: Выбранный период
-        selected_plan: Выбранный план
-        contract_id_filter: Фильтр по Contract ID
-        imei_filter: Фильтр по IMEI
-        customer_name_filter: Фильтр по названию клиента
-        code_1c_filter: Фильтр по коду 1С
+    Отображение закладки отчета по расходам.
+    Фильтры — в теле вкладки (render_report_filters).
     """
+    selected_period, selected_plan, contract_id_filter, imei_filter, customer_name_filter, code_1c_filter = (
+        render_report_filters(get_connection, get_periods, get_plans, include_plan=True)
+    )
     period_filter = selected_period
     plan_filter = None if selected_plan == "All Plans" else selected_plan
     contract_id_filter = contract_id_filter if contract_id_filter else None

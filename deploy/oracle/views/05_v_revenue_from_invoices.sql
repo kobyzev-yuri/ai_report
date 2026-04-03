@@ -11,12 +11,13 @@ SET SQLBLANKLINES ON
 SET DEFINE OFF
 
 CREATE OR REPLACE VIEW V_REVENUE_FROM_INVOICES AS
-WITH -- Главная услуга: SBD (9002) или Stectrace (9014) с SUB-XXXXX; плюс приостановка (9008) без главной — строка по IMEI всё равно должна быть в отчёте
+WITH -- Главная услуга: SBD (9002) или Stectrace (9014) с SUB-XXXXX; плюс «осиротевшие» 9008 / 9004,9010,… когда в СФ есть только они (часто счёт из 1С без полного набора позиций биллинга)
 main_sbd_services AS (
+    -- 9002/9014: ключ строки отчёта — VSAT (IMEI); LOGIN для BASE_CONTRACT_ID = SUB-
     SELECT DISTINCT
         s.SERVICE_ID,
         REGEXP_REPLACE(s.LOGIN, '-clone-.*', '') AS BASE_CONTRACT_ID,
-        s.VSAT AS IMEI,
+        TRIM(TO_CHAR(s.VSAT)) AS IMEI,
         s.ACCOUNT_ID,
         s.CUSTOMER_ID
     FROM SERVICES s
@@ -24,25 +25,120 @@ main_sbd_services AS (
       AND s.LOGIN LIKE 'SUB-%'
     UNION ALL
     -- Приостановка (9008): когда по IMEI+ACCOUNT нет главной 9002/9014, строка в отчёте по IMEI всё равно нужна (REVENUE_SUSPEND_ABON)
+    -- Ключ устройства: VSAT, иначе LOGIN (у части записей VSAT пустой, IMEI только в LOGIN)
     SELECT DISTINCT
         s.SERVICE_ID,
-        s.VSAT AS BASE_CONTRACT_ID,
-        s.VSAT AS IMEI,
+        NVL(NULLIF(TRIM(TO_CHAR(s.VSAT)), ''), NULLIF(TRIM(TO_CHAR(s.LOGIN)), '')) AS BASE_CONTRACT_ID,
+        NVL(NULLIF(TRIM(TO_CHAR(s.VSAT)), ''), NULLIF(TRIM(TO_CHAR(s.LOGIN)), '')) AS IMEI,
         s.ACCOUNT_ID,
         s.CUSTOMER_ID
     FROM SERVICES s
     WHERE s.TYPE_ID = 9008
-      AND s.VSAT IS NOT NULL
+      AND NVL(NULLIF(TRIM(TO_CHAR(s.VSAT)), ''), NULLIF(TRIM(TO_CHAR(s.LOGIN)), '')) IS NOT NULL
       AND NOT EXISTS (
           SELECT 1 FROM SERVICES m
           WHERE m.TYPE_ID IN (9002, 9014)
-            AND m.VSAT = s.VSAT
             AND m.ACCOUNT_ID = s.ACCOUNT_ID
+            AND TRIM(TO_CHAR(m.VSAT)) = NVL(NULLIF(TRIM(TO_CHAR(s.VSAT)), ''), NULLIF(TRIM(TO_CHAR(s.LOGIN)), ''))
       )
+    UNION ALL
+    -- Мониторинг/трекинг/блокировка (9004, 9005, 9010, 9013): нет 9002/9014 и нет 9008 по IMEI+ЛС — якорь для позиций СФ только по сопутствующим (типично 9010 или 9004)
+    SELECT x.SERVICE_ID, x.BASE_CONTRACT_ID, x.IMEI, x.ACCOUNT_ID, x.CUSTOMER_ID
+    FROM (
+        SELECT
+            s.SERVICE_ID,
+            NVL(NULLIF(TRIM(TO_CHAR(s.VSAT)), ''), NULLIF(TRIM(TO_CHAR(s.LOGIN)), '')) AS BASE_CONTRACT_ID,
+            NVL(NULLIF(TRIM(TO_CHAR(s.VSAT)), ''), NULLIF(TRIM(TO_CHAR(s.LOGIN)), '')) AS IMEI,
+            s.ACCOUNT_ID,
+            s.CUSTOMER_ID,
+            ROW_NUMBER() OVER (
+                PARTITION BY NVL(NULLIF(TRIM(TO_CHAR(s.VSAT)), ''), NULLIF(TRIM(TO_CHAR(s.LOGIN)), '')), s.ACCOUNT_ID
+                ORDER BY
+                    CASE s.TYPE_ID
+                        WHEN 9010 THEN 1
+                        WHEN 9004 THEN 2
+                        WHEN 9005 THEN 3
+                        WHEN 9013 THEN 4
+                        ELSE 5
+                    END,
+                    s.SERVICE_ID
+            ) AS rn
+        FROM SERVICES s
+        WHERE s.TYPE_ID IN (9004, 9005, 9010, 9013)
+          AND NVL(NULLIF(TRIM(TO_CHAR(s.VSAT)), ''), NULLIF(TRIM(TO_CHAR(s.LOGIN)), '')) IS NOT NULL
+          AND NOT EXISTS (
+              SELECT 1 FROM SERVICES m
+              WHERE m.TYPE_ID IN (9002, 9014)
+                AND m.ACCOUNT_ID = s.ACCOUNT_ID
+                AND TRIM(TO_CHAR(m.VSAT)) = NVL(NULLIF(TRIM(TO_CHAR(s.VSAT)), ''), NULLIF(TRIM(TO_CHAR(s.LOGIN)), ''))
+          )
+          AND NOT EXISTS (
+              SELECT 1 FROM SERVICES m
+              WHERE m.TYPE_ID = 9008
+                AND m.ACCOUNT_ID = s.ACCOUNT_ID
+                AND NVL(NULLIF(TRIM(TO_CHAR(m.VSAT)), ''), NULLIF(TRIM(TO_CHAR(m.LOGIN)), ''))
+                    = NVL(NULLIF(TRIM(TO_CHAR(s.VSAT)), ''), NULLIF(TRIM(TO_CHAR(s.LOGIN)), ''))
+          )
+    ) x
+    WHERE x.rn = 1
+),
+-- Якоря для JOIN: main_sbd_services + услуги сопутствующих по факту СФ за период, если в этом периоде нет строк 9002/9014 с тем же IMEI+ЛС
+-- Один якорь на (BASE_CONTRACT_ID, IMEI, ACCOUNT_ID): при конфликте 9008 vs 9010 приоритет у 9010/9004/9005/9013 (строка СФ)
+revenue_service_anchors AS (
+    SELECT SERVICE_ID, BASE_CONTRACT_ID, IMEI, ACCOUNT_ID, CUSTOMER_ID
+    FROM (
+        SELECT
+            x.SERVICE_ID,
+            x.BASE_CONTRACT_ID,
+            x.IMEI,
+            x.ACCOUNT_ID,
+            x.CUSTOMER_ID,
+            ROW_NUMBER() OVER (
+                PARTITION BY x.BASE_CONTRACT_ID, x.IMEI, x.ACCOUNT_ID
+                ORDER BY
+                    CASE svc.TYPE_ID
+                        WHEN 9010 THEN 1
+                        WHEN 9004 THEN 2
+                        WHEN 9005 THEN 3
+                        WHEN 9013 THEN 4
+                        WHEN 9008 THEN 5
+                        WHEN 9002 THEN 6
+                        WHEN 9014 THEN 7
+                        ELSE 9
+                    END,
+                    x.SERVICE_ID
+            ) AS rn
+        FROM (
+            SELECT SERVICE_ID, BASE_CONTRACT_ID, IMEI, ACCOUNT_ID, CUSTOMER_ID FROM main_sbd_services
+            UNION ALL
+            SELECT DISTINCT
+                s.SERVICE_ID,
+                NVL(NULLIF(TRIM(TO_CHAR(s.VSAT)), ''), NULLIF(TRIM(TO_CHAR(s.LOGIN)), '')) AS BASE_CONTRACT_ID,
+                NVL(NULLIF(TRIM(TO_CHAR(s.VSAT)), ''), NULLIF(TRIM(TO_CHAR(s.LOGIN)), '')) AS IMEI,
+                s.ACCOUNT_ID,
+                s.CUSTOMER_ID
+            FROM BM_INVOICE_ITEM ii
+            JOIN SERVICES s ON ii.SERVICE_ID = s.SERVICE_ID
+            WHERE s.TYPE_ID IN (9004, 9005, 9008, 9010, 9013)
+              AND NVL(NULLIF(TRIM(TO_CHAR(s.VSAT)), ''), NULLIF(TRIM(TO_CHAR(s.LOGIN)), '')) IS NOT NULL
+              AND NOT EXISTS (
+                  SELECT 1
+                  FROM BM_INVOICE_ITEM ii_m
+                  JOIN SERVICES s_m ON ii_m.SERVICE_ID = s_m.SERVICE_ID
+                  WHERE ii_m.PERIOD_ID = ii.PERIOD_ID
+                    AND ii_m.ACCOUNT_ID = s.ACCOUNT_ID
+                    AND s_m.TYPE_ID IN (9002, 9014)
+                    AND NVL(NULLIF(TRIM(TO_CHAR(s_m.VSAT)), ''), NULLIF(TRIM(TO_CHAR(s_m.LOGIN)), ''))
+                        = NVL(NULLIF(TRIM(TO_CHAR(s.VSAT)), ''), NULLIF(TRIM(TO_CHAR(s.LOGIN)), ''))
+              )
+        ) x
+        JOIN SERVICES svc ON x.SERVICE_ID = svc.SERVICE_ID
+    )
+    WHERE rn = 1
 ),
 -- Теперь находим все invoice items для всех Iridium услуг
 -- Для 9002/9014: BASE_CONTRACT_ID = SUB-XXXXX
--- Для 9005, 9008, 9013: BASE_CONTRACT_ID из main_sbd_services по VSAT=IMEI (при отсутствии 9002/9014 для 9008 — IMEI)
+-- Для 9004, 9005, 9008, 9010, 9013: если в СФ за период есть 9002/9014 с тем же IMEI+ЛС — BASE = SUB- из main_sbd; иначе BASE = IMEI и якорь — сама услуга строки СФ (9010 и т.д.)
 base_contracts AS (
     SELECT DISTINCT
         ii.INVOICE_ITEM_ID,
@@ -51,7 +147,12 @@ base_contracts AS (
         ii.MONEY,
         NVL(ii.MONEY_REVERSED, 0) AS MONEY_REVERSED,
         s.TYPE_ID,
-        s.VSAT AS IMEI,
+        CASE
+            WHEN s.TYPE_ID IN (9004, 9005, 9008, 9010, 9013) THEN
+                NVL(NULLIF(TRIM(TO_CHAR(s.VSAT)), ''), NULLIF(TRIM(TO_CHAR(s.LOGIN)), ''))
+            ELSE
+                TRIM(TO_CHAR(s.VSAT))
+        END AS IMEI,
         s.ACCOUNT_ID,
         s.CUSTOMER_ID,
         rt.RESOURCE_TYPE_ID,
@@ -62,36 +163,54 @@ base_contracts AS (
         COALESCE(ii.ACC_CURRENCY_ID, i.CURRENCY_ID) AS ACC_CURRENCY_ID,
         -- Суммы в валюте лицевого счета (валюта учета)
         ii.ACC_MONEY,
-        -- BASE_CONTRACT_ID: для 9002 и 9014 (главные) — из LOGIN; для 9005, 9008, 9013 — из связанной главной (9002 или 9014) по VSAT
+        -- BASE_CONTRACT_ID: 9002/9014 — из LOGIN; сопутствующие — SUB- только если в этом PERIOD_ID в СФ уже есть 9002/9014 с тем же IMEI+ЛС
         CASE 
             WHEN s.TYPE_ID IN (9002, 9014) THEN
                 REGEXP_REPLACE(COALESCE(ii.LOGIN, s.LOGIN), '-clone-.*', '')
+            WHEN s.TYPE_ID IN (9004, 9005, 9008, 9010, 9013)
+                 AND NOT EXISTS (
+                     SELECT 1
+                     FROM BM_INVOICE_ITEM ii_m
+                     JOIN SERVICES s_m ON ii_m.SERVICE_ID = s_m.SERVICE_ID
+                     WHERE ii_m.PERIOD_ID = ii.PERIOD_ID
+                       AND ii_m.ACCOUNT_ID = s.ACCOUNT_ID
+                       AND s_m.TYPE_ID IN (9002, 9014)
+                       AND NVL(NULLIF(TRIM(TO_CHAR(s_m.VSAT)), ''), NULLIF(TRIM(TO_CHAR(s_m.LOGIN)), ''))
+                           = NVL(NULLIF(TRIM(TO_CHAR(s.VSAT)), ''), NULLIF(TRIM(TO_CHAR(s.LOGIN)), ''))
+                 )
+            THEN
+                NVL(NULLIF(TRIM(TO_CHAR(s.VSAT)), ''), NULLIF(TRIM(TO_CHAR(s.LOGIN)), ''))
             ELSE
                 (SELECT REGEXP_REPLACE(ms.BASE_CONTRACT_ID, '-clone-.*', '')
                  FROM main_sbd_services ms
-                 WHERE ms.IMEI = s.VSAT
-                   AND ms.ACCOUNT_ID = s.ACCOUNT_ID
+                 WHERE ms.ACCOUNT_ID = s.ACCOUNT_ID
+                   AND ms.IMEI = CASE
+                       WHEN s.TYPE_ID IN (9004, 9005, 9008, 9010, 9013) THEN
+                           NVL(NULLIF(TRIM(TO_CHAR(s.VSAT)), ''), NULLIF(TRIM(TO_CHAR(s.LOGIN)), ''))
+                       ELSE
+                           TRIM(TO_CHAR(s.VSAT))
+                   END
                    AND ROWNUM = 1)
         END AS BASE_CONTRACT_ID
     FROM BM_INVOICE_ITEM ii
     JOIN BM_INVOICE i ON ii.INVOICE_ID = i.INVOICE_ID
     JOIN SERVICES s ON ii.SERVICE_ID = s.SERVICE_ID
     LEFT JOIN BM_RESOURCE_TYPE rt ON ii.RESOURCE_TYPE_ID = rt.RESOURCE_TYPE_ID
-    WHERE s.TYPE_ID IN (9002, 9005, 9008, 9013, 9014)  -- Iridium услуги
+    WHERE s.TYPE_ID IN (9002, 9004, 9005, 9008, 9010, 9013, 9014)  -- Iridium / сопутствующие SBD
       -- Для 9002: должен быть SUB-XXXXX
-      -- Для 9005, 9008, 9013: связаны по VSAT с услугой 9002
+      -- Для 9004, 9005, 9008, 9010, 9013: связаны по VSAT с главной 9002/9014 (не основные, но начисления при активном SBD возможны)
       -- Для 9014: может быть SUB-XXXXX или связана по VSAT
       AND (
           -- Главные услуги SBD (9002) и Stectrace (9014) с SUB-XXXXX
           (s.TYPE_ID IN (9002, 9014) AND (ii.LOGIN LIKE 'SUB-%' OR s.LOGIN LIKE 'SUB-%'))
           OR
-          -- Сопутствующие (9005, 9008, 9013) — связаны по VSAT с главной (9002 или 9014)
-          (s.TYPE_ID IN (9005, 9008, 9013) 
+          -- Сопутствующие (9004 трекинг, 9005 мониторинг, 9008 suspend, 9010 GSM-мониторинг, 9013 блокировка) — по VSAT с главной (9002 или 9014)
+          (s.TYPE_ID IN (9004, 9005, 9008, 9010, 9013) 
            AND EXISTS (
                SELECT 1 
                FROM main_sbd_services ms
-               WHERE ms.IMEI = s.VSAT
-                 AND ms.ACCOUNT_ID = s.ACCOUNT_ID
+               WHERE ms.ACCOUNT_ID = s.ACCOUNT_ID
+                 AND ms.IMEI = NVL(NULLIF(TRIM(TO_CHAR(s.VSAT)), ''), NULLIF(TRIM(TO_CHAR(s.LOGIN)), ''))
            ))
       )
 ),
@@ -239,10 +358,10 @@ SELECT
         ELSE 0
     END) AS REVENUE_SUSPEND_ABON,
     
-    -- Доходы мониторинга (9005) - абонплата (в рублях - валюта счета-фактуры)
-    SUM(CASE 
-        WHEN bc.TYPE_ID = 9005 
-        AND bc.RESOURCE_MNEMONIC = 'iridium_monitoring'
+    -- Доходы мониторинга (9004 трекинг, 9005 мониторинг, 9010 GSM-мониторинг)
+    -- Суммируем в одну колонку REVENUE_MONITORING_ABON без разбиения по подтипам.
+    SUM(CASE
+        WHEN bc.TYPE_ID IN (9004, 9005, 9010)
         THEN bc.MONEY - bc.MONEY_REVERSED
         ELSE 0
     END) AS REVENUE_MONITORING_ABON,
@@ -276,14 +395,28 @@ SELECT
     END) AS REVENUE_TOTAL_ACC_CURRENCY,
     
     -- Количество позиций в счетах-фактурах
-    COUNT(DISTINCT bc.INVOICE_ITEM_ID) AS INVOICE_ITEMS_COUNT
+    COUNT(DISTINCT bc.INVOICE_ITEM_ID) AS INVOICE_ITEMS_COUNT,
+    
+    -- Пояснение для нештатных строк (нет 9002/9014 в биллинге по IMEI+ЛС); NULL — обычный случай
+    MAX(
+        CASE
+            WHEN sa.TYPE_ID IN (9002, 9014) THEN NULL
+            WHEN sa.TYPE_ID = 9008 THEN
+                'Нестандартно: нет услуги SBD/Stectrace (9002/9014) по IMEI+лицевому счёту; строка привязана к приостановке 9008, CONTRACT_ID=IMEI. Проверить полноту счёта-фактуры (в т.ч. выставление из 1С).'
+            WHEN sa.TYPE_ID IN (9004, 9005, 9010, 9013) THEN
+                'Нестандартно: нет 9002/9014/9008 по IMEI+лицевому счёту; строка привязана к сопутствующей услуге TYPE_ID=' || TO_CHAR(sa.TYPE_ID)
+                || ' (напр. 9010 GSM-мониторинг, 9004 трекинг), CONTRACT_ID=IMEI. Рекомендуется сверить с биллингом и источником СФ.'
+            ELSE NULL
+        END
+    ) AS REVENUE_ANOMALY_NOTE
     
 FROM base_contracts bc
--- Джойним с главной услугой (9002 или 9014) для получения SERVICE_ID, IMEI, ACCOUNT_ID, CUSTOMER_ID
-JOIN main_sbd_services ms 
+-- Джойним с якорем: SUB+9002/9014, осиротевшие в SERVICES, либо якорь по факту СФ (9010 без 9002 в СФ за период)
+JOIN revenue_service_anchors ms 
     ON bc.BASE_CONTRACT_ID = ms.BASE_CONTRACT_ID
     AND bc.IMEI = ms.IMEI
     AND bc.ACCOUNT_ID = ms.ACCOUNT_ID
+JOIN SERVICES sa ON ms.SERVICE_ID = sa.SERVICE_ID
 -- Джойним с данными клиентов
 LEFT JOIN customer_info ci 
     ON bc.BASE_CONTRACT_ID = REGEXP_REPLACE(ci.CONTRACT_ID, '-clone-.*', '')
@@ -330,11 +463,11 @@ ORDER BY
 /
 
 -- Комментарии
-COMMENT ON TABLE V_REVENUE_FROM_INVOICES IS 'Отчет по доходам из счетов-фактур (BM_INVOICE_ITEM). В Иридиуме одна услуга SBD; у нас главная услуга строки — 9002 (учёт по КБ) или 9014 Stectrace (учёт по сообщениям). Сопутствующие (9005, 9008, 9013) связаны с главной по VSAT=IMEI. Одна строка на (контракт/IMEI, период).'
+COMMENT ON TABLE V_REVENUE_FROM_INVOICES IS 'Отчет по доходам из счетов-фактур (BM_INVOICE_ITEM). В Иридиуме одна услуга SBD; нормальная главная услуга строки — 9002 (учёт по КБ) или 9014 Stectrace (учёт по сообщениям). Сопутствующие связаны с SUB- по VSAT=IMEI только если в том же PERIOD_ID в СФ есть строка 9002 или 9014 с тем же IMEI+ЛС; иначе CONTRACT_ID=IMEI и SERVICE_ID — услуга из СФ (9010 и т.д.), без привязки к 9002 из SERVICES без позиции в СФ. См. REVENUE_ANOMALY_NOTE. Одна строка на (SUB- или IMEI, IMEI, период).'
 /
-COMMENT ON COLUMN V_REVENUE_FROM_INVOICES.CONTRACT_ID IS 'Базовый SUB-XXXXX (без -clone-...) - ключевая связь для сопоставления с затратами'
+COMMENT ON COLUMN V_REVENUE_FROM_INVOICES.CONTRACT_ID IS 'Базовый SUB-XXXXX (без -clone-...) — ключ для сопоставления с затратами; при нестандартной привязке без 9002/9014 — числовой IMEI'
 /
-COMMENT ON COLUMN V_REVENUE_FROM_INVOICES.SERVICE_ID IS 'SERVICE_ID главной услуги (TYPE_ID = 9002 SBD или 9014 Stectrace)'
+COMMENT ON COLUMN V_REVENUE_FROM_INVOICES.SERVICE_ID IS 'SERVICE_ID услуги-якоря строки: обычно 9002 SBD или 9014 Stectrace; при отсутствии их в биллинге по IMEI+ЛС — 9008 или одна из 9004/9005/9010/9013 (см. REVENUE_ANOMALY_NOTE)'
 /
 COMMENT ON COLUMN V_REVENUE_FROM_INVOICES.REVENUE_SBD_TRAFFIC IS 'Доходы от трафика превышения SBD (IRIDIUM_SBD, kb_traffic_pay, IRIDIUM_SBD_MBOX, sbd_reg, woufzwv). В счетах-фактурах показывается только трафик, превышающий включенный в абонплату (overage). Итого для всех тарифов.'
 /
@@ -346,7 +479,7 @@ COMMENT ON COLUMN V_REVENUE_FROM_INVOICES.REVENUE_SBD_ABON IS 'Доходы от
 /
 COMMENT ON COLUMN V_REVENUE_FROM_INVOICES.REVENUE_SUSPEND_ABON IS 'Доходы от абонплаты приостановки SBD (iridium_sbd_suspend). Услуга 9008 связана с основной услугой 9002 по VSAT=IMEI.'
 /
-COMMENT ON COLUMN V_REVENUE_FROM_INVOICES.REVENUE_MONITORING_ABON IS 'Доходы от абонплаты мониторинга (iridium_monitoring). Услуга 9005 связана с основной услугой 9002 по VSAT=IMEI.'
+COMMENT ON COLUMN V_REVENUE_FROM_INVOICES.REVENUE_MONITORING_ABON IS 'Доходы мониторинга в одной колонке: 9004 (Платформа трекинг), 9005 (Платформа мониторинг), 9010 (Услуга мониторинга GSM). Сопутствующие SBD, связь по VSAT=IMEI.'
 /
 COMMENT ON COLUMN V_REVENUE_FROM_INVOICES.REVENUE_MONITORING_BLOCK_ABON IS 'Доходы от абонплаты блокировки мониторинга (abo_gsm_block). Услуга 9013 связана с основной услугой 9002 по VSAT=IMEI.'
 /
@@ -355,6 +488,8 @@ COMMENT ON COLUMN V_REVENUE_FROM_INVOICES.REVENUE_MSG_ABON IS 'Доходы от
 COMMENT ON COLUMN V_REVENUE_FROM_INVOICES.REVENUE_TOTAL IS 'Итого доходов (сумма всех типов услуг) в рублях (MONEY) - основная валюта для всех договоров'
 /
 COMMENT ON COLUMN V_REVENUE_FROM_INVOICES.REVENUE_TOTAL_ACC_CURRENCY IS 'Опционально: итого доходов в валюте лицевого счета (ACC_MONEY) - только для УЕ договоров (ACC_CURRENCY_ID = 4), используется для справки. Основная валюта - рубли (REVENUE_TOTAL)'
+/
+COMMENT ON COLUMN V_REVENUE_FROM_INVOICES.REVENUE_ANOMALY_NOTE IS 'Предупреждение для нештатной привязки (нет 9002/9014 в биллинге по IMEI+ЛС). NULL — штатный случай. Отчёт только по нестандартным: WHERE REVENUE_ANOMALY_NOTE IS NOT NULL.'
 /
 COMMENT ON COLUMN V_REVENUE_FROM_INVOICES.BILL_MONTH IS 'Месяц биллинга (YYYYMM) для сопоставления с затратами'
 /

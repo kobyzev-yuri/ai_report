@@ -6,8 +6,10 @@
 
 set -e
 
-ORACLE_DIR="/mnt/ai/cnn/ai_report/oracle/export"
-POSTGRES_DIR="/mnt/ai/cnn/ai_report/postgresql/export"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+ORACLE_DIR="$REPO_ROOT/oracle/export"
+POSTGRES_DIR="$REPO_ROOT/postgresql/export"
 
 echo "============================================================================"
 echo "Oracle vs PostgreSQL Comparison"

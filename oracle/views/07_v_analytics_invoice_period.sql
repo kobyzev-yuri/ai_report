@@ -52,7 +52,7 @@ analytics_data AS (
     FROM ANALYTICS a
     JOIN SERVICES s ON a.SERVICE_ID = s.SERVICE_ID
     JOIN commercial_customers cc ON a.CUSTOMER_ID = cc.CUSTOMER_ID
-    WHERE s.TYPE_ID IN (9002, 9005, 9008, 9013, 9014)  -- Iridium услуги
+    WHERE s.TYPE_ID IN (9002, 9004, 9005, 9008, 9010, 9013, 9014)  -- Iridium + сопутствующие SBD
 ),
 -- Информация о клиентах
 customer_info AS (
@@ -183,7 +183,7 @@ SELECT
     -- Разделение на абонплату и трафик по зонам
     CASE 
         WHEN rt.MNEMONIC IN ('fee_sbd', 'abon_payment', 'iridium_sbd_suspend', 
-                            'iridium_monitoring', 'abo_gsm_block', 'fee_iridium_msg') 
+                            'iridium_tracking', 'iridium_monitoring', 'gsm_monitoring', 'abo_gsm_block', 'fee_iridium_msg') 
         THEN ad.MONEY 
         ELSE 0 
     END AS MONEY_ABON,

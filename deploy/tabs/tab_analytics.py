@@ -1,26 +1,67 @@
 """
 Закладка: Счета за период
 """
+import os
 import streamlit as st
 import pandas as pd
 from datetime import datetime
-from tabs.common import export_to_csv, export_to_excel
+from pathlib import Path
 
-def show_tab(get_connection, get_analytics_invoice_period_report, get_analytics_duplicates,
-             selected_period, contract_id_filter, imei_filter,
-             customer_name_filter, code_1c_filter, remove_analytics_duplicates):
+from tabs.common import export_to_excel
+from tabs.report_filters import render_report_filters
+
+
+def _get_project_root() -> Path:
+    """Корень проекта (директория, где есть папка tabs/)."""
+    script_path = Path(__file__).resolve()
+    current = script_path
+    while current.parent != current:
+        if (current / "tabs").exists():
+            return current
+        current = current.parent
+    return script_path.parent
+
+
+def _resolve_export_dir() -> Path:
+    raw = os.getenv("ANALYTICS_EXPORT_DIR", "exports/analytics_invoices").strip()
+    p = Path(raw)
+    if p.is_absolute():
+        return p
+    return _get_project_root() / p
+
+
+def _safe_period_slug(period_filter) -> str:
+    if period_filter is None:
+        return "all"
+    s = str(period_filter).strip().replace("/", "_").replace("\\", "_").replace(" ", "_")
+    return (s[:120] if s else "all")
+
+
+def show_tab(
+    get_connection,
+    get_analytics_invoice_period_report,
+    get_analytics_duplicates,
+    get_periods,
+    get_plans,
+    remove_analytics_duplicates,
+):
     """
-    Отображение закладки отчетов по счетам за период
+    Отображение закладки отчетов по счетам за период.
+    Фильтры — в теле вкладки.
     """
     st.header("📋 Счета за период")
     st.markdown("Отчет по счетам за период на основе таблицы ANALYTICS. Иерархия: клиент → договор → сервис.")
-    
+
+    selected_period, _plan, contract_id_filter, imei_filter, customer_name_filter, code_1c_filter = (
+        render_report_filters(get_connection, get_periods, get_plans, include_plan=False)
+    )
+
     # Создаем подвкладки
     sub_tab_report, sub_tab_duplicates = st.tabs([
         "📊 Отчет по счетам",
         "🔍 Проверка дубликатов"
     ])
-    
+
     period_filter = selected_period
     contract_id_filter = contract_id_filter if contract_id_filter else None
     imei_filter = imei_filter if imei_filter else None
@@ -194,6 +235,30 @@ def show_tab(get_connection, get_analytics_invoice_period_report, get_analytics_
                     file_name=f"analytics_invoice_period_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                 )
+
+            st.markdown("---")
+            st.subheader("💾 Сохранение на сервер")
+            st.caption(
+                "Каталог задаётся переменной `ANALYTICS_EXPORT_DIR` "
+                "(относительно корня приложения или абсолютный путь)."
+            )
+
+            export_dir = _resolve_export_dir()
+            if st.button("💾 Сохранить отчёт на сервер (CSV + Excel)", key="analytics_save_server"):
+                try:
+                    export_dir.mkdir(parents=True, exist_ok=True)
+                    slug = _safe_period_slug(period_filter)
+                    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+                    base = f"analytics_invoice_period_{slug}_{ts}"
+                    csv_path = export_dir / f"{base}.csv"
+                    xlsx_path = export_dir / f"{base}.xlsx"
+                    df_analytics.to_csv(csv_path, index=False, encoding="utf-8-sig")
+                    xlsx_path.write_bytes(export_to_excel(df_analytics))
+                    st.success(
+                        f"Сохранено на сервер:\n- `{csv_path.resolve()}`\n- `{xlsx_path.resolve()}`"
+                    )
+                except Exception as e:
+                    st.error(f"Не удалось сохранить на сервер: {e}")
         elif df_analytics is not None and df_analytics.empty:
             st.warning("⚠️ Данные не найдены для выбранных фильтров")
     

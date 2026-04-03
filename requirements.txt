@@ -27,6 +27,9 @@ pyyaml
 # Authentication
 bcrypt>=4.0.0
 
+# Распаковка RAR на закладке «Рассылка счетов» (опционально; обычно достаточно системного unrar/7z)
+rarfile>=4.0
+
 # Logging and utilities
 colorama
 tqdm

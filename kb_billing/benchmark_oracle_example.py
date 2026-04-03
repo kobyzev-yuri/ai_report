@@ -238,8 +238,8 @@ async def main():
     """
     Пример запуска benchmark для kb_billing
     """
-    # Загрузка тестовых вопросов из kb_billing
-    kb_dir = Path("/mnt/ai/cnn/ai_report/kb_billing")
+    # Загрузка тестовых вопросов из kb_billing (рядом с этим файлом)
+    kb_dir = Path(__file__).resolve().parent
     training_file = kb_dir / "training_data" / "sql_examples.json"
     
     with open(training_file) as f:

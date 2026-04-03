@@ -10,8 +10,8 @@ This directory contains scripts to export data from Oracle for PostgreSQL testin
 Exports ALL data from Oracle tables to PostgreSQL-compatible INSERT statements.
 
 ```bash
-# Run in Oracle
-cd /mnt/ai/cnn/ai_report/oracle/scripts
+# Run in Oracle (из корня репозитория)
+cd oracle/scripts
 sqlplus billing7/billing@bm7 @export_data_for_postgres.sql
 
 # Output files:
@@ -27,8 +27,8 @@ sqlplus billing7/billing@bm7 @export_data_for_postgres.sql
 Exports limited sample data (100 SPNET_TRAFFIC, 50 STECCOM_EXPENSES) for quick testing.
 
 ```bash
-# Run in Oracle
-cd /mnt/ai/cnn/ai_report/oracle/scripts
+# Run in Oracle (из корня репозитория)
+cd oracle/scripts
 sqlplus billing7/billing@bm7 @export_sample_data.sql
 
 # Output files:
