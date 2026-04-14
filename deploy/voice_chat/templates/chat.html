@@ -1,0 +1,371 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Голосовой диалог — {{ username }}</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+      margin: 0;
+      padding: 0;
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      background: linear-gradient(180deg, #f0f4f8 0%, #e2e8f0 100%);
+      color: #1e293b;
+      line-height: 1.5;
+    }
+    .header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 0.75rem 1.25rem;
+      background: #fff;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.06);
+      flex-shrink: 0;
+    }
+    .header-title { font-size: 1.1rem; font-weight: 600; color: #0f172a; }
+    .header-user { font-size: 0.9rem; color: #64748b; }
+    .header a { color: #2563eb; text-decoration: none; font-weight: 500; }
+    .header a:hover { text-decoration: underline; }
+    .assistant-tabs {
+      display: flex;
+      gap: 0.25rem;
+      padding: 0.5rem 1.25rem;
+      background: #fff;
+      border-bottom: 1px solid #e2e8f0;
+      flex-shrink: 0;
+    }
+    .assistant-tabs label {
+      padding: 0.4rem 0.9rem;
+      border-radius: 8px;
+      cursor: pointer;
+      font-size: 0.9rem;
+      transition: background 0.15s, color 0.15s;
+    }
+    .assistant-tabs label:hover { background: #f1f5f9; }
+    .assistant-tabs input { display: none; }
+    .assistant-tabs input:checked + span { background: #2563eb; color: #fff; }
+    .assistant-tabs label span { display: block; padding: 0.25rem 0; }
+    .messages {
+      flex: 1;
+      overflow-y: auto;
+      padding: 1rem 1.25rem 1.5rem;
+      min-height: 200px;
+    }
+    .msg {
+      max-width: 85%;
+      margin-bottom: 1rem;
+      padding: 0.85rem 1rem;
+      border-radius: 12px;
+      box-shadow: 0 1px 2px rgba(0,0,0,0.05);
+      line-height: 1.55;
+    }
+    .msg.user {
+      margin-left: auto;
+      background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
+      color: #fff;
+    }
+    .msg.assistant {
+      margin-right: auto;
+      background: #fff;
+      border: 1px solid #e2e8f0;
+      white-space: pre-wrap;
+      color: #334155;
+    }
+    .msg .role {
+      font-weight: 600;
+      font-size: 0.75rem;
+      text-transform: uppercase;
+      letter-spacing: 0.03em;
+      margin-bottom: 0.35rem;
+      opacity: 0.9;
+    }
+    .msg.user .role { color: rgba(255,255,255,0.9); }
+    .msg.assistant .role { color: #64748b; }
+    .msg-actions { margin-top: 0.6rem; }
+    .input-area {
+      flex-shrink: 0;
+      padding: 1rem 1.25rem 1.25rem;
+      background: #fff;
+      border-top: 1px solid #e2e8f0;
+      box-shadow: 0 -1px 3px rgba(0,0,0,0.04);
+    }
+    .input-row {
+      display: flex;
+      gap: 0.6rem;
+      align-items: flex-end;
+    }
+    .input-row textarea {
+      flex: 1;
+      min-height: 56px;
+      max-height: 160px;
+      padding: 0.65rem 0.9rem;
+      border: 1px solid #cbd5e1;
+      border-radius: 10px;
+      font-family: inherit;
+      font-size: 0.95rem;
+      resize: vertical;
+      transition: border-color 0.15s, box-shadow 0.15s;
+    }
+    .input-row textarea:focus {
+      outline: none;
+      border-color: #2563eb;
+      box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
+    }
+    .btn {
+      padding: 0.55rem 1.1rem;
+      border-radius: 10px;
+      border: none;
+      cursor: pointer;
+      font-size: 0.95rem;
+      font-weight: 500;
+      transition: background 0.15s, transform 0.05s;
+    }
+    .btn:active { transform: scale(0.98); }
+    .btn-primary { background: #2563eb; color: #fff; }
+    .btn-primary:hover { background: #1d4ed8; }
+    .btn-speak { background: #059669; color: #fff; }
+    .btn-speak:hover { background: #047857; }
+    .btn-speak.listening { background: #dc2626; animation: pulse 1.2s ease-in-out infinite; }
+    .btn-sql { background: #7c3aed; color: #fff; font-size: 0.9rem; }
+    .btn-sql:hover { background: #6d28d9; }
+    .btn-excel {
+      background: #0d9488;
+      color: #fff;
+      text-decoration: none;
+      display: inline-block;
+      margin-top: 0.5rem;
+      padding: 0.45rem 0.9rem;
+      border-radius: 8px;
+      font-size: 0.9rem;
+      font-weight: 500;
+    }
+    .btn-excel:hover { background: #0f766e; color: #fff; }
+    @keyframes pulse { 50% { opacity: 0.85; } }
+    .btn:disabled { opacity: 0.6; cursor: not-allowed; }
+    .input-hint {
+      font-size: 0.8rem;
+      color: #64748b;
+      margin-top: 0.4rem;
+    }
+    .status { font-size: 0.85rem; color: #64748b; margin-top: 0.3rem; min-height: 1.2em; }
+    .sql-result {
+      margin-top: 0.6rem;
+      margin-bottom: 1rem;
+      overflow-x: auto;
+      border-radius: 10px;
+      overflow: hidden;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+    }
+    .sql-result table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.9rem;
+      background: #fff;
+    }
+    .sql-result th, .sql-result td { padding: 0.55rem 0.85rem; text-align: left; border-bottom: 1px solid #e2e8f0; }
+    .sql-result th { background: #f8fafc; font-weight: 600; color: #475569; }
+    .sql-result tr:hover { background: #f8fafc; }
+    .sql-result .error { color: #b91c1c; padding: 0.6rem; font-size: 0.9rem; }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <span class="header-title">Голосовой диалог с ассистентами</span>
+    <span class="header-user">{{ username }} · <a href="{{ url_for('logout') }}">Выйти</a></span>
+  </div>
+  <div class="assistant-tabs">
+    <label><input type="radio" name="assistant" value="billing" checked><span>Биллинг-ассистент</span></label>
+    <label><input type="radio" name="assistant" value="satellite"><span>Спутниковый ассистент</span></label>
+  </div>
+  <div class="messages" id="messages"></div>
+  <div class="input-area">
+    <div class="input-row">
+      <textarea id="input" placeholder="Введите сообщение или нажмите «Говорить» (Chrome)…" rows="2"></textarea>
+      <button type="button" class="btn btn-speak" id="speakBtn" title="Распознавание в браузере">🗣 Говорить</button>
+      <button type="button" class="btn btn-primary" id="sendBtn">Отправить</button>
+    </div>
+    <p class="input-hint">«Говорить» — распознавание в Chrome бесплатно (без сервера). Нужен HTTPS или localhost.</p>
+    <div class="status" id="status"></div>
+  </div>
+
+  <script>
+    const SCRIPT_NAME = "{{ script_name|default('', true) }}";
+    const messagesEl = document.getElementById('messages');
+    const inputEl = document.getElementById('input');
+    const speakBtn = document.getElementById('speakBtn');
+    const sendBtn = document.getElementById('sendBtn');
+    const statusEl = document.getElementById('status');
+
+    let messages = [];
+    let speechRecognition = null;
+
+    function getAssistant() {
+      return document.querySelector('input[name="assistant"]:checked').value;
+    }
+
+    function setStatus(text) {
+      statusEl.textContent = text;
+    }
+
+    function extractSql(content) {
+      const m = content.match(/```sql\s*([\s\S]*?)```/i);
+      return m ? m[1].trim() : null;
+    }
+
+    function addMessage(role, content) {
+      messages.push({ role, content });
+      const div = document.createElement('div');
+      div.className = 'msg ' + role;
+      const sql = role === 'assistant' ? extractSql(content) : null;
+      div.innerHTML = '<div class="role">' + (role === 'user' ? 'Вы' : 'Ассистент') + '</div><div>' + escapeHtml(content) + '</div>';
+      if (sql) {
+        const actions = document.createElement('div');
+        actions.className = 'msg-actions';
+        const runBtn = document.createElement('button');
+        runBtn.type = 'button';
+        runBtn.className = 'btn btn-sql';
+        runBtn.textContent = '▶ Выполнить SQL';
+        runBtn.dataset.sql = sql;
+        runBtn.onclick = function() { runSql(this); };
+        actions.appendChild(runBtn);
+        div.appendChild(actions);
+      }
+      messagesEl.appendChild(div);
+      messagesEl.scrollTop = messagesEl.scrollHeight;
+    }
+
+    function escapeHtml(s) {
+      const d = document.createElement('div');
+      d.textContent = s;
+      return d.innerHTML;
+    }
+
+    async function runSql(btn) {
+      const sql = btn.dataset.sql;
+      if (!sql) return;
+      const msgDiv = btn.closest('.msg');
+      let resultDiv = msgDiv.nextElementSibling && msgDiv.nextElementSibling.classList.contains('sql-result') ? msgDiv.nextElementSibling : null;
+      if (resultDiv) resultDiv.remove();
+      resultDiv = document.createElement('div');
+      resultDiv.className = 'sql-result';
+      msgDiv.after(resultDiv);
+      resultDiv.innerHTML = '<span class="error">Выполнение…</span>';
+      btn.disabled = true;
+      try {
+        const r = await fetch(SCRIPT_NAME + '/api/execute_sql', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+          body: JSON.stringify({ sql })
+        });
+        const data = await r.json();
+        if (!r.ok) {
+          resultDiv.innerHTML = '<div class="error">Ошибка: ' + escapeHtml(data.error || r.status) + '</div>';
+          btn.disabled = false;
+          return;
+        }
+        const columns = data.columns || [];
+        const rows = data.rows || [];
+        let tableHtml = '<table><thead><tr>';
+        columns.forEach(function(c) { tableHtml += '<th>' + escapeHtml(String(c)) + '</th>'; });
+        tableHtml += '</tr></thead><tbody>';
+        rows.forEach(function(row) {
+          tableHtml += '<tr>';
+          row.forEach(function(cell) { tableHtml += '<td>' + escapeHtml(String(cell)) + '</td>'; });
+          tableHtml += '</tr>';
+        });
+        tableHtml += '</tbody></table>';
+        if (rows.length > 0) {
+          tableHtml += '<a href="' + SCRIPT_NAME + '/api/export_excel" class="btn btn-excel" download>📥 Скачать Excel</a>';
+        }
+        resultDiv.innerHTML = tableHtml;
+      } catch (e) {
+        resultDiv.innerHTML = '<div class="error">Ошибка: ' + escapeHtml(e.message) + '</div>';
+      }
+      btn.disabled = false;
+      messagesEl.scrollTop = messagesEl.scrollHeight;
+    }
+
+    async function sendMessage() {
+      const text = inputEl.value.trim();
+      if (!text) return;
+      inputEl.value = '';
+      addMessage('user', text);
+      sendBtn.disabled = true;
+      setStatus('Ответ ассистента…');
+      try {
+        const r = await fetch(SCRIPT_NAME + '/api/chat', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+          body: JSON.stringify({ assistant: getAssistant(), messages })
+        });
+        const data = await r.json();
+        if (!r.ok) {
+          addMessage('assistant', 'Ошибка: ' + (data.error || r.status));
+          return;
+        }
+        addMessage('assistant', data.reply || 'Пустой ответ.');
+      } catch (e) {
+        addMessage('assistant', 'Ошибка сети: ' + e.message);
+      } finally {
+        sendBtn.disabled = false;
+        setStatus('');
+      }
+    }
+
+    sendBtn.addEventListener('click', sendMessage);
+    inputEl.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); } });
+
+    // Распознавание в браузере (Chrome — бесплатно)
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    speakBtn.addEventListener('click', () => {
+      if (!SpeechRecognition) {
+        setStatus('Распознавание речи в браузере не поддерживается. Используйте Chrome.');
+        return;
+      }
+      if (speechRecognition && speechRecognition.abort) {
+        speechRecognition.abort();
+        speakBtn.classList.remove('listening');
+        speakBtn.textContent = '🗣 Говорить';
+        setStatus('');
+        return;
+      }
+      const rec = new SpeechRecognition();
+      rec.lang = 'ru-RU';
+      rec.continuous = true;
+      rec.interimResults = true;
+      const committed = (inputEl.value || '').trim();
+      let sessionFinal = '';
+      rec.onresult = (e) => {
+        let interim = '';
+        for (let i = e.resultIndex; i < e.results.length; i++) {
+          const t = e.results[i][0].transcript;
+          if (e.results[i].isFinal) sessionFinal += t;
+          else interim += t;
+        }
+        inputEl.value = (committed ? committed + ' ' : '') + sessionFinal + interim;
+      };
+      rec.onend = () => {
+        speakBtn.classList.remove('listening');
+        speakBtn.textContent = '🗣 Говорить';
+        setStatus('');
+        speechRecognition = null;
+      };
+      rec.onerror = (e) => {
+        setStatus('Ошибка: ' + (e.error || 'unknown'));
+        speakBtn.classList.remove('listening');
+        speakBtn.textContent = '🗣 Говорить';
+        speechRecognition = null;
+      };
+      speechRecognition = rec;
+      rec.start();
+      speakBtn.classList.add('listening');
+      speakBtn.textContent = '⏹ Стоп';
+      setStatus('Говорите…');
+    });
+  </script>
+</body>
+</html>

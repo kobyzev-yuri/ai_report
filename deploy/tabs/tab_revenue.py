@@ -15,7 +15,12 @@ def show_tab(get_connection, get_revenue_report, get_periods, get_plans):
     """
     st.header("💰 Доходы из счетов-фактур")
     st.markdown("Отчет по доходам из счетов-фактур (BM_INVOICE_ITEM). Все суммы в рублях.")
-    st.caption("В отчёте: SBD = REVENUE_SBD_*; Stectrace = REVENUE_MSG_ABON; мониторинг (9004/9005/9010) = REVENUE_MONITORING_ABON. Одна строка на (SUB-/контракт, IMEI, период); при смене SUB на том же IMEI в периоде возможны две строки. Фильтр по активной главной услуге в периоде.")
+    st.caption(
+        "В отчёте: SBD = REVENUE_SBD_*; Stectrace = REVENUE_MSG_ABON; мониторинг (9004/9005/9010) = REVENUE_MONITORING_ABON. "
+        "Колонка TARIFF_SINGLE_PAYMENT_MONEY — разовый платёж «подключение устройства» из тарифа (BM_TARIFFEL single_payment для 9002/9014), справочно, не из СФ. "
+        "Строка попадает в отчёт только если в выбранном периоде есть позиции счёта-фактуры (BM_INVOICE_ITEM) по Iridium; без начислений в месяце IMEI в выборке не будет — это не справочник всех устройств. "
+        "Одна строка на (SUB-/контракт, IMEI, период); при смене SUB на том же IMEI в периоде возможны две строки."
+    )
 
     selected_period, _selected_plan, contract_id_filter, imei_filter, customer_name_filter, code_1c_filter = (
         render_report_filters(get_connection, get_periods, get_plans, include_plan=False)
@@ -115,7 +120,34 @@ def show_tab(get_connection, get_revenue_report, get_periods, get_plans):
             if 'REVENUE_MSG_ABON' in df_revenue.columns:
                 st.metric("Сообщения Абонплата", f"{df_revenue['REVENUE_MSG_ABON'].sum():,.2f}")
             st.metric("Записей", f"{len(df_revenue):,}")
-        
+
+        # Справочно: разовый платёж подключения из тарифа (как отдельная строка метрик — сумма и охват, не выручка из СФ)
+        if "TARIFF_SINGLE_PAYMENT_MONEY" in df_revenue.columns:
+            tpm = df_revenue["TARIFF_SINGLE_PAYMENT_MONEY"]
+            tpm_num = pd.to_numeric(tpm, errors="coerce")
+            cnt_tariff = int(tpm_num.notna().sum())
+            sum_tariff = float(tpm_num.sum(skipna=True))
+            m1, m2, m3 = st.columns(3)
+            without_tariff = len(df_revenue) - cnt_tariff
+            with m1:
+                st.metric(
+                    "Подключение (тариф, сумма)",
+                    f"{sum_tariff:,.2f}" if cnt_tariff else "—",
+                    help="Сумма TARIFF_SINGLE_PAYMENT_MONEY по текущей выборке (single_payment в тарифе 9002/9014). На строку — одно значение тарифа; не фактическая выручка из СФ.",
+                )
+            with m2:
+                st.metric(
+                    "Подключение (строк с тарифом)",
+                    f"{cnt_tariff:,}",
+                    help="Сколько строк, где колонка тарифа подключения не пустая.",
+                )
+            with m3:
+                st.metric(
+                    "Без тарифа в колонке",
+                    f"{without_tariff:,}" if len(df_revenue) else "—",
+                    help="Строк без single_payment в тарифе или не 9002/9014.",
+                )
+
         st.markdown("---")
         
         display_df_revenue = df_revenue.copy()

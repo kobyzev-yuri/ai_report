@@ -74,11 +74,11 @@ def get_main_report(get_connection, period_filter=None, plan_filter=None, contra
         contract_value = contract_id_filter.strip().replace("'", "''")
         contract_condition = f"AND v.CONTRACT_ID LIKE '%{contract_value}%'"
     
-    # Фильтр по IMEI
+    # Фильтр по IMEI (VSAT в БД может быть NUMBER)
     imei_condition = ""
     if imei_filter and imei_filter.strip():
         imei_value = imei_filter.strip().replace("'", "''")
-        imei_condition = f"AND v.IMEI = '{imei_value}'"
+        imei_condition = f"AND TRIM(TO_CHAR(v.IMEI)) = '{imei_value}'"
     
     # Фильтр по названию клиента
     customer_condition = ""
@@ -242,8 +242,27 @@ def get_revenue_report(get_connection, period_filter=None, contract_id_filter=No
     if contract_id_filter: 
         val = contract_id_filter.strip().replace("'", "''")
         conds.append(f"v.CONTRACT_ID LIKE '%{val}%'")
-    if imei_filter: 
-        conds.append(f"v.IMEI = '{imei_filter.strip()}'")
+    if imei_filter:
+        raw_imei = imei_filter.strip()
+        imei_sql = raw_imei.replace("'", "''")
+        # Сначала дешёвый поиск SERVICE_ID по VSAT; если есть — только IN (без OR по всему view).
+        sid_list = []
+        try:
+            cur = conn.cursor()
+            cur.execute(
+                "SELECT SERVICE_ID FROM SERVICES WHERE TRIM(TO_CHAR(VSAT)) = :1",
+                [raw_imei],
+            )
+            for row in cur.fetchall():
+                if row and row[0] is not None:
+                    sid_list.append(int(row[0]))
+            cur.close()
+        except Exception:
+            sid_list = []
+        if sid_list:
+            conds.append("v.SERVICE_ID IN (" + ",".join(str(x) for x in sid_list) + ")")
+        else:
+            conds.append(f"TRIM(TO_CHAR(v.IMEI)) = '{imei_sql}'")
     if customer_name_filter: 
         val = customer_name_filter.strip().replace("'", "''")
         conds.append(f"UPPER(COALESCE(v.CUSTOMER_NAME, '')) LIKE UPPER('%{val}%')")
@@ -253,7 +272,51 @@ def get_revenue_report(get_connection, period_filter=None, contract_id_filter=No
     where = " AND ".join(conds) if conds else "1=1"
     # Без задвоения: 1) показываем строку если главная услуга активна ИЛИ есть активная услуга с начислениями в периоде;
     # 2) на (IMEI, CONTRACT_ID, PERIOD) оставляем одну строку — приоритет у строки, где главная услуга активна (не клон)
-    query = f"""SELECT * FROM (
+    #
+    # Для одного выбранного месяца EXISTS по BM_INVOICE_ITEM заменён на WITH+JOIN (один проход по счетам за период),
+    # иначе при «только период» запрос зависал на коррелированном EXISTS по всем строкам view.
+    period_esc = None
+    if period_filter and period_filter != "All Periods":
+        period_esc = period_filter.replace("'", "''")
+    exists_sql = f"""
+      EXISTS (
+        SELECT 1 FROM BM_INVOICE_ITEM ii2
+        JOIN SERVICES s2 ON ii2.SERVICE_ID = s2.SERVICE_ID
+        JOIN BM_PERIOD p ON ii2.PERIOD_ID = p.PERIOD_ID
+        WHERE NVL(NULLIF(TRIM(TO_CHAR(s2.VSAT)), ''), NULLIF(TRIM(TO_CHAR(s2.LOGIN)), '')) = TRIM(TO_CHAR(v.IMEI))
+          AND TO_CHAR(p.START_DATE,'YYYY-MM') = v.PERIOD_YYYYMM
+          AND (s2.CLOSE_DATE IS NULL OR s2.CLOSE_DATE > LAST_DAY(TO_DATE(v.PERIOD_YYYYMM||'-01','YYYY-MM-DD')))
+      )"""
+    if period_esc:
+        query = f"""WITH inv_cov AS (
+  SELECT DISTINCT
+    NVL(NULLIF(TRIM(TO_CHAR(s2.VSAT)), ''), NULLIF(TRIM(TO_CHAR(s2.LOGIN)), '')) AS imei_key,
+    TO_CHAR(p.START_DATE,'YYYY-MM') AS yyyymm
+  FROM BM_INVOICE_ITEM ii2
+  JOIN SERVICES s2 ON ii2.SERVICE_ID = s2.SERVICE_ID
+  JOIN BM_PERIOD p ON ii2.PERIOD_ID = p.PERIOD_ID
+  WHERE TO_CHAR(p.START_DATE,'YYYY-MM') = '{period_esc}'
+    AND (s2.CLOSE_DATE IS NULL OR s2.CLOSE_DATE > LAST_DAY(TO_DATE(TO_CHAR(p.START_DATE,'YYYY-MM')||'-01','YYYY-MM-DD')))
+)
+SELECT * FROM (
+  SELECT v.*,
+    ROW_NUMBER() OVER (
+      PARTITION BY v.IMEI, v.CONTRACT_ID, v.PERIOD_YYYYMM
+      ORDER BY CASE WHEN s.SERVICE_ID IS NOT NULL THEN 0 ELSE 1 END, v.SERVICE_ID
+    ) AS rn
+  FROM V_REVENUE_FROM_INVOICES v
+  LEFT JOIN SERVICES s ON v.SERVICE_ID = s.SERVICE_ID
+    AND (s.CLOSE_DATE IS NULL OR s.CLOSE_DATE > LAST_DAY(TO_DATE(v.PERIOD_YYYYMM||'-01','YYYY-MM-DD')))
+  LEFT JOIN inv_cov ic ON ic.imei_key = TRIM(TO_CHAR(v.IMEI)) AND ic.yyyymm = v.PERIOD_YYYYMM
+  WHERE {where}
+    AND (
+      s.SERVICE_ID IS NOT NULL
+      OR ic.yyyymm IS NOT NULL
+    )
+) WHERE rn = 1
+ORDER BY PERIOD_YYYYMM DESC, CONTRACT_ID"""
+    else:
+        query = f"""SELECT * FROM (
   SELECT v.*,
     ROW_NUMBER() OVER (
       PARTITION BY v.IMEI, v.CONTRACT_ID, v.PERIOD_YYYYMM
@@ -265,14 +328,7 @@ def get_revenue_report(get_connection, period_filter=None, contract_id_filter=No
   WHERE {where}
     AND (
       s.SERVICE_ID IS NOT NULL
-      OR EXISTS (
-        SELECT 1 FROM BM_INVOICE_ITEM ii2
-        JOIN SERVICES s2 ON ii2.SERVICE_ID = s2.SERVICE_ID
-        JOIN BM_PERIOD p ON ii2.PERIOD_ID = p.PERIOD_ID
-        WHERE NVL(NULLIF(TRIM(TO_CHAR(s2.VSAT)), ''), NULLIF(TRIM(TO_CHAR(s2.LOGIN)), '')) = TRIM(TO_CHAR(v.IMEI))
-          AND TO_CHAR(p.START_DATE,'YYYY-MM') = v.PERIOD_YYYYMM
-          AND (s2.CLOSE_DATE IS NULL OR s2.CLOSE_DATE > LAST_DAY(TO_DATE(v.PERIOD_YYYYMM||'-01','YYYY-MM-DD')))
-      )
+      OR {exists_sql}
     )
 ) WHERE rn = 1
 ORDER BY PERIOD_YYYYMM DESC, CONTRACT_ID"""
@@ -377,8 +433,9 @@ def get_analytics_invoice_period_report(get_connection, period_filter=None, cont
     if contract_id_filter: 
         val = contract_id_filter.strip().replace("'", "''")
         conds.append(f"v.CONTRACT_ID LIKE '%{val}%'")
-    if imei_filter: 
-        conds.append(f"v.IMEI = '{imei_filter.strip()}'")
+    if imei_filter:
+        imei_val = imei_filter.strip().replace("'", "''")
+        conds.append(f"TRIM(TO_CHAR(v.IMEI)) = '{imei_val}'")
     if customer_name_filter: 
         val = customer_name_filter.strip().replace("'", "''")
         conds.append(f"UPPER(COALESCE(v.CUSTOMER_NAME, '')) LIKE UPPER('%{val}%')")

@@ -278,6 +278,21 @@ plan_info AS (
       AND cor.CONTRACT_ID IS NOT NULL
       AND cor.IMEI IS NOT NULL
       AND cor.BILL_MONTH_YYYMM IS NOT NULL
+),
+-- Разовый платёж «Подключение устройства» (single_payment) по тарифу услуги 9002/9014:
+-- BM_TARIFFEL_TYPE (MNEMONIC=single_payment, TYPE_ID = услуге) + BM_TARIFFEL.MONEY при TARIFF_ID услуги
+tariff_single_payment AS (
+    SELECT
+        s.SERVICE_ID,
+        MAX(tf.MONEY) AS TARIFF_SINGLE_PAYMENT_MONEY
+    FROM SERVICES s
+    INNER JOIN BM_TARIFFEL tf ON tf.TARIFF_ID = s.TARIFF_ID
+    INNER JOIN BM_TARIFFEL_TYPE tyt ON tf.TARIFFEL_TYPE_ID = tyt.TARIFFEL_TYPE_ID
+    WHERE s.TYPE_ID IN (9002, 9014)
+      AND tyt.MNEMONIC = 'single_payment'
+      AND tyt.TYPE_ID = s.TYPE_ID
+      AND NVL(tf.MONEY, 0) > 0
+    GROUP BY s.SERVICE_ID
 )
 SELECT 
     -- Информационные колонки (как в затратах)
@@ -385,6 +400,9 @@ SELECT
     
     -- Итого доходов (в рублях - валюта счета-фактуры)
     SUM(bc.MONEY - bc.MONEY_REVERSED) AS REVENUE_TOTAL,
+
+    -- Справочно: разовый платёж подключения из тарифного плана (не из СФ; BM_TARIFFEL по single_payment)
+    MAX(tsp.TARIFF_SINGLE_PAYMENT_MONEY) AS TARIFF_SINGLE_PAYMENT_MONEY,
     
     -- Опционально: суммы в валюте лицевого счета (для УЕ договоров, где ACC_CURRENCY_ID = 4)
     -- Используется только для справки, основная валюта - рубли (MONEY)
@@ -435,6 +453,7 @@ LEFT JOIN plan_info pi
     ON bc.BASE_CONTRACT_ID = pi.CONTRACT_ID
     AND bc.IMEI = pi.IMEI
     AND pm.PERIOD_YYYYMM = pi.PERIOD_YYYYMM
+LEFT JOIN tariff_single_payment tsp ON ms.SERVICE_ID = tsp.SERVICE_ID
 GROUP BY 
     ms.SERVICE_ID,
     bc.BASE_CONTRACT_ID,
@@ -457,13 +476,10 @@ GROUP BY
     pm.BILL_MONTH_START,
     pm.PERIOD_YYYYMM,
     pm.PERIOD_MONTH_NAME
-ORDER BY 
-    bc.BASE_CONTRACT_ID,
-    bc.PERIOD_ID NULLS LAST
 /
 
 -- Комментарии
-COMMENT ON TABLE V_REVENUE_FROM_INVOICES IS 'Отчет по доходам из счетов-фактур (BM_INVOICE_ITEM). В Иридиуме одна услуга SBD; нормальная главная услуга строки — 9002 (учёт по КБ) или 9014 Stectrace (учёт по сообщениям). Сопутствующие связаны с SUB- по VSAT=IMEI только если в том же PERIOD_ID в СФ есть строка 9002 или 9014 с тем же IMEI+ЛС; иначе CONTRACT_ID=IMEI и SERVICE_ID — услуга из СФ (9010 и т.д.), без привязки к 9002 из SERVICES без позиции в СФ. См. REVENUE_ANOMALY_NOTE. Одна строка на (SUB- или IMEI, IMEI, период).'
+COMMENT ON TABLE V_REVENUE_FROM_INVOICES IS 'Отчет по доходам из счетов-фактур (BM_INVOICE_ITEM). Сопутствующие услуги по VSAT=IMEI; см. комментарии к колонкам. Справочно: TARIFF_SINGLE_PAYMENT_MONEY из тарифа single_payment для 9002/9014.'
 /
 COMMENT ON COLUMN V_REVENUE_FROM_INVOICES.CONTRACT_ID IS 'Базовый SUB-XXXXX (без -clone-...) — ключ для сопоставления с затратами; при нестандартной привязке без 9002/9014 — числовой IMEI'
 /
@@ -487,9 +503,11 @@ COMMENT ON COLUMN V_REVENUE_FROM_INVOICES.REVENUE_MSG_ABON IS 'Доходы от
 /
 COMMENT ON COLUMN V_REVENUE_FROM_INVOICES.REVENUE_TOTAL IS 'Итого доходов (сумма всех типов услуг) в рублях (MONEY) - основная валюта для всех договоров'
 /
+COMMENT ON COLUMN V_REVENUE_FROM_INVOICES.TARIFF_SINGLE_PAYMENT_MONEY IS 'Разовый платёж подключения устройства (SBD/Stectrace) по тарифному плану: BM_TARIFFEL.MONEY для типа BM_TARIFFEL_TYPE с MNEMONIC=single_payment и TYPE_ID услуги (9002/9014). Справочно, не сумма из счёта-фактуры.'
+/
 COMMENT ON COLUMN V_REVENUE_FROM_INVOICES.REVENUE_TOTAL_ACC_CURRENCY IS 'Опционально: итого доходов в валюте лицевого счета (ACC_MONEY) - только для УЕ договоров (ACC_CURRENCY_ID = 4), используется для справки. Основная валюта - рубли (REVENUE_TOTAL)'
 /
-COMMENT ON COLUMN V_REVENUE_FROM_INVOICES.REVENUE_ANOMALY_NOTE IS 'Предупреждение для нештатной привязки (нет 9002/9014 в биллинге по IMEI+ЛС). NULL — штатный случай. Отчёт только по нестандартным: WHERE REVENUE_ANOMALY_NOTE IS NOT NULL.'
+COMMENT ON COLUMN V_REVENUE_FROM_INVOICES.REVENUE_ANOMALY_NOTE IS 'Предупреждение для нештатной привязки (нет 9002/9014 в биллинге по IMEI+ЛС). NULL — штатный случай.'
 /
 COMMENT ON COLUMN V_REVENUE_FROM_INVOICES.BILL_MONTH IS 'Месяц биллинга (YYYYMM) для сопоставления с затратами'
 /
