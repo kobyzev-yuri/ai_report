@@ -215,16 +215,82 @@ base_contracts AS (
       )
 ),
 -- Получаем данные клиентов из V_IRIDIUM_SERVICES_INFO
-customer_info AS (
+customer_info_raw AS (
     SELECT DISTINCT
         CONTRACT_ID,
+        IMEI,
+        ACCOUNT_ID,
+        CUSTOMER_ID,
         CUSTOMER_NAME,
+        ORGANIZATION_NAME,
+        PERSON_NAME,
         CODE_1C,
         AGREEMENT_NUMBER,
         ORDER_NUMBER,
-        SERVICE_ID AS INFO_SERVICE_ID
+        SERVICE_ID AS INFO_SERVICE_ID,
+        TARIFF_ID,
+        IS_SUSPENDED,
+        START_DATE,
+        STOP_DATE
     FROM V_IRIDIUM_SERVICES_INFO
     WHERE CONTRACT_ID LIKE 'SUB-%'
+),
+customer_info_sub AS (
+    SELECT
+        CONTRACT_ID,
+        IMEI,
+        ACCOUNT_ID,
+        CUSTOMER_ID,
+        CUSTOMER_NAME,
+        ORGANIZATION_NAME,
+        PERSON_NAME,
+        CODE_1C,
+        AGREEMENT_NUMBER,
+        ORDER_NUMBER,
+        INFO_SERVICE_ID,
+        TARIFF_ID,
+        IS_SUSPENDED,
+        START_DATE,
+        STOP_DATE
+    FROM (
+        SELECT
+            r.*,
+            ROW_NUMBER() OVER (
+                PARTITION BY r.CONTRACT_ID
+                ORDER BY r.START_DATE DESC NULLS LAST, r.STOP_DATE DESC NULLS LAST, r.INFO_SERVICE_ID DESC
+            ) AS rn
+        FROM customer_info_raw r
+    )
+    WHERE rn = 1
+),
+customer_info_imei AS (
+    SELECT
+        CONTRACT_ID,
+        IMEI,
+        ACCOUNT_ID,
+        CUSTOMER_ID,
+        CUSTOMER_NAME,
+        ORGANIZATION_NAME,
+        PERSON_NAME,
+        CODE_1C,
+        AGREEMENT_NUMBER,
+        ORDER_NUMBER,
+        INFO_SERVICE_ID,
+        TARIFF_ID,
+        IS_SUSPENDED,
+        START_DATE,
+        STOP_DATE
+    FROM (
+        SELECT
+            r.*,
+            ROW_NUMBER() OVER (
+                PARTITION BY r.ACCOUNT_ID, TRIM(TO_CHAR(r.IMEI))
+                ORDER BY r.START_DATE DESC NULLS LAST, r.STOP_DATE DESC NULLS LAST, r.INFO_SERVICE_ID DESC
+            ) AS rn
+        FROM customer_info_raw r
+        WHERE r.IMEI IS NOT NULL
+    )
+    WHERE rn = 1
 ),
 -- Маппинг PERIOD_ID на BILL_MONTH через BM_PERIOD
 periods_mapping AS (
@@ -299,12 +365,21 @@ SELECT
     ms.SERVICE_ID,
     bc.BASE_CONTRACT_ID AS CONTRACT_ID,
     bc.IMEI,
-    ci.CUSTOMER_NAME,
-    ci.CODE_1C,
+    -- SUB-контракт (если строка привязана к IMEI, а не к SUB-)
+    COALESCE(ci_sub.CONTRACT_ID, ci_imei.CONTRACT_ID) AS SUB_CONTRACT_ID,
+    COALESCE(ci_sub.CUSTOMER_NAME, ci_imei.CUSTOMER_NAME) AS CUSTOMER_NAME,
+    COALESCE(ci_sub.ORGANIZATION_NAME, ci_imei.ORGANIZATION_NAME) AS ORGANIZATION_NAME,
+    COALESCE(ci_sub.PERSON_NAME, ci_imei.PERSON_NAME) AS PERSON_NAME,
+    COALESCE(ci_sub.CODE_1C, ci_imei.CODE_1C) AS CODE_1C,
     ms.ACCOUNT_ID,
     ms.CUSTOMER_ID,
-    ci.AGREEMENT_NUMBER,
-    ci.ORDER_NUMBER,
+    COALESCE(ci_sub.AGREEMENT_NUMBER, ci_imei.AGREEMENT_NUMBER) AS AGREEMENT_NUMBER,
+    COALESCE(ci_sub.ORDER_NUMBER, ci_imei.ORDER_NUMBER) AS ORDER_NUMBER,
+    COALESCE(ci_sub.INFO_SERVICE_ID, ci_imei.INFO_SERVICE_ID) AS INFO_SERVICE_ID,
+    COALESCE(ci_sub.TARIFF_ID, ci_imei.TARIFF_ID) AS TARIFF_ID,
+    COALESCE(ci_sub.IS_SUSPENDED, ci_imei.IS_SUSPENDED) AS IS_SUSPENDED,
+    COALESCE(ci_sub.START_DATE, ci_imei.START_DATE) AS SERVICE_START_DATE,
+    COALESCE(ci_sub.STOP_DATE, ci_imei.STOP_DATE) AS SERVICE_STOP_DATE,
     
     -- Валюта счета-фактуры (рубли)
     bc.CURRENCY_ID,
@@ -420,10 +495,35 @@ SELECT
         CASE
             WHEN sa.TYPE_ID IN (9002, 9014) THEN NULL
             WHEN sa.TYPE_ID = 9008 THEN
-                'Нестандартно: нет услуги SBD/Stectrace (9002/9014) по IMEI+лицевому счёту; строка привязана к приостановке 9008, CONTRACT_ID=IMEI. Проверить полноту счёта-фактуры (в т.ч. выставление из 1С).'
+                CASE
+                    -- 9008 может быть единственной позицией СФ в периоде и это штатно при приостановке,
+                    -- если в биллинге по IMEI+ЛС всё же есть основная 9002/9014 (просто не попала в СФ за период).
+                    WHEN EXISTS (
+                        SELECT 1
+                        FROM SERVICES s_m
+                        WHERE s_m.TYPE_ID IN (9002, 9014)
+                          AND s_m.ACCOUNT_ID = ms.ACCOUNT_ID
+                          AND TRIM(TO_CHAR(s_m.VSAT)) = bc.IMEI
+                    ) THEN
+                        'СФ содержит приостановку 9008 без 9002/9014 в этом периоде (возможен штатный случай при приостановке). CONTRACT_ID=IMEI.'
+                    ELSE
+                        'Нестандартно: в SERVICES нет 9002/9014 по IMEI+лицевому счёту; строка привязана к 9008, CONTRACT_ID=IMEI. Проверить полноту счёта-фактуры (в т.ч. выставление из 1С).'
+                END
             WHEN sa.TYPE_ID IN (9004, 9005, 9010, 9013) THEN
-                'Нестандартно: нет 9002/9014/9008 по IMEI+лицевому счёту; строка привязана к сопутствующей услуге TYPE_ID=' || TO_CHAR(sa.TYPE_ID)
-                || ' (напр. 9010 GSM-мониторинг, 9004 трекинг), CONTRACT_ID=IMEI. Рекомендуется сверить с биллингом и источником СФ.'
+                CASE
+                    WHEN EXISTS (
+                        SELECT 1
+                        FROM SERVICES s_m
+                        WHERE s_m.TYPE_ID IN (9002, 9014, 9008)
+                          AND s_m.ACCOUNT_ID = ms.ACCOUNT_ID
+                          AND NVL(NULLIF(TRIM(TO_CHAR(s_m.VSAT)), ''), NULLIF(TRIM(TO_CHAR(s_m.LOGIN)), '')) = bc.IMEI
+                    ) THEN
+                        'СФ содержит сопутствующую услугу TYPE_ID=' || TO_CHAR(sa.TYPE_ID)
+                        || ' без 9002/9014 в этом периоде (возможен штатный случай). CONTRACT_ID=IMEI.'
+                    ELSE
+                        'Нестандартно: в SERVICES нет 9002/9014/9008 по IMEI+лицевому счёту; строка привязана к сопутствующей услуге TYPE_ID=' || TO_CHAR(sa.TYPE_ID)
+                        || ' (напр. 9010 GSM-мониторинг, 9004 трекинг), CONTRACT_ID=IMEI. Рекомендуется сверить с биллингом и источником СФ.'
+                END
             ELSE NULL
         END
     ) AS REVENUE_ANOMALY_NOTE
@@ -436,9 +536,11 @@ JOIN revenue_service_anchors ms
     AND bc.ACCOUNT_ID = ms.ACCOUNT_ID
 JOIN SERVICES sa ON ms.SERVICE_ID = sa.SERVICE_ID
 -- Джойним с данными клиентов
-LEFT JOIN customer_info ci 
-    ON bc.BASE_CONTRACT_ID = REGEXP_REPLACE(ci.CONTRACT_ID, '-clone-.*', '')
-    AND ms.SERVICE_ID = ci.INFO_SERVICE_ID
+LEFT JOIN customer_info_sub ci_sub
+    ON bc.BASE_CONTRACT_ID = REGEXP_REPLACE(ci_sub.CONTRACT_ID, '-clone-.*', '')
+LEFT JOIN customer_info_imei ci_imei
+    ON ci_imei.ACCOUNT_ID = ms.ACCOUNT_ID
+    AND TRIM(TO_CHAR(ci_imei.IMEI)) = bc.IMEI
 -- Маппинг периодов
 LEFT JOIN periods_mapping pm 
     ON bc.PERIOD_ID = pm.PERIOD_ID
@@ -458,12 +560,20 @@ GROUP BY
     ms.SERVICE_ID,
     bc.BASE_CONTRACT_ID,
     bc.IMEI,
-    ci.CUSTOMER_NAME,
-    ci.CODE_1C,
+    COALESCE(ci_sub.CONTRACT_ID, ci_imei.CONTRACT_ID),
+    COALESCE(ci_sub.CUSTOMER_NAME, ci_imei.CUSTOMER_NAME),
+    COALESCE(ci_sub.ORGANIZATION_NAME, ci_imei.ORGANIZATION_NAME),
+    COALESCE(ci_sub.PERSON_NAME, ci_imei.PERSON_NAME),
+    COALESCE(ci_sub.CODE_1C, ci_imei.CODE_1C),
     ms.ACCOUNT_ID,
     ms.CUSTOMER_ID,
-    ci.AGREEMENT_NUMBER,
-    ci.ORDER_NUMBER,
+    COALESCE(ci_sub.AGREEMENT_NUMBER, ci_imei.AGREEMENT_NUMBER),
+    COALESCE(ci_sub.ORDER_NUMBER, ci_imei.ORDER_NUMBER),
+    COALESCE(ci_sub.INFO_SERVICE_ID, ci_imei.INFO_SERVICE_ID),
+    COALESCE(ci_sub.TARIFF_ID, ci_imei.TARIFF_ID),
+    COALESCE(ci_sub.IS_SUSPENDED, ci_imei.IS_SUSPENDED),
+    COALESCE(ci_sub.START_DATE, ci_imei.START_DATE),
+    COALESCE(ci_sub.STOP_DATE, ci_imei.STOP_DATE),
     bc.CURRENCY_ID,
     curr.CURRENCY_NAME,
     curr.CURRENCY_CODE,
@@ -482,6 +592,22 @@ GROUP BY
 COMMENT ON TABLE V_REVENUE_FROM_INVOICES IS 'Отчет по доходам из счетов-фактур (BM_INVOICE_ITEM). Сопутствующие услуги по VSAT=IMEI; см. комментарии к колонкам. Справочно: TARIFF_SINGLE_PAYMENT_MONEY из тарифа single_payment для 9002/9014.'
 /
 COMMENT ON COLUMN V_REVENUE_FROM_INVOICES.CONTRACT_ID IS 'Базовый SUB-XXXXX (без -clone-...) — ключ для сопоставления с затратами; при нестандартной привязке без 9002/9014 — числовой IMEI'
+/
+COMMENT ON COLUMN V_REVENUE_FROM_INVOICES.SUB_CONTRACT_ID IS 'SUB-XXXXX контракт, найденный по (ACCOUNT_ID+IMEI) или по CONTRACT_ID. Полезно, когда CONTRACT_ID=IMEI (строка привязана к услугам без 9002/9014 в СФ периода).'
+/
+COMMENT ON COLUMN V_REVENUE_FROM_INVOICES.ORGANIZATION_NAME IS 'Название организации (для юр.лиц) из V_IRIDIUM_SERVICES_INFO'
+/
+COMMENT ON COLUMN V_REVENUE_FROM_INVOICES.PERSON_NAME IS 'ФИО (для физ.лиц) из V_IRIDIUM_SERVICES_INFO'
+/
+COMMENT ON COLUMN V_REVENUE_FROM_INVOICES.INFO_SERVICE_ID IS 'SERVICE_ID из V_IRIDIUM_SERVICES_INFO, по которому подтянуты клиентские атрибуты (не обязательно совпадает с SERVICE_ID строки отчёта)'
+/
+COMMENT ON COLUMN V_REVENUE_FROM_INVOICES.TARIFF_ID IS 'TARIFF_ID из V_IRIDIUM_SERVICES_INFO (тариф 9002/9014), связанный с IMEI/контрактом'
+/
+COMMENT ON COLUMN V_REVENUE_FROM_INVOICES.IS_SUSPENDED IS 'Признак приостановки (Y/N) из V_IRIDIUM_SERVICES_INFO: есть активная 9008 по IMEI+ACCOUNT_ID'
+/
+COMMENT ON COLUMN V_REVENUE_FROM_INVOICES.SERVICE_START_DATE IS 'START_DATE (open_date) основной услуги 9002/9014 из V_IRIDIUM_SERVICES_INFO'
+/
+COMMENT ON COLUMN V_REVENUE_FROM_INVOICES.SERVICE_STOP_DATE IS 'STOP_DATE (stop_date) основной услуги 9002/9014 из V_IRIDIUM_SERVICES_INFO'
 /
 COMMENT ON COLUMN V_REVENUE_FROM_INVOICES.SERVICE_ID IS 'SERVICE_ID услуги-якоря строки: обычно 9002 SBD или 9014 Stectrace; при отсутствии их в биллинге по IMEI+ЛС — 9008 или одна из 9004/9005/9010/9013 (см. REVENUE_ANOMALY_NOTE)'
 /
