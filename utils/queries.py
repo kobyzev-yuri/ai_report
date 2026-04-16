@@ -455,3 +455,82 @@ def get_analytics_invoice_period_report(get_connection, period_filter=None, cont
         return None
     finally:
         if conn: conn.close()
+
+
+def get_lbs_services_report(
+    get_connection,
+    period_filter=None,
+    contract_id_filter=None,
+    imei_filter=None,
+    customer_name_filter=None,
+    code_1c_filter=None,
+    exclude_steccom=True,
+    only_in_invoice=False,
+    only_active=False,
+):
+    """Отчет по LBS услугам (TYPE_ID=9002, тарифы BM_TARIFF.NAME like %LBS%). Без сумм: атрибуты сервиса + признак попадания в СФ."""
+    conn = get_connection()
+    if not conn:
+        return None
+
+    conds = []
+    # Пересечение интервала услуги [OPEN_DATE, CLOSE_DATE] с календарным месяцем period_filter (YYYY-MM):
+    # OPEN_DATE <= конец месяца AND (CLOSE_DATE IS NULL OR CLOSE_DATE >= начало месяца)
+    if period_filter and str(period_filter).strip() and str(period_filter).strip() != "All Periods":
+        p = str(period_filter).strip().replace("'", "''")
+        conds.append(
+            f"v.OPEN_DATE <= LAST_DAY(TO_DATE('{p}-01','YYYY-MM-DD')) "
+            f"AND (v.CLOSE_DATE IS NULL OR v.CLOSE_DATE >= TRUNC(TO_DATE('{p}-01','YYYY-MM-DD')))"
+        )
+    if contract_id_filter and str(contract_id_filter).strip():
+        val = str(contract_id_filter).strip().replace("'", "''")
+        conds.append(f"v.CONTRACT_ID LIKE '%{val}%'")
+    if imei_filter and str(imei_filter).strip():
+        val = str(imei_filter).strip().replace("'", "''")
+        conds.append(f"TRIM(TO_CHAR(v.IMEI)) = '{val}'")
+    if customer_name_filter and str(customer_name_filter).strip():
+        val = str(customer_name_filter).strip().replace("'", "''")
+        conds.append("UPPER(COALESCE(v.ORGANIZATION_NAME, v.CUSTOMER_NAME, '')) LIKE UPPER('%" + val + "%')")
+    if code_1c_filter and str(code_1c_filter).strip():
+        val = str(code_1c_filter).strip().replace("'", "''")
+        conds.append(f"v.CODE_1C LIKE '%{val}%'")
+    if exclude_steccom:
+        conds.append("NVL(v.CUSTOMER_ID, -1) <> 521")
+    if only_in_invoice:
+        conds.append("v.IN_INVOICE = 'Y'")
+    if only_active:
+        conds.append("v.CLOSE_DATE IS NULL")
+
+    where = " AND ".join(conds) if conds else "1=1"
+    query = f"""
+    SELECT
+        v.SERVICE_ID,
+        v.CONTRACT_ID,
+        v.IMEI,
+        COALESCE(v.ORGANIZATION_NAME, v.CUSTOMER_NAME, '') AS CUSTOMER_NAME,
+        v.CODE_1C,
+        v.AGREEMENT_NUMBER,
+        v.ORDER_NUMBER,
+        v.TARIFF_ID,
+        v.TARIFF_NAME,
+        v.OPEN_DATE,
+        v.CLOSE_DATE,
+        v.IN_INVOICE,
+        v.FIRST_INVOICE_PERIOD_ID,
+        v.FIRST_INVOICE_PERIOD_YYYYMM,
+        v.ACCOUNT_ID,
+        v.CUSTOMER_ID,
+        v.STATUS,
+        v.ACTUAL_STATUS
+    FROM V_LBS_SERVICES v
+    WHERE {where}
+    ORDER BY v.IN_INVOICE DESC, v.FIRST_INVOICE_PERIOD_ID NULLS LAST, v.OPEN_DATE DESC NULLS LAST, v.CONTRACT_ID, v.IMEI
+    """
+    try:
+        return pd.read_sql_query(query, conn)
+    except Exception as e:
+        st.error(f"Ошибка получения отчета по LBS услугам: {e}")
+        return None
+    finally:
+        if conn:
+            conn.close()

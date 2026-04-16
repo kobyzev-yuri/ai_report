@@ -23,6 +23,7 @@ AVAILABLE_TABS = {
     'confluence_librarian': '🛰️ Спутниковый ассистент',
     'report': '💰 Расходы Иридиум',
     'revenue': '💰 Доходы',
+    'lbs': '📍 LBS услуги',
     'bills': '📄 Рассылка счетов',
     'analytics': '📋 Счета за период',
     'loader': '📥 Data Loader',
@@ -33,6 +34,7 @@ AVAILABLE_TABS = {
 _FALLBACK_TAB_LABELS = {
     "bills": "📄 Рассылка счетов",
     "campaigns": "📧 Кампании",
+    "lbs": "📍 LBS услуги",
 }
 for _fk, _fl in _FALLBACK_TAB_LABELS.items():
     if _fk not in AVAILABLE_TABS:
@@ -144,7 +146,7 @@ def create_user(username, password, is_superuser=False, allowed_tabs=None, creat
         
         # Если allowed_tabs не указан, даем доступ только к основным вкладкам
         if allowed_tabs is None:
-            allowed_tabs = ['report', 'revenue']  # По умолчанию только отчеты
+            allowed_tabs = ['report', 'revenue', 'lbs']  # По умолчанию основные отчеты + LBS
         
         # Валидация allowed_tabs
         if not isinstance(allowed_tabs, list):
@@ -207,7 +209,7 @@ def authenticate_user(username, password):
                 allowed_tabs = []
         else:
             # Если allowed_tabs не установлен, даем доступ к базовым вкладкам
-            allowed_tabs = ['report', 'revenue']
+            allowed_tabs = ['report', 'revenue', 'lbs']
         
         # Суперпользователи имеют доступ ко всем вкладкам
         if is_superuser:
@@ -310,9 +312,9 @@ def get_user_permissions(username):
                 allowed_tabs = json.loads(allowed_tabs_json)
                 return True, sanitize_allowed_tab_keys(allowed_tabs)
             except json.JSONDecodeError:
-                return True, ['report', 'revenue']  # Базовые права по умолчанию
+                return True, ['report', 'revenue', 'lbs']  # Базовые права по умолчанию
         else:
-            return True, ['report', 'revenue']  # Базовые права по умолчанию
+            return True, ['report', 'revenue', 'lbs']  # Базовые права по умолчанию
     finally:
         conn.close()
 

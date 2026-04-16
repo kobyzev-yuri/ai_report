@@ -50,6 +50,10 @@ PROMPT Создание V_UNPROFITABLE_CUSTOMERS...
 PROMPT Создание V_ANALYTICS_INVOICE_PERIOD...
 @@07_v_analytics_invoice_period.sql
 
+-- 10. V_LBS_SERVICES - сервисный отчет по LBS услугам (9002 + тарифы like %LBS%)
+PROMPT Создание V_LBS_SERVICES...
+@@10_v_lbs_services.sql
+
 PROMPT
 PROMPT ========================================
 PROMPT Конец установки (без проверочных SELECT по представлениям — они могли «висеть» на COUNT)
