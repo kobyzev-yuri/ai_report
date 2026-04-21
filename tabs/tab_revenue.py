@@ -16,7 +16,7 @@ def show_tab(get_connection, get_revenue_report, get_periods, get_plans):
     st.header("💰 Доходы из счетов-фактур")
     st.markdown(
         "Отчет по доходам из счетов-фактур (BM_INVOICE_ITEM). Все суммы в рублях. "
-        "Данные из `V_REVENUE_FROM_INVOICES` (укороченный набор). Дата `OPEN_DATE` в выборке — из `SERVICES` по `SERVICE_ID` строки, пока на БД не обновлён view с колонкой `OPEN_DATE`."
+        "Данные из `V_REVENUE_FROM_INVOICES` (укороченный набор). Дата `OPEN_DATE` — из `SERVICES` по `SERVICE_ID` (скалярный подзапрос), без колонки `v.OPEN_DATE` в view."
     )
     st.caption(
         "В отчёте: SBD = REVENUE_SBD_*; Stectrace = REVENUE_MSG_ABON; мониторинг (9004/9005/9010) = REVENUE_MONITORING_ABON. "
