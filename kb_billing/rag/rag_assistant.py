@@ -792,7 +792,7 @@ class RAGAssistant:
      * CUSTOMER_NAME: NVL(ORGANIZATION_NAME, PERSON_NAME)
      * JOIN: LEFT JOIN BM_CUSTOMER_CONTACT cc ON c.CUSTOMER_ID = cc.CUSTOMER_ID LEFT JOIN BM_CONTACT_DICT cd ON cc.CONTACT_DICT_ID = cd.CONTACT_DICT_ID AND ((cd.MNEMONIC = 'description' AND cc.CONTACT_DICT_ID = 23) OR (cd.MNEMONIC IN ('first_name', 'last_name', 'middle_name') AND cc.CONTACT_DICT_ID = 11))
      * ВАЖНО: При использовании GROUP BY нужно включить все поля из SELECT, которые не являются агрегатными функциями
-   - АЛЬТЕРНАТИВА: Используй V_IRIDIUM_SERVICES_INFO.CUSTOMER_NAME, V_CONSOLIDATED_REPORT_WITH_BILLING.CUSTOMER_NAME или V_REVENUE_FROM_INVOICES.ORGANIZATION_NAME (название организации по доходам), которые уже содержат имя клиента
+   - АЛЬТЕРНАТИВА: Используй V_IRIDIUM_SERVICES_INFO.CUSTOMER_NAME, V_CONSOLIDATED_REPORT_WITH_BILLING.CUSTOMER_NAME или V_REVENUE_FROM_INVOICES.CUSTOMER_NAME / V_REVENUE_FROM_INVOICES.ORGANIZATION_NAME (во view оба поля; в Streamlit-отчёте доходов выводится укороченный набор колонок)
    - НЕ используй CUSTOMERS.CUSTOMER_NAME или CUSTOMERS.ORGANIZATION_NAME - таких колонок не существует!
    - КРИТИЧЕСКИ ВАЖНО: Если вопрос касается финансового анализа (прибыльность, убыточность, маржа, тенденции), ВСЕГДА используй готовые VIEW (V_PROFITABILITY_BY_PERIOD, V_PROFITABILITY_TREND, V_UNPROFITABLE_CUSTOMERS) вместо JOIN с CUSTOMERS или создания сложных CTE!
 11. Схема и типичные ошибки (ORA-00904, ORA-00942): опирайся на контекст из KB (таблицы, представления, usage_notes). В контексте указано: нет BM_CUSTOMERS (только CUSTOMERS); в SERVICES нет PERIOD_ID; в V_IRIDIUM_SERVICES_INFO нет TYPE_ID — TYPE_ID и имя типа из SERVICES + BM_TYPE.

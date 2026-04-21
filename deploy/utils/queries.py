@@ -9,6 +9,52 @@ from pathlib import Path
 import streamlit as st
 from datetime import datetime
 
+# Укороченный набор колонок V_REVENUE_FROM_INVOICES для Streamlit «Доходы» (полное представление в Oracle шире).
+_REVENUE_UI_COLUMNS = (
+    "SERVICE_ID",
+    "CONTRACT_ID",
+    "IMEI",
+    "ORGANIZATION_NAME",
+    "CODE_1C",
+    "ACCOUNT_ID",
+    "CUSTOMER_ID",
+    "AGREEMENT_NUMBER",
+    "ORDER_NUMBER",
+    "INFO_SERVICE_ID",
+    "TARIFF_ID",
+    "IS_SUSPENDED",
+    "OPEN_DATE",
+    "CURRENCY_ID",
+    "CURRENCY_NAME",
+    "CURRENCY_CODE",
+    "TARIFF_CURRENCY",
+    "ACC_CURRENCY_NAME",
+    "ACC_CURRENCY_CODE",
+    "ACC_CURRENCY_MNEMONIC",
+    "PERIOD_ID",
+    "BILL_MONTH",
+    "REVENUE_SBD_TRAFFIC",
+    "REVENUE_SBD_TRAFFIC_SBD1",
+    "REVENUE_SBD_TRAFFIC_SBD10",
+    "REVENUE_SBD_ABON",
+    "REVENUE_SBD_TOTAL",
+    "REVENUE_SUSPEND_ABON",
+    "REVENUE_MONITORING_ABON",
+    "REVENUE_MONITORING_BLOCK_ABON",
+    "REVENUE_MSG_ABON",
+    "REVENUE_TOTAL",
+    "TARIFF_SINGLE_PAYMENT_MONEY",
+    "REVENUE_CONNECTION_RUB",
+    "REVENUE_TOTAL_ACC_CURRENCY",
+    "INVOICE_ITEMS_COUNT",
+    "REVENUE_ANOMALY_NOTE",
+)
+
+
+def _revenue_ui_select_sql(alias: str = "v") -> str:
+    return ", ".join(f"{alias}.{c}" for c in _REVENUE_UI_COLUMNS)
+
+
 def count_file_records(file_path):
     """Подсчет количества записей в файле (CSV или XLSX). Для CSV — pandas с разными sep/encoding, как в загрузчиках."""
     try:
@@ -219,8 +265,7 @@ def get_revenue_periods(_get_connection):
     if not conn:
         return []
     try:
-        query = """SELECT DISTINCT TO_CHAR(TO_DATE(TO_CHAR(BILL_MONTH), 'YYYYMM'), 'YYYY-MM') AS PERIOD_YYYYMM
-        FROM V_REVENUE_FROM_INVOICES WHERE BILL_MONTH IS NOT NULL ORDER BY 1 DESC"""
+        query = "SELECT DISTINCT PERIOD_YYYYMM FROM V_REVENUE_FROM_INVOICES WHERE PERIOD_YYYYMM IS NOT NULL ORDER BY PERIOD_YYYYMM DESC"
         cursor = conn.cursor()
         cursor.execute(query)
         periods = [(str(row[0]), str(row[0])) for row in cursor.fetchall() if row[0]]
@@ -239,9 +284,7 @@ def get_revenue_report(get_connection, period_filter=None, contract_id_filter=No
     
     conds = []
     if period_filter and period_filter != "All Periods": 
-        conds.append(
-            f"TO_CHAR(TO_DATE(TO_CHAR(v.BILL_MONTH), 'YYYYMM'), 'YYYY-MM') = '{period_filter}'"
-        )
+        conds.append(f"v.PERIOD_YYYYMM = '{period_filter}'")
     if contract_id_filter: 
         val = contract_id_filter.strip().replace("'", "''")
         conds.append(f"v.CONTRACT_ID LIKE '%{val}%'")
@@ -268,7 +311,9 @@ def get_revenue_report(get_connection, period_filter=None, contract_id_filter=No
             conds.append(f"TRIM(TO_CHAR(v.IMEI)) = '{imei_sql}'")
     if customer_name_filter: 
         val = customer_name_filter.strip().replace("'", "''")
-        conds.append(f"UPPER(COALESCE(v.ORGANIZATION_NAME, '')) LIKE UPPER('%{val}%')")
+        conds.append(
+            f"UPPER(COALESCE(v.CUSTOMER_NAME, v.ORGANIZATION_NAME, '')) LIKE UPPER('%{val}%')"
+        )
     if code_1c_filter: 
         conds.append(f"v.CODE_1C LIKE '%{code_1c_filter.strip()}%'")
     
@@ -287,8 +332,8 @@ def get_revenue_report(get_connection, period_filter=None, contract_id_filter=No
         JOIN SERVICES s2 ON ii2.SERVICE_ID = s2.SERVICE_ID
         JOIN BM_PERIOD p ON ii2.PERIOD_ID = p.PERIOD_ID
         WHERE NVL(NULLIF(TRIM(TO_CHAR(s2.VSAT)), ''), NULLIF(TRIM(TO_CHAR(s2.LOGIN)), '')) = TRIM(TO_CHAR(v.IMEI))
-          AND TO_CHAR(p.START_DATE,'YYYY-MM') = TO_CHAR(TO_DATE(TO_CHAR(v.BILL_MONTH), 'YYYYMM'), 'YYYY-MM')
-          AND (s2.CLOSE_DATE IS NULL OR s2.CLOSE_DATE > LAST_DAY(TO_DATE(TO_CHAR(v.BILL_MONTH), 'YYYYMM')))
+          AND TO_CHAR(p.START_DATE,'YYYY-MM') = v.PERIOD_YYYYMM
+          AND (s2.CLOSE_DATE IS NULL OR s2.CLOSE_DATE > LAST_DAY(TO_DATE(v.PERIOD_YYYYMM||'-01','YYYY-MM-DD')))
       )"""
     if period_esc:
         query = f"""WITH inv_cov AS (
@@ -302,15 +347,15 @@ def get_revenue_report(get_connection, period_filter=None, contract_id_filter=No
     AND (s2.CLOSE_DATE IS NULL OR s2.CLOSE_DATE > LAST_DAY(TO_DATE(TO_CHAR(p.START_DATE,'YYYY-MM')||'-01','YYYY-MM-DD')))
 )
 SELECT * FROM (
-  SELECT v.*,
+  SELECT {_revenue_ui_select_sql('v')},
     ROW_NUMBER() OVER (
-      PARTITION BY v.IMEI, v.CONTRACT_ID, v.BILL_MONTH
+      PARTITION BY v.IMEI, v.CONTRACT_ID, v.PERIOD_YYYYMM
       ORDER BY CASE WHEN s.SERVICE_ID IS NOT NULL THEN 0 ELSE 1 END, v.SERVICE_ID
     ) AS rn
   FROM V_REVENUE_FROM_INVOICES v
   LEFT JOIN SERVICES s ON v.SERVICE_ID = s.SERVICE_ID
-    AND (s.CLOSE_DATE IS NULL OR s.CLOSE_DATE > LAST_DAY(TO_DATE(TO_CHAR(v.BILL_MONTH), 'YYYYMM')))
-  LEFT JOIN inv_cov ic ON ic.imei_key = TRIM(TO_CHAR(v.IMEI)) AND ic.yyyymm = TO_CHAR(TO_DATE(TO_CHAR(v.BILL_MONTH), 'YYYYMM'), 'YYYY-MM')
+    AND (s.CLOSE_DATE IS NULL OR s.CLOSE_DATE > LAST_DAY(TO_DATE(v.PERIOD_YYYYMM||'-01','YYYY-MM-DD')))
+  LEFT JOIN inv_cov ic ON ic.imei_key = TRIM(TO_CHAR(v.IMEI)) AND ic.yyyymm = v.PERIOD_YYYYMM
   WHERE {where}
     AND (
       s.SERVICE_ID IS NOT NULL
@@ -320,14 +365,14 @@ SELECT * FROM (
 ORDER BY BILL_MONTH DESC, CONTRACT_ID"""
     else:
         query = f"""SELECT * FROM (
-  SELECT v.*,
+  SELECT {_revenue_ui_select_sql('v')},
     ROW_NUMBER() OVER (
-      PARTITION BY v.IMEI, v.CONTRACT_ID, v.BILL_MONTH
+      PARTITION BY v.IMEI, v.CONTRACT_ID, v.PERIOD_YYYYMM
       ORDER BY CASE WHEN s.SERVICE_ID IS NOT NULL THEN 0 ELSE 1 END, v.SERVICE_ID
     ) AS rn
   FROM V_REVENUE_FROM_INVOICES v
   LEFT JOIN SERVICES s ON v.SERVICE_ID = s.SERVICE_ID
-    AND (s.CLOSE_DATE IS NULL OR s.CLOSE_DATE > LAST_DAY(TO_DATE(TO_CHAR(v.BILL_MONTH), 'YYYYMM')))
+    AND (s.CLOSE_DATE IS NULL OR s.CLOSE_DATE > LAST_DAY(TO_DATE(v.PERIOD_YYYYMM||'-01','YYYY-MM-DD')))
   WHERE {where}
     AND (
       s.SERVICE_ID IS NOT NULL
