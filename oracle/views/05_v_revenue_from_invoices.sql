@@ -1,5 +1,6 @@
 -- ============================================================================
 -- V_REVENUE_FROM_INVOICES
+-- Источник истины для доходов: определение здесь должно совпадать с CREATE в Oracle (см. deploy/oracle/views копию).
 -- Отчет по доходам из счетов-фактур (BM_INVOICE_ITEM)
 -- Группировка по базовому SUB- (без -clone-...) и периоду
 -- Разделение доходов по типам услуг (SBD, SUSPEND, мониторинг, блокировка, сообщения)
@@ -377,6 +378,7 @@ SELECT
     COALESCE(ci_sub.INFO_SERVICE_ID, ci_imei.INFO_SERVICE_ID) AS INFO_SERVICE_ID,
     COALESCE(ci_sub.TARIFF_ID, ci_imei.TARIFF_ID) AS TARIFF_ID,
     COALESCE(ci_sub.IS_SUSPENDED, ci_imei.IS_SUSPENDED) AS IS_SUSPENDED,
+    sa.OPEN_DATE,
     COALESCE(ci_sub.START_DATE, ci_imei.START_DATE) AS SERVICE_START_DATE,
     COALESCE(ci_sub.STOP_DATE, ci_imei.STOP_DATE) AS SERVICE_STOP_DATE,
     
@@ -611,6 +613,7 @@ LEFT JOIN (
     )
 GROUP BY 
     ms.SERVICE_ID,
+    sa.OPEN_DATE,
     bc.BASE_CONTRACT_ID,
     bc.IMEI,
     COALESCE(ci_sub.CONTRACT_ID, ci_imei.CONTRACT_ID),
@@ -642,7 +645,7 @@ GROUP BY
 /
 
 -- Комментарии
-COMMENT ON TABLE V_REVENUE_FROM_INVOICES IS 'Отчет по доходам из счетов-фактур (BM_INVOICE_ITEM). Сопутствующие услуги по VSAT=IMEI; см. комментарии к колонкам. Справочно: TARIFF_SINGLE_PAYMENT_MONEY из тарифа single_payment для 9002/9014. В Streamlit в выборку попадает укороченный набор колонок плюс OPEN_DATE из SERVICES.SERVICE_ID=SERVICE_ID строки (get_revenue_report).'
+COMMENT ON TABLE V_REVENUE_FROM_INVOICES IS 'Отчет по доходам из счетов-фактур (BM_INVOICE_ITEM). Сопутствующие услуги по VSAT=IMEI; см. комментарии к колонкам. Справочно: TARIFF_SINGLE_PAYMENT_MONEY из тарифа single_payment для 9002/9014. Определение view в репозитории должно совпадать с развёрнутым в Oracle; Streamlit берёт укороченный поднабор колонок из view (get_revenue_report).'
 /
 COMMENT ON COLUMN V_REVENUE_FROM_INVOICES.CONTRACT_ID IS 'Базовый SUB-XXXXX (без -clone-...) — ключ для сопоставления с затратами; при нестандартной привязке без 9002/9014 — числовой IMEI'
 /
@@ -660,7 +663,9 @@ COMMENT ON COLUMN V_REVENUE_FROM_INVOICES.TARIFF_ID IS 'TARIFF_ID из V_IRIDIUM
 /
 COMMENT ON COLUMN V_REVENUE_FROM_INVOICES.IS_SUSPENDED IS 'Признак приостановки (Y/N) из V_IRIDIUM_SERVICES_INFO: есть активная 9008 по IMEI+ACCOUNT_ID'
 /
-COMMENT ON COLUMN V_REVENUE_FROM_INVOICES.SERVICE_START_DATE IS 'START_DATE из V_IRIDIUM_SERVICES_INFO (справочно по клиенту). Признание разового подключения в доходах — по SERVICES.OPEN_DATE услуги-якоря (SERVICE_ID строки), см. REVENUE_CONNECTION_RUB'
+COMMENT ON COLUMN V_REVENUE_FROM_INVOICES.OPEN_DATE IS 'SERVICES.OPEN_DATE услуги-якоря (та же строка, что SERVICE_ID): признание разового подключения и курс УЕ→руб для REVENUE_CONNECTION_RUB'
+/
+COMMENT ON COLUMN V_REVENUE_FROM_INVOICES.SERVICE_START_DATE IS 'START_DATE из V_IRIDIUM_SERVICES_INFO (справочно по клиенту). Разовое подключение в доходах — по колонке OPEN_DATE (SERVICES якорной услуги), см. REVENUE_CONNECTION_RUB'
 /
 COMMENT ON COLUMN V_REVENUE_FROM_INVOICES.SERVICE_STOP_DATE IS 'STOP_DATE из V_IRIDIUM_SERVICES_INFO (справочно по клиенту)'
 /

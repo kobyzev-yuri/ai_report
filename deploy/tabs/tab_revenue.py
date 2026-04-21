@@ -16,7 +16,7 @@ def show_tab(get_connection, get_revenue_report, get_periods, get_plans):
     st.header("💰 Доходы из счетов-фактур")
     st.markdown(
         "Отчет по доходам из счетов-фактур (BM_INVOICE_ITEM). Все суммы в рублях. "
-        "В таблице — основные колонки из `V_REVENUE_FROM_INVOICES` и дата `OPEN_DATE` из `SERVICES` по якорному `SERVICE_ID` строки."
+        "Данные из `V_REVENUE_FROM_INVOICES` (в таблице — укороченный набор колонок view; DDL в репозитории должен совпадать с Oracle)."
     )
     st.caption(
         "В отчёте: SBD = REVENUE_SBD_*; Stectrace = REVENUE_MSG_ABON; мониторинг (9004/9005/9010) = REVENUE_MONITORING_ABON. "
