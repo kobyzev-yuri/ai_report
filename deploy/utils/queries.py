@@ -9,8 +9,9 @@ from pathlib import Path
 import streamlit as st
 from datetime import datetime
 
-# Укороченный набор колонок V_REVENUE_FROM_INVOICES для Streamlit «Доходы» (полное определение view — oracle/views/05_…).
-_REVENUE_UI_COLUMNS = (
+# Укороченный набор колонок для Streamlit «Доходы» (остальное — из V_REVENUE_FROM_INVOICES, см. oracle/views/05_…).
+# OPEN_DATE не из v.*: на БД без пересборки 05 колонки v.OPEN_DATE нет (ORA-00904). Берём s_open.OPEN_DATE — то же, что sa.OPEN_DATE в view после деплоя DDL.
+_REVENUE_UI_BEFORE_OPEN_DATE = (
     "SERVICE_ID",
     "CONTRACT_ID",
     "IMEI",
@@ -23,7 +24,8 @@ _REVENUE_UI_COLUMNS = (
     "INFO_SERVICE_ID",
     "TARIFF_ID",
     "IS_SUSPENDED",
-    "OPEN_DATE",
+)
+_REVENUE_UI_AFTER_OPEN_DATE = (
     "CURRENCY_ID",
     "CURRENCY_NAME",
     "CURRENCY_CODE",
@@ -52,7 +54,9 @@ _REVENUE_UI_COLUMNS = (
 
 
 def _revenue_ui_select_sql(alias: str = "v") -> str:
-    return ", ".join(f"{alias}.{c}" for c in _REVENUE_UI_COLUMNS)
+    a = ", ".join(f"{alias}.{c}" for c in _REVENUE_UI_BEFORE_OPEN_DATE)
+    b = ", ".join(f"{alias}.{c}" for c in _REVENUE_UI_AFTER_OPEN_DATE)
+    return f"{a}, s_open.OPEN_DATE AS OPEN_DATE, {b}"
 
 
 def count_file_records(file_path):
@@ -353,6 +357,7 @@ SELECT * FROM (
       ORDER BY CASE WHEN s.SERVICE_ID IS NOT NULL THEN 0 ELSE 1 END, v.SERVICE_ID
     ) AS rn
   FROM V_REVENUE_FROM_INVOICES v
+  LEFT JOIN SERVICES s_open ON s_open.SERVICE_ID = v.SERVICE_ID
   LEFT JOIN SERVICES s ON v.SERVICE_ID = s.SERVICE_ID
     AND (s.CLOSE_DATE IS NULL OR s.CLOSE_DATE > LAST_DAY(TO_DATE(v.PERIOD_YYYYMM||'-01','YYYY-MM-DD')))
   LEFT JOIN inv_cov ic ON ic.imei_key = TRIM(TO_CHAR(v.IMEI)) AND ic.yyyymm = v.PERIOD_YYYYMM
@@ -371,6 +376,7 @@ ORDER BY BILL_MONTH DESC, CONTRACT_ID"""
       ORDER BY CASE WHEN s.SERVICE_ID IS NOT NULL THEN 0 ELSE 1 END, v.SERVICE_ID
     ) AS rn
   FROM V_REVENUE_FROM_INVOICES v
+  LEFT JOIN SERVICES s_open ON s_open.SERVICE_ID = v.SERVICE_ID
   LEFT JOIN SERVICES s ON v.SERVICE_ID = s.SERVICE_ID
     AND (s.CLOSE_DATE IS NULL OR s.CLOSE_DATE > LAST_DAY(TO_DATE(v.PERIOD_YYYYMM||'-01','YYYY-MM-DD')))
   WHERE {where}
