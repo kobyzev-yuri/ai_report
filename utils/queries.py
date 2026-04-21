@@ -9,7 +9,7 @@ from pathlib import Path
 import streamlit as st
 from datetime import datetime
 
-# Укороченный набор колонок для Streamlit «Доходы» (остальное — из V_REVENUE_FROM_INVOICES, см. oracle/views/05_…).
+# Укороченный набор колонок для экрана/CSV «Доходы». DDL V_REVENUE_FROM_INVOICES в Oracle не меняем — только список полей в этом SELECT.
 # OPEN_DATE не из v.*: на БД без пересборки 05 колонки v.OPEN_DATE нет (ORA-00904). Берём s_open.OPEN_DATE — то же, что sa.OPEN_DATE в view после деплоя DDL.
 _REVENUE_UI_BEFORE_OPEN_DATE = (
     "SERVICE_ID",
