@@ -219,7 +219,8 @@ def get_revenue_periods(_get_connection):
     if not conn:
         return []
     try:
-        query = "SELECT DISTINCT PERIOD_YYYYMM FROM V_REVENUE_FROM_INVOICES WHERE PERIOD_YYYYMM IS NOT NULL ORDER BY PERIOD_YYYYMM DESC"
+        query = """SELECT DISTINCT TO_CHAR(TO_DATE(TO_CHAR(BILL_MONTH), 'YYYYMM'), 'YYYY-MM') AS PERIOD_YYYYMM
+        FROM V_REVENUE_FROM_INVOICES WHERE BILL_MONTH IS NOT NULL ORDER BY 1 DESC"""
         cursor = conn.cursor()
         cursor.execute(query)
         periods = [(str(row[0]), str(row[0])) for row in cursor.fetchall() if row[0]]
@@ -238,7 +239,9 @@ def get_revenue_report(get_connection, period_filter=None, contract_id_filter=No
     
     conds = []
     if period_filter and period_filter != "All Periods": 
-        conds.append(f"v.PERIOD_YYYYMM = '{period_filter}'")
+        conds.append(
+            f"TO_CHAR(TO_DATE(TO_CHAR(v.BILL_MONTH), 'YYYYMM'), 'YYYY-MM') = '{period_filter}'"
+        )
     if contract_id_filter: 
         val = contract_id_filter.strip().replace("'", "''")
         conds.append(f"v.CONTRACT_ID LIKE '%{val}%'")
@@ -265,7 +268,7 @@ def get_revenue_report(get_connection, period_filter=None, contract_id_filter=No
             conds.append(f"TRIM(TO_CHAR(v.IMEI)) = '{imei_sql}'")
     if customer_name_filter: 
         val = customer_name_filter.strip().replace("'", "''")
-        conds.append(f"UPPER(COALESCE(v.CUSTOMER_NAME, '')) LIKE UPPER('%{val}%')")
+        conds.append(f"UPPER(COALESCE(v.ORGANIZATION_NAME, '')) LIKE UPPER('%{val}%')")
     if code_1c_filter: 
         conds.append(f"v.CODE_1C LIKE '%{code_1c_filter.strip()}%'")
     
@@ -284,8 +287,8 @@ def get_revenue_report(get_connection, period_filter=None, contract_id_filter=No
         JOIN SERVICES s2 ON ii2.SERVICE_ID = s2.SERVICE_ID
         JOIN BM_PERIOD p ON ii2.PERIOD_ID = p.PERIOD_ID
         WHERE NVL(NULLIF(TRIM(TO_CHAR(s2.VSAT)), ''), NULLIF(TRIM(TO_CHAR(s2.LOGIN)), '')) = TRIM(TO_CHAR(v.IMEI))
-          AND TO_CHAR(p.START_DATE,'YYYY-MM') = v.PERIOD_YYYYMM
-          AND (s2.CLOSE_DATE IS NULL OR s2.CLOSE_DATE > LAST_DAY(TO_DATE(v.PERIOD_YYYYMM||'-01','YYYY-MM-DD')))
+          AND TO_CHAR(p.START_DATE,'YYYY-MM') = TO_CHAR(TO_DATE(TO_CHAR(v.BILL_MONTH), 'YYYYMM'), 'YYYY-MM')
+          AND (s2.CLOSE_DATE IS NULL OR s2.CLOSE_DATE > LAST_DAY(TO_DATE(TO_CHAR(v.BILL_MONTH), 'YYYYMM')))
       )"""
     if period_esc:
         query = f"""WITH inv_cov AS (
@@ -301,37 +304,37 @@ def get_revenue_report(get_connection, period_filter=None, contract_id_filter=No
 SELECT * FROM (
   SELECT v.*,
     ROW_NUMBER() OVER (
-      PARTITION BY v.IMEI, v.CONTRACT_ID, v.PERIOD_YYYYMM
+      PARTITION BY v.IMEI, v.CONTRACT_ID, v.BILL_MONTH
       ORDER BY CASE WHEN s.SERVICE_ID IS NOT NULL THEN 0 ELSE 1 END, v.SERVICE_ID
     ) AS rn
   FROM V_REVENUE_FROM_INVOICES v
   LEFT JOIN SERVICES s ON v.SERVICE_ID = s.SERVICE_ID
-    AND (s.CLOSE_DATE IS NULL OR s.CLOSE_DATE > LAST_DAY(TO_DATE(v.PERIOD_YYYYMM||'-01','YYYY-MM-DD')))
-  LEFT JOIN inv_cov ic ON ic.imei_key = TRIM(TO_CHAR(v.IMEI)) AND ic.yyyymm = v.PERIOD_YYYYMM
+    AND (s.CLOSE_DATE IS NULL OR s.CLOSE_DATE > LAST_DAY(TO_DATE(TO_CHAR(v.BILL_MONTH), 'YYYYMM')))
+  LEFT JOIN inv_cov ic ON ic.imei_key = TRIM(TO_CHAR(v.IMEI)) AND ic.yyyymm = TO_CHAR(TO_DATE(TO_CHAR(v.BILL_MONTH), 'YYYYMM'), 'YYYY-MM')
   WHERE {where}
     AND (
       s.SERVICE_ID IS NOT NULL
       OR ic.yyyymm IS NOT NULL
     )
 ) WHERE rn = 1
-ORDER BY PERIOD_YYYYMM DESC, CONTRACT_ID"""
+ORDER BY BILL_MONTH DESC, CONTRACT_ID"""
     else:
         query = f"""SELECT * FROM (
   SELECT v.*,
     ROW_NUMBER() OVER (
-      PARTITION BY v.IMEI, v.CONTRACT_ID, v.PERIOD_YYYYMM
+      PARTITION BY v.IMEI, v.CONTRACT_ID, v.BILL_MONTH
       ORDER BY CASE WHEN s.SERVICE_ID IS NOT NULL THEN 0 ELSE 1 END, v.SERVICE_ID
     ) AS rn
   FROM V_REVENUE_FROM_INVOICES v
   LEFT JOIN SERVICES s ON v.SERVICE_ID = s.SERVICE_ID
-    AND (s.CLOSE_DATE IS NULL OR s.CLOSE_DATE > LAST_DAY(TO_DATE(v.PERIOD_YYYYMM||'-01','YYYY-MM-DD')))
+    AND (s.CLOSE_DATE IS NULL OR s.CLOSE_DATE > LAST_DAY(TO_DATE(TO_CHAR(v.BILL_MONTH), 'YYYYMM')))
   WHERE {where}
     AND (
       s.SERVICE_ID IS NOT NULL
       OR {exists_sql}
     )
 ) WHERE rn = 1
-ORDER BY PERIOD_YYYYMM DESC, CONTRACT_ID"""
+ORDER BY BILL_MONTH DESC, CONTRACT_ID"""
     
     try:
         df = pd.read_sql_query(query, conn)
@@ -474,6 +477,8 @@ def get_lbs_services_report(
         return None
 
     conds = []
+    # Пересечение интервала услуги [OPEN_DATE, CLOSE_DATE] с календарным месяцем period_filter (YYYY-MM):
+    # OPEN_DATE <= конец месяца AND (CLOSE_DATE IS NULL OR CLOSE_DATE >= начало месяца)
     if period_filter and str(period_filter).strip() and str(period_filter).strip() != "All Periods":
         p = str(period_filter).strip().replace("'", "''")
         conds.append(

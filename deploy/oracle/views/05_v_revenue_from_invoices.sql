@@ -365,11 +365,7 @@ SELECT
     ms.SERVICE_ID,
     bc.BASE_CONTRACT_ID AS CONTRACT_ID,
     bc.IMEI,
-    -- SUB-контракт (если строка привязана к IMEI, а не к SUB-)
-    COALESCE(ci_sub.CONTRACT_ID, ci_imei.CONTRACT_ID) AS SUB_CONTRACT_ID,
-    COALESCE(ci_sub.CUSTOMER_NAME, ci_imei.CUSTOMER_NAME) AS CUSTOMER_NAME,
     COALESCE(ci_sub.ORGANIZATION_NAME, ci_imei.ORGANIZATION_NAME) AS ORGANIZATION_NAME,
-    COALESCE(ci_sub.PERSON_NAME, ci_imei.PERSON_NAME) AS PERSON_NAME,
     COALESCE(ci_sub.CODE_1C, ci_imei.CODE_1C) AS CODE_1C,
     ms.ACCOUNT_ID,
     ms.CUSTOMER_ID,
@@ -378,16 +374,14 @@ SELECT
     COALESCE(ci_sub.INFO_SERVICE_ID, ci_imei.INFO_SERVICE_ID) AS INFO_SERVICE_ID,
     COALESCE(ci_sub.TARIFF_ID, ci_imei.TARIFF_ID) AS TARIFF_ID,
     COALESCE(ci_sub.IS_SUSPENDED, ci_imei.IS_SUSPENDED) AS IS_SUSPENDED,
-    COALESCE(ci_sub.START_DATE, ci_imei.START_DATE) AS SERVICE_START_DATE,
-    COALESCE(ci_sub.STOP_DATE, ci_imei.STOP_DATE) AS SERVICE_STOP_DATE,
+    sa.OPEN_DATE,
     
     -- Валюта счета-фактуры (рубли)
     bc.CURRENCY_ID,
     curr.CURRENCY_NAME,
     curr.CURRENCY_CODE,
-    curr.CURRENCY_MNEMONIC,
+    curr.CURRENCY_MNEMONIC AS TARIFF_CURRENCY,
     -- Валюта лицевого счета (валюта учета договора)
-    bc.ACC_CURRENCY_ID,
     acc_curr.ACC_CURRENCY_NAME,
     acc_curr.ACC_CURRENCY_CODE,
     acc_curr.ACC_CURRENCY_MNEMONIC,
@@ -395,8 +389,6 @@ SELECT
     -- Период
     bc.PERIOD_ID,
     pm.BILL_MONTH_START AS BILL_MONTH,
-    pm.PERIOD_YYYYMM AS PERIOD_YYYYMM,
-    pm.PERIOD_MONTH_NAME,
     
     -- Доходы SBD (9002) - трафик превышения (overage) (в рублях - валюта счета-фактуры)
     -- В счетах-фактурах показывается только трафик, превышающий включенный в абонплату
@@ -474,10 +466,47 @@ SELECT
     END) AS REVENUE_MSG_ABON,
     
     -- Итого доходов (в рублях - валюта счета-фактуры)
-    SUM(bc.MONEY - bc.MONEY_REVERSED) AS REVENUE_TOTAL,
+    -- ВАЖНО: сюда также добавляем разовый платёж подключения из тарифа (single_payment),
+    -- но только в периоде, чей календарный месяц совпадает с месяцем SERVICES.OPEN_DATE якорной услуги (9002/9014),
+    -- с конвертацией УЕ->руб по курсу BM_CURRENCY_RATE (currency_id=4) на дату не позже TRUNC(OPEN_DATE) (последняя запись START_TIME).
+    (SUM(bc.MONEY - bc.MONEY_REVERSED)
+     + NVL(
+         MAX(
+             CASE
+                 WHEN tsp.TARIFF_SINGLE_PAYMENT_MONEY IS NULL THEN NULL
+                 WHEN sa.OPEN_DATE IS NULL THEN NULL
+                 WHEN TRUNC(sa.OPEN_DATE, 'MM') <> TRUNC(TO_DATE(pm.PERIOD_YYYYMM || '-01', 'YYYY-MM-DD'), 'MM') THEN NULL
+                 ELSE
+                     CASE
+                         WHEN bc.ACC_CURRENCY_ID = 4 THEN
+                             tsp.TARIFF_SINGLE_PAYMENT_MONEY * cr.RATE
+                         ELSE
+                             tsp.TARIFF_SINGLE_PAYMENT_MONEY
+                     END
+             END
+         ),
+         0
+     )
+    ) AS REVENUE_TOTAL,
 
     -- Справочно: разовый платёж подключения из тарифного плана (не из СФ; BM_TARIFFEL по single_payment)
     MAX(tsp.TARIFF_SINGLE_PAYMENT_MONEY) AS TARIFF_SINGLE_PAYMENT_MONEY,
+
+    -- Разовый платёж подключения, учтённый в доходах (рубли, курс УЕ на дату OPEN_DATE; месяц OPEN_DATE = месяц отчётного периода)
+    MAX(
+        CASE
+            WHEN tsp.TARIFF_SINGLE_PAYMENT_MONEY IS NULL THEN NULL
+            WHEN sa.OPEN_DATE IS NULL THEN NULL
+            WHEN TRUNC(sa.OPEN_DATE, 'MM') <> TRUNC(TO_DATE(pm.PERIOD_YYYYMM || '-01', 'YYYY-MM-DD'), 'MM') THEN NULL
+            ELSE
+                CASE
+                    WHEN bc.ACC_CURRENCY_ID = 4 THEN
+                        tsp.TARIFF_SINGLE_PAYMENT_MONEY * cr.RATE
+                    ELSE
+                        tsp.TARIFF_SINGLE_PAYMENT_MONEY
+                END
+        END
+    ) AS REVENUE_CONNECTION_RUB,
     
     -- Опционально: суммы в валюте лицевого счета (для УЕ договоров, где ACC_CURRENCY_ID = 4)
     -- Используется только для справки, основная валюта - рубли (MONEY)
@@ -496,6 +525,8 @@ SELECT
             WHEN sa.TYPE_ID IN (9002, 9014) THEN NULL
             WHEN sa.TYPE_ID = 9008 THEN
                 CASE
+                    -- 9008 может быть единственной позицией СФ в периоде и это штатно при приостановке,
+                    -- если в биллинге по IMEI+ЛС всё же есть основная 9002/9014 (просто не попала в СФ за период).
                     WHEN EXISTS (
                         SELECT 1
                         FROM SERVICES s_m
@@ -554,14 +585,29 @@ LEFT JOIN plan_info pi
     AND bc.IMEI = pi.IMEI
     AND pm.PERIOD_YYYYMM = pi.PERIOD_YYYYMM
 LEFT JOIN tariff_single_payment tsp ON ms.SERVICE_ID = tsp.SERVICE_ID
+-- Курс УЕ на дату не позже OPEN_DATE (для конвертации single_payment в рубли)
+LEFT JOIN (
+    SELECT
+        START_TIME,
+        MAX(RATE) AS RATE
+    FROM BM_CURRENCY_RATE
+    WHERE CURRENCY_ID = 4
+      AND DOMAIN_ID = 1
+    GROUP BY START_TIME
+) cr
+    ON cr.START_TIME = (
+        SELECT MAX(r.START_TIME)
+        FROM BM_CURRENCY_RATE r
+        WHERE r.CURRENCY_ID = 4
+          AND r.DOMAIN_ID = 1
+          AND r.START_TIME <= TRUNC(sa.OPEN_DATE)
+    )
 GROUP BY 
     ms.SERVICE_ID,
+    sa.OPEN_DATE,
     bc.BASE_CONTRACT_ID,
     bc.IMEI,
-    COALESCE(ci_sub.CONTRACT_ID, ci_imei.CONTRACT_ID),
-    COALESCE(ci_sub.CUSTOMER_NAME, ci_imei.CUSTOMER_NAME),
     COALESCE(ci_sub.ORGANIZATION_NAME, ci_imei.ORGANIZATION_NAME),
-    COALESCE(ci_sub.PERSON_NAME, ci_imei.PERSON_NAME),
     COALESCE(ci_sub.CODE_1C, ci_imei.CODE_1C),
     ms.ACCOUNT_ID,
     ms.CUSTOMER_ID,
@@ -570,8 +616,6 @@ GROUP BY
     COALESCE(ci_sub.INFO_SERVICE_ID, ci_imei.INFO_SERVICE_ID),
     COALESCE(ci_sub.TARIFF_ID, ci_imei.TARIFF_ID),
     COALESCE(ci_sub.IS_SUSPENDED, ci_imei.IS_SUSPENDED),
-    COALESCE(ci_sub.START_DATE, ci_imei.START_DATE),
-    COALESCE(ci_sub.STOP_DATE, ci_imei.STOP_DATE),
     bc.CURRENCY_ID,
     curr.CURRENCY_NAME,
     curr.CURRENCY_CODE,
@@ -582,8 +626,7 @@ GROUP BY
     acc_curr.ACC_CURRENCY_MNEMONIC,
     bc.PERIOD_ID,
     pm.BILL_MONTH_START,
-    pm.PERIOD_YYYYMM,
-    pm.PERIOD_MONTH_NAME
+    pm.PERIOD_YYYYMM
 /
 
 -- Комментарии
@@ -591,11 +634,7 @@ COMMENT ON TABLE V_REVENUE_FROM_INVOICES IS 'Отчет по доходам из
 /
 COMMENT ON COLUMN V_REVENUE_FROM_INVOICES.CONTRACT_ID IS 'Базовый SUB-XXXXX (без -clone-...) — ключ для сопоставления с затратами; при нестандартной привязке без 9002/9014 — числовой IMEI'
 /
-COMMENT ON COLUMN V_REVENUE_FROM_INVOICES.SUB_CONTRACT_ID IS 'SUB-XXXXX контракт, найденный по (ACCOUNT_ID+IMEI) или по CONTRACT_ID. Полезно, когда CONTRACT_ID=IMEI (строка привязана к услугам без 9002/9014 в СФ периода).'
-/
 COMMENT ON COLUMN V_REVENUE_FROM_INVOICES.ORGANIZATION_NAME IS 'Название организации (для юр.лиц) из V_IRIDIUM_SERVICES_INFO'
-/
-COMMENT ON COLUMN V_REVENUE_FROM_INVOICES.PERSON_NAME IS 'ФИО (для физ.лиц) из V_IRIDIUM_SERVICES_INFO'
 /
 COMMENT ON COLUMN V_REVENUE_FROM_INVOICES.INFO_SERVICE_ID IS 'SERVICE_ID из V_IRIDIUM_SERVICES_INFO, по которому подтянуты клиентские атрибуты (не обязательно совпадает с SERVICE_ID строки отчёта)'
 /
@@ -603,9 +642,7 @@ COMMENT ON COLUMN V_REVENUE_FROM_INVOICES.TARIFF_ID IS 'TARIFF_ID из V_IRIDIUM
 /
 COMMENT ON COLUMN V_REVENUE_FROM_INVOICES.IS_SUSPENDED IS 'Признак приостановки (Y/N) из V_IRIDIUM_SERVICES_INFO: есть активная 9008 по IMEI+ACCOUNT_ID'
 /
-COMMENT ON COLUMN V_REVENUE_FROM_INVOICES.SERVICE_START_DATE IS 'START_DATE (open_date) основной услуги 9002/9014 из V_IRIDIUM_SERVICES_INFO'
-/
-COMMENT ON COLUMN V_REVENUE_FROM_INVOICES.SERVICE_STOP_DATE IS 'STOP_DATE (stop_date) основной услуги 9002/9014 из V_IRIDIUM_SERVICES_INFO'
+COMMENT ON COLUMN V_REVENUE_FROM_INVOICES.OPEN_DATE IS 'Дата начала предоставления услуги (SERVICES.OPEN_DATE услуги-якоря); для признания разового подключения и курса УЕ→руб'
 /
 COMMENT ON COLUMN V_REVENUE_FROM_INVOICES.SERVICE_ID IS 'SERVICE_ID услуги-якоря строки: обычно 9002 SBD или 9014 Stectrace; при отсутствии их в биллинге по IMEI+ЛС — 9008 или одна из 9004/9005/9010/9013 (см. REVENUE_ANOMALY_NOTE)'
 /
@@ -625,19 +662,17 @@ COMMENT ON COLUMN V_REVENUE_FROM_INVOICES.REVENUE_MONITORING_BLOCK_ABON IS 'До
 /
 COMMENT ON COLUMN V_REVENUE_FROM_INVOICES.REVENUE_MSG_ABON IS 'Доходы от абонплаты сообщений (fee_iridium_msg). Для сообщений трафик не практикуется - услуга блокируется при достижении включенного в абонплату трафика'
 /
-COMMENT ON COLUMN V_REVENUE_FROM_INVOICES.REVENUE_TOTAL IS 'Итого доходов (сумма всех типов услуг) в рублях (MONEY) - основная валюта для всех договоров'
+COMMENT ON COLUMN V_REVENUE_FROM_INVOICES.REVENUE_TOTAL IS 'Итого доходов в рублях: сумма начислений из счёта-фактуры (BM_INVOICE_ITEM.MONEY) + разовый платёж подключения (REVENUE_CONNECTION_RUB), если месяц SERVICES.OPEN_DATE якорной услуги совпадает с месяцем отчётного периода.'
 /
 COMMENT ON COLUMN V_REVENUE_FROM_INVOICES.TARIFF_SINGLE_PAYMENT_MONEY IS 'Разовый платёж подключения устройства (SBD/Stectrace) по тарифному плану: BM_TARIFFEL.MONEY для типа BM_TARIFFEL_TYPE с MNEMONIC=single_payment и TYPE_ID услуги (9002/9014). Справочно, не сумма из счёта-фактуры.'
+/
+COMMENT ON COLUMN V_REVENUE_FROM_INVOICES.REVENUE_CONNECTION_RUB IS 'Разовый платёж подключения, учтённый в доходах (в рублях): single_payment из тарифа 9002/9014, только если календарный месяц SERVICES.OPEN_DATE якорной услуги совпадает с месяцем отчётного периода (BM_PERIOD); для УЕ договоров конвертация по BM_CURRENCY_RATE (currency_id=4) на дату не позже TRUNC(OPEN_DATE).'
 /
 COMMENT ON COLUMN V_REVENUE_FROM_INVOICES.REVENUE_TOTAL_ACC_CURRENCY IS 'Опционально: итого доходов в валюте лицевого счета (ACC_MONEY) - только для УЕ договоров (ACC_CURRENCY_ID = 4), используется для справки. Основная валюта - рубли (REVENUE_TOTAL)'
 /
 COMMENT ON COLUMN V_REVENUE_FROM_INVOICES.REVENUE_ANOMALY_NOTE IS 'Предупреждение для нештатной привязки (нет 9002/9014 в биллинге по IMEI+ЛС). NULL — штатный случай.'
 /
-COMMENT ON COLUMN V_REVENUE_FROM_INVOICES.BILL_MONTH IS 'Месяц биллинга (YYYYMM) для сопоставления с затратами'
-/
-COMMENT ON COLUMN V_REVENUE_FROM_INVOICES.PERIOD_YYYYMM IS 'Финансовый период в формате YYYY-MM (например, 2025-02) для фильтрации и сопоставления с FINANCIAL_PERIOD из затрат'
-/
-COMMENT ON COLUMN V_REVENUE_FROM_INVOICES.PERIOD_MONTH_NAME IS 'Название месяца из BM_PERIOD (например, Фев, Мар)'
+COMMENT ON COLUMN V_REVENUE_FROM_INVOICES.BILL_MONTH IS 'Месяц биллинга в виде числа YYYYMM (из BM_PERIOD по PERIOD_ID) для сопоставления с затратами'
 /
 COMMENT ON COLUMN V_REVENUE_FROM_INVOICES.CURRENCY_ID IS 'ID валюты счета-фактуры (рубли) - всегда рубли для выставления счетов'
 /
@@ -645,9 +680,7 @@ COMMENT ON COLUMN V_REVENUE_FROM_INVOICES.CURRENCY_NAME IS 'Название в�
 /
 COMMENT ON COLUMN V_REVENUE_FROM_INVOICES.CURRENCY_CODE IS 'Код валюты счета-фактуры из BM_CURRENCY (810 = рубли)'
 /
-COMMENT ON COLUMN V_REVENUE_FROM_INVOICES.CURRENCY_MNEMONIC IS 'Мнемоника валюты счета-фактуры из BM_CURRENCY (RUR)'
-/
-COMMENT ON COLUMN V_REVENUE_FROM_INVOICES.ACC_CURRENCY_ID IS 'ID валюты лицевого счета (валюта учета договора): 1 = рубли, 4 = УЕ (доллары по курсу ЦБРФ на последний день месяца выставления счета). ВАЖНО: Все суммы (REVENUE_*) показываются в рублях (CURRENCY_ID), но группировка идет по ACC_CURRENCY_ID'
+COMMENT ON COLUMN V_REVENUE_FROM_INVOICES.TARIFF_CURRENCY IS 'Мнемоника валюты счёта-фактуры из BM_CURRENCY (колонка переименована из CURRENCY_MNEMONIC; RUR)'
 /
 COMMENT ON COLUMN V_REVENUE_FROM_INVOICES.ACC_CURRENCY_NAME IS 'Название валюты лицевого счета из BM_CURRENCY (Российский рубль или Доллары США)'
 /
