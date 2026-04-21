@@ -10,7 +10,8 @@ import streamlit as st
 from datetime import datetime
 
 # Укороченный набор колонок V_REVENUE_FROM_INVOICES для Streamlit «Доходы» (полное представление в Oracle шире).
-_REVENUE_UI_COLUMNS = (
+# OPEN_DATE не читаем из v.*: на старых БД view может быть без колонки OPEN_DATE — берём SERVICES.OPEN_DATE по v.SERVICE_ID (якорь строки).
+_REVENUE_UI_BEFORE_OPEN_DATE = (
     "SERVICE_ID",
     "CONTRACT_ID",
     "IMEI",
@@ -23,7 +24,8 @@ _REVENUE_UI_COLUMNS = (
     "INFO_SERVICE_ID",
     "TARIFF_ID",
     "IS_SUSPENDED",
-    "OPEN_DATE",
+)
+_REVENUE_UI_AFTER_OPEN_DATE = (
     "CURRENCY_ID",
     "CURRENCY_NAME",
     "CURRENCY_CODE",
@@ -52,7 +54,9 @@ _REVENUE_UI_COLUMNS = (
 
 
 def _revenue_ui_select_sql(alias: str = "v") -> str:
-    return ", ".join(f"{alias}.{c}" for c in _REVENUE_UI_COLUMNS)
+    a = ", ".join(f"{alias}.{c}" for c in _REVENUE_UI_BEFORE_OPEN_DATE)
+    b = ", ".join(f"{alias}.{c}" for c in _REVENUE_UI_AFTER_OPEN_DATE)
+    return f"{a}, s_open.OPEN_DATE AS OPEN_DATE, {b}"
 
 
 def count_file_records(file_path):
@@ -353,6 +357,7 @@ SELECT * FROM (
       ORDER BY CASE WHEN s.SERVICE_ID IS NOT NULL THEN 0 ELSE 1 END, v.SERVICE_ID
     ) AS rn
   FROM V_REVENUE_FROM_INVOICES v
+  LEFT JOIN SERVICES s_open ON s_open.SERVICE_ID = v.SERVICE_ID
   LEFT JOIN SERVICES s ON v.SERVICE_ID = s.SERVICE_ID
     AND (s.CLOSE_DATE IS NULL OR s.CLOSE_DATE > LAST_DAY(TO_DATE(v.PERIOD_YYYYMM||'-01','YYYY-MM-DD')))
   LEFT JOIN inv_cov ic ON ic.imei_key = TRIM(TO_CHAR(v.IMEI)) AND ic.yyyymm = v.PERIOD_YYYYMM
@@ -371,6 +376,7 @@ ORDER BY BILL_MONTH DESC, CONTRACT_ID"""
       ORDER BY CASE WHEN s.SERVICE_ID IS NOT NULL THEN 0 ELSE 1 END, v.SERVICE_ID
     ) AS rn
   FROM V_REVENUE_FROM_INVOICES v
+  LEFT JOIN SERVICES s_open ON s_open.SERVICE_ID = v.SERVICE_ID
   LEFT JOIN SERVICES s ON v.SERVICE_ID = s.SERVICE_ID
     AND (s.CLOSE_DATE IS NULL OR s.CLOSE_DATE > LAST_DAY(TO_DATE(v.PERIOD_YYYYMM||'-01','YYYY-MM-DD')))
   WHERE {where}
