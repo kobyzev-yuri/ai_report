@@ -135,6 +135,7 @@ echo "  → Документация..."
 cp README.md "$DEPLOY_DIR/"
 cp docs/ORACLE_TUNNEL.md "$DEPLOY_DIR/docs/" 2>/dev/null || true
 cp docs/SYNC_TO_ORACLE.md "$DEPLOY_DIR/docs/" 2>/dev/null || true
+cp docs/deploy.md "$DEPLOY_DIR/docs/" 2>/dev/null || true
 
 # 7. Создаем .gitignore для деплоя
 cat > "$DEPLOY_DIR/.gitignore" << 'EOF'
@@ -185,6 +186,8 @@ nano config.env  # Заполните реальные значения Oracle
 ```bash
 pip install -r requirements.txt
 ```
+
+2.1. **Системные утилиты (рекомендуется):** для вкладки «Счета 1С» / распаковки **.7z** на сервере нужна команда `7z` (Debian/Ubuntu: `apt install -y p7zip-full`). Для RAR — `unrar` или `unar`.
 
 3. **Установите Oracle структуру** (если еще не установлена):
 ```bash

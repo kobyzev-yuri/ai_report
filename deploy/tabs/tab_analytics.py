@@ -56,11 +56,15 @@ def show_tab(
         render_report_filters(get_connection, get_periods, get_plans, include_plan=False)
     )
 
-    # Создаем подвкладки
-    sub_tab_report, sub_tab_duplicates = st.tabs([
-        "📊 Отчет по счетам",
-        "🔍 Проверка дубликатов"
-    ])
+    # Подразделы: не st.tabs() — при rerun Streamlit всегда показывает первую вкладку,
+    # из‑за чего после выбора периода / поиска дубликатов «перескакивало» на отчёт.
+    sub_nav = st.radio(
+        "Подраздел",
+        ["📊 Отчет по счетам", "🔍 Проверка дубликатов"],
+        horizontal=True,
+        key="analytics_sub_nav",
+        label_visibility="collapsed",
+    )
 
     period_filter = selected_period
     contract_id_filter = contract_id_filter if contract_id_filter else None
@@ -68,8 +72,8 @@ def show_tab(
     customer_name_filter = customer_name_filter if customer_name_filter else None
     code_1c_filter = code_1c_filter if code_1c_filter else None
     
-    # ========== SUB TAB: ОТЧЕТ ПО СЧЕТАМ ==========
-    with sub_tab_report:
+    # ========== ПОДРАЗДЕЛ: ОТЧЕТ ПО СЧЕТАМ ==========
+    if sub_nav == "📊 Отчет по счетам":
         # Дополнительные фильтры
         col1, col2 = st.columns(2)
         with col1:
@@ -261,9 +265,9 @@ def show_tab(
                     st.error(f"Не удалось сохранить на сервер: {e}")
         elif df_analytics is not None and df_analytics.empty:
             st.warning("⚠️ Данные не найдены для выбранных фильтров")
-    
-    # ========== SUB TAB: ПРОВЕРКА ДУБЛИКАТОВ ==========
-    with sub_tab_duplicates:
+
+    # ========== ПОДРАЗДЕЛ: ПРОВЕРКА ДУБЛИКАТОВ ==========
+    else:
         st.header("🔍 Проверка дубликатов в ANALYTICS")
         st.markdown("Поиск записей, где **все ключевые поля совпадают**, кроме AID (первичного ключа).")
         st.info("💡 Дубликаты могут возникать при повторной загрузке данных или ошибках в процессе формирования ANALYTICS.")

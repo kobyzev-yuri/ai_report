@@ -15,6 +15,8 @@ nano config.env  # Заполните реальные значения Oracle
 pip install -r requirements.txt
 ```
 
+2.1. **Системные утилиты (рекомендуется):** для вкладки «Счета 1С» / распаковки **.7z** на сервере нужна команда `7z` (Debian/Ubuntu: `apt install -y p7zip-full`). Для RAR — `unrar` или `unar`.
+
 3. **Установите Oracle структуру** (если еще не установлена):
 ```bash
 cd oracle/tables

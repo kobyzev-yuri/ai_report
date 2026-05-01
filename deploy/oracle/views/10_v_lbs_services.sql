@@ -52,6 +52,8 @@ customer_info_raw AS (
     FROM V_IRIDIUM_SERVICES_INFO
     WHERE CONTRACT_ID LIKE 'SUB-%'
 ),
+-- Одна строка на SERVICE_ID: клиентские атрибуты должны соответствовать конкретной услуге,
+-- иначе JOIN только по SUB- размножает строки на все исторические SERVICE_ID с тем же CONTRACT_ID.
 service_info AS (
     SELECT *
     FROM (
