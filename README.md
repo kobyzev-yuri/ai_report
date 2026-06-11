@@ -71,7 +71,9 @@ streamlit run streamlit_report_oracle_backup.py \
 
 Подробные инструкции: **[docs/deploy.md](docs/deploy.md)** — схема поддержки и тестирования, синхронизация, перезапуск на сервере (без Docker). Вся документация: **[docs/](docs/README.md)**.
 
-Кратко: `./prepare_deployment.sh` → `SSH_CMD="ssh -p 1194" ./sync_deploy.sh root@82.114.2.2` → на сервере `./restart_streamlit.sh`.
+Кратко (vz2): `./deploy_vz2.sh --restart` — или `./prepare_deployment.sh` → `./sync_deploy.sh vz2` → `ssh vz2 'cd /usr/local/projects/ai_report && ./restart_streamlit.sh'`.
+
+Legacy (82.114.2.2): `./prepare_deployment.sh` → `SSH_CMD="ssh -p 1194" ./sync_deploy.sh root@82.114.2.2` → на сервере `./restart_streamlit.sh`.
 
 ### Подключение к Oracle
 

@@ -49,6 +49,7 @@ cp oracle/README.md "$DEPLOY_DIR/oracle/" 2>/dev/null || true
 echo "  → Python приложение..."
 cp streamlit_report_oracle_backup.py "$DEPLOY_DIR/"
 cp streamlit_data_loader.py "$DEPLOY_DIR/"
+cp cx_Oracle.py "$DEPLOY_DIR/"
 mkdir -p "$DEPLOY_DIR/utils"
 cp utils/*.py "$DEPLOY_DIR/utils/"
 cp python/*.py "$DEPLOY_DIR/python/" 2>/dev/null || true
@@ -59,6 +60,8 @@ cp tabs/*.py "$DEPLOY_DIR/tabs/" 2>/dev/null || true
 echo "  → Конфигурация..."
 cp config.env.example "$DEPLOY_DIR/"
 cp requirements.txt "$DEPLOY_DIR/"
+mkdir -p "$DEPLOY_DIR/.streamlit"
+cp .streamlit/config.toml "$DEPLOY_DIR/.streamlit/" 2>/dev/null || true
 
 # 4. Скрипты управления
 echo "  → Скрипты управления..."

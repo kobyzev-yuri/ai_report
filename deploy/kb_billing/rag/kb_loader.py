@@ -11,8 +11,9 @@ from pathlib import Path
 from typing import List, Dict, Any, Optional
 from qdrant_client import QdrantClient
 from qdrant_client.models import Distance, VectorParams, PointStruct, Filter, FieldCondition, MatchValue
-from sentence_transformers import SentenceTransformer
 import logging
+
+from kb_billing.rag.embedding_model import load_sentence_transformer
 
 # Импорт конфигурации sql4A
 try:
@@ -56,11 +57,12 @@ class KBLoader:
         self.qdrant_port = qdrant_port or SQL4AConfig.QDRANT_PORT
         self.client = QdrantClient(
             host=self.qdrant_host,
-            port=self.qdrant_port
+            port=self.qdrant_port,
+            check_compatibility=False,
         )
         self.collection_name = collection_name or SQL4AConfig.QDRANT_COLLECTION
         self.embedding_model = embedding_model or SQL4AConfig.EMBEDDING_MODEL
-        self.model = SentenceTransformer(self.embedding_model)
+        self.model = load_sentence_transformer(self.embedding_model)
         self.vector_size = self.model.get_sentence_embedding_dimension()
         
         # Путь к директории KB: явный kb_dir (как в UI) или от расположения модуля

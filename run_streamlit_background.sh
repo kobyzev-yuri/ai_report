@@ -67,8 +67,12 @@ if [ -f "$PID_FILE" ]; then
     fi
 fi
 
+# Лимит загрузки файлов (МБ). Streamlit по умолчанию — 200; архивы bills до ~400 МБ.
+MAX_UPLOAD_MB="${STREAMLIT_MAX_UPLOAD_MB:-500}"
+export STREAMLIT_SERVER_MAX_UPLOAD_SIZE="$MAX_UPLOAD_MB"
+
 # Параметры запуска - всегда с baseUrlPath для proxy
-STREAMLIT_ARGS="--server.port $PORT --server.headless true --server.baseUrlPath=${BASE_URL_PATH} --server.enableCORS false --server.enableXsrfProtection false"
+STREAMLIT_ARGS="--server.port $PORT --server.headless true --server.baseUrlPath=${BASE_URL_PATH} --server.enableCORS false --server.enableXsrfProtection false --server.maxUploadSize=${MAX_UPLOAD_MB}"
 
 echo "🌐 Режим: Проксирование через nginx"
 echo "   Base URL Path: ${BASE_URL_PATH}"

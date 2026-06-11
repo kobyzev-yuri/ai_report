@@ -105,7 +105,9 @@ else
     fi
     
     BASE_URL_PATH="/ai_report"
-    STREAMLIT_ARGS="--server.port $PORT --server.headless true --server.baseUrlPath=${BASE_URL_PATH} --server.enableCORS false --server.enableXsrfProtection false"
+    MAX_UPLOAD_MB="${STREAMLIT_MAX_UPLOAD_MB:-500}"
+    export STREAMLIT_SERVER_MAX_UPLOAD_SIZE="$MAX_UPLOAD_MB"
+    STREAMLIT_ARGS="--server.port $PORT --server.headless true --server.baseUrlPath=${BASE_URL_PATH} --server.enableCORS false --server.enableXsrfProtection false --server.maxUploadSize=${MAX_UPLOAD_MB}"
     if [ -f "venv39/bin/activate" ]; then
         set -a; source "venv39/bin/activate"; set +a
         STREAMLIT_CMD="python -m streamlit"

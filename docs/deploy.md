@@ -18,6 +18,32 @@
 - **deploy/** — минимальный набор файлов для сервера. Создаётся скриптом, в git не коммитится как «исходник».
 - **Сервер** — нет Docker Compose. Streamlit запущен процессом; перезапуск только через `./restart_streamlit.sh`, логи — `streamlit_8504.log`.
 
+**Сервер (prod):** vz2 — `192.168.3.22`, SSH alias `vz2` (jump через `stecheep` / `82.114.2.2:1194`)  
+**Директория на сервере:** `/usr/local/projects/ai_report`  
+**Доступ:** http://stat.steccom.ru:7776/ai_report
+
+> Прямой доступ к 82.114.2.2 (без jump) — legacy; основной хост приложения — **vz2**.
+
+### Быстрый деплой на vz2
+
+```bash
+./deploy_vz2.sh --restart          # prepare + sync + restart Streamlit
+./deploy_vz2_kb.sh                 # синхронизация KB + Qdrant
+./deploy_vz2_kb.sh --only-examples # только Q/A примеры (быстро)
+```
+
+Настройки: `deploy.vz2.env`. Эквивалент вручную:
+
+```bash
+./prepare_deployment.sh
+./sync_deploy.sh vz2
+ssh vz2 'cd /usr/local/projects/ai_report && ./restart_streamlit.sh'
+```
+
+---
+
+## Legacy: прямой деплой на 82.114.2.2
+
 **Сервер:** 82.114.2.2, SSH порт 1194  
 **Директория на сервере:** `/usr/local/projects/ai_report`  
 **Доступ:** http://stat.steccom.ru:7776/ai_report

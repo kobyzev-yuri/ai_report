@@ -19,5 +19,6 @@ __pycache__/
 # База данных пользователей (может быть синхронизирована отдельно)
 users.db
 
-# Streamlit кэш
-.streamlit/
+# Streamlit кэш (config.toml — в git, копируется prepare_deployment.sh)
+.streamlit/*
+!.streamlit/config.toml

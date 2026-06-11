@@ -6,6 +6,7 @@
 # Явный ключ только если сами зададите переменную (имя файла у каждого своё, в репозитории путь не задан):
 #   export DEPLOY_SSH_KEY=~/.ssh/ВАШ_КЛЮЧ
 #   ./sync_deploy.sh root@82.114.2.2
+#   ./sync_deploy.sh vz2                    # через ~/.ssh/config (jump stecheep)
 # Порт: DEPLOY_SSH_PORT (по умолчанию 1194).
 # Полный контроль:
 #   SSH_CMD="ssh -p 1194 -i \"$HOME/.ssh/ВАШ_КЛЮЧ\"" ./sync_deploy.sh root@82.114.2.2
@@ -22,7 +23,14 @@ REMOTE_DIR="/usr/local/projects/ai_report"
 DEPLOY_SSH_PORT="${DEPLOY_SSH_PORT:-1194}"
 USED_DEPLOY_SSH_KEY=0
 if [ -z "${SSH_CMD:-}" ]; then
-  SSH_CMD="ssh -p $DEPLOY_SSH_PORT"
+  case "$SERVER" in
+    vz2|vz3|stecheep|steccom)
+      SSH_CMD="ssh"
+      ;;
+    *)
+      SSH_CMD="ssh -p $DEPLOY_SSH_PORT"
+      ;;
+  esac
   if [ -n "${DEPLOY_SSH_KEY:-}" ]; then
     KEY_PATH="${DEPLOY_SSH_KEY/#\~/$HOME}"
     if [ ! -r "$KEY_PATH" ]; then

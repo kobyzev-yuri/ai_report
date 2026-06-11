@@ -45,7 +45,10 @@ def get_db_connection():
         Connection object или None
     """
     try:
-        import cx_Oracle
+        try:
+            import oracledb as cx_Oracle
+        except ImportError:
+            import cx_Oracle
         config = get_oracle_config()
         dsn = cx_Oracle.makedsn(
             config['host'],
@@ -58,7 +61,7 @@ def get_db_connection():
             dsn=dsn
         )
     except ImportError:
-        raise ImportError("cx_Oracle not installed. Install with: pip install cx_Oracle")
+        raise ImportError("Oracle driver not installed. Install with: pip install oracledb")
     except Exception as e:
         print(f"Error connecting to Oracle: {e}")
         return None

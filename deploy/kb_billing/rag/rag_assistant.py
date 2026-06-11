@@ -9,8 +9,9 @@ os.environ['PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION'] = 'python'
 from typing import List, Dict, Any, Optional
 from qdrant_client import QdrantClient
 from qdrant_client.models import Filter, FieldCondition, MatchValue
-from sentence_transformers import SentenceTransformer
 import logging
+
+from kb_billing.rag.embedding_model import load_sentence_transformer
 
 # Импорт конфигурации sql4A
 try:
@@ -28,6 +29,130 @@ except ImportError:
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+
+def extract_top_n_from_question(question: str) -> Optional[int]:
+    """Извлекает N из формулировок «5 самых», «топ 10», «первые 3» и т.п."""
+    import re
+
+    q = question.lower()
+    patterns = [
+        r'(\d+)\s*самых',
+        r'топ[\s-]*(\d+)',
+        r'(\d+)\s*первых',
+        r'(\d+)\s*лучших',
+        r'(\d+)\s*выгодн',
+        r'(\d+)\s*доходн',
+        r'(\d+)\s*прибыльн',
+        r'(\d+)\s*убыточн',
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, q)
+        if match:
+            n = int(match.group(1))
+            if 1 <= n <= 1000:
+                return n
+    return None
+
+
+def ensure_fetch_limit(sql: str, question: str) -> str:
+    """Добавляет FETCH FIRST N ROWS ONLY, если в вопросе топ-N, а в SQL нет ограничения."""
+    import re
+
+    n = extract_top_n_from_question(question)
+    if not n:
+        return sql
+
+    sql_clean = sql.strip().rstrip(';').strip()
+    sql_upper = sql_clean.upper()
+    if re.search(r'\bFETCH\s+(?:FIRST|NEXT)\s+\d+\s+ROWS\s+ONLY\b', sql_upper):
+        return sql_clean
+    if re.search(r'\bROWNUM\s*[<=>]', sql_upper):
+        return sql_clean
+    if 'ORDER BY' not in sql_upper:
+        return sql_clean
+
+    limited = f"{sql_clean}\nFETCH FIRST {n} ROWS ONLY"
+    logger.info("Добавлен FETCH FIRST %s ROWS ONLY (топ-N из вопроса)", n)
+    return limited
+
+
+def optimize_revenue_topn_query(sql: str, question: str) -> str:
+    """
+    Топ-N по IMEI из V_REVENUE_FROM_INVOICES на Oracle часто идёт минутами:
+    view тяжёлое, FETCH FIRST не всегда «проталкивается» внутрь.
+    Для простых запросов подменяем на агрегацию BM_INVOICE_ITEM за период.
+    """
+    import re
+
+    sql_clean = sql.strip().rstrip(';').strip()
+    sql_upper = re.sub(r'\s+', ' ', sql_clean.upper())
+
+    if 'V_REVENUE_FROM_INVOICES' not in sql_upper:
+        return sql_clean
+    if 'GROUP BY' in sql_upper:
+        return sql_clean
+    if 'ORDER BY' not in sql_upper or 'REVENUE_TOTAL' not in sql_upper:
+        return sql_clean
+
+    period_match = re.search(
+        r"PERIOD_YYYYMM\s*=\s*'(\d{4}-\d{2})'",
+        sql_clean,
+        re.IGNORECASE,
+    )
+    if not period_match:
+        return sql_clean
+
+    n = extract_top_n_from_question(question)
+    if not n:
+        fetch_match = re.search(
+            r'FETCH\s+(?:FIRST|NEXT)\s+(\d+)\s+ROWS\s+ONLY',
+            sql_upper,
+        )
+        if fetch_match:
+            n = int(fetch_match.group(1))
+    if not n:
+        return sql_clean
+
+    period = period_match.group(1)
+    want_customer = any(
+        kw in question.lower()
+        for kw in ('клиент', 'customer', 'назван', 'организац', 'code_1c', '1с')
+    )
+    customer_col = (
+        ", MAX(vi.CUSTOMER_NAME) AS CUSTOMER_NAME, MAX(vi.CODE_1C) AS CODE_1C"
+        if want_customer
+        else ""
+    )
+    customer_select = (
+        ", customer_name AS CUSTOMER_NAME, code_1c AS CODE_1C"
+        if want_customer
+        else ""
+    )
+
+    optimized = f"""SELECT imei AS IMEI{customer_select}, rev AS "Доход (руб)"
+FROM (
+  SELECT TRIM(TO_CHAR(s.VSAT)) AS imei{customer_col},
+         SUM(ii.MONEY - NVL(ii.MONEY_REVERSED, 0)) AS rev
+  FROM BM_INVOICE_ITEM ii
+  JOIN BM_PERIOD p ON ii.PERIOD_ID = p.PERIOD_ID
+  JOIN SERVICES s ON ii.SERVICE_ID = s.SERVICE_ID
+  LEFT JOIN V_IRIDIUM_SERVICES_INFO vi
+    ON vi.ACCOUNT_ID = s.ACCOUNT_ID
+   AND TRIM(TO_CHAR(vi.IMEI)) = TRIM(TO_CHAR(s.VSAT))
+  WHERE TO_CHAR(p.START_DATE, 'YYYY-MM') = '{period}'
+    AND s.TYPE_ID IN (9002, 9004, 9005, 9008, 9010, 9013, 9014)
+    AND s.VSAT IS NOT NULL
+  GROUP BY TRIM(TO_CHAR(s.VSAT))
+  ORDER BY rev DESC
+  FETCH FIRST {n} ROWS ONLY
+)"""
+    logger.info(
+        "Топ-%s IMEI: заменён V_REVENUE_FROM_INVOICES на быстрый BM_INVOICE_ITEM за %s",
+        n,
+        period,
+    )
+    return optimized
 
 
 class RAGAssistant:
@@ -54,11 +179,12 @@ class RAGAssistant:
         self.qdrant_port = qdrant_port or SQL4AConfig.QDRANT_PORT
         self.client = QdrantClient(
             host=self.qdrant_host,
-            port=self.qdrant_port
+            port=self.qdrant_port,
+            check_compatibility=False,
         )
         self.collection_name = collection_name or SQL4AConfig.QDRANT_COLLECTION
         self.embedding_model = embedding_model or SQL4AConfig.EMBEDDING_MODEL
-        self.model = SentenceTransformer(self.embedding_model)
+        self.model = load_sentence_transformer(self.embedding_model)
         
         logger.info(f"Инициализация RAGAssistant:")
         logger.info(f"  - Qdrant: {self.qdrant_host}:{self.qdrant_port}")
@@ -540,7 +666,7 @@ class RAGAssistant:
         try:
             # Импорт OpenAI (опционально)
             try:
-                from openai import OpenAI
+                from kb_billing.rag.openai_client import build_openai_client
             except ImportError:
                 logger.warning("OpenAI библиотека не установлена. Установите: pip install openai")
                 return None
@@ -560,16 +686,9 @@ class RAGAssistant:
                 logger.warning("OPENAI_API_KEY не установлен. Генерация SQL через LLM недоступна.")
                 return None
             
-            # Инициализация клиента OpenAI
-            client_kwargs = {"api_key": api_key}
-            if api_base:
-                client_kwargs["base_url"] = api_base
-            elif os.getenv("OPENAI_BASE_URL"):  # Поддержка OPENAI_BASE_URL (как в sql4A)
-                client_kwargs["base_url"] = os.getenv("OPENAI_BASE_URL")
-            elif os.getenv("OPENAI_API_BASE"):
-                client_kwargs["base_url"] = os.getenv("OPENAI_API_BASE")
-            
-            client = OpenAI(**client_kwargs)
+            from kb_billing.rag.openai_client import build_openai_client
+
+            client = build_openai_client(api_key=api_key, api_base=api_base)
             
             # Формирование промпта
             system_prompt = """Ты - продвинутый эксперт по Oracle SQL и продвинутый финансовый эксперт в телекоммуникационной области.
@@ -831,7 +950,11 @@ class RAGAssistant:
    - Используй HAVING для фильтрации после агрегации вместо WHERE после JOIN
    - Для JOIN по нескольким полям (FINANCIAL_PERIOD, CUSTOMER_NAME, CODE_1C) убедись, что фильтрация по периоду применена ДО агрегации
    - Минимизируй количество строк перед JOIN: фильтруй по периоду в CTE, а не в основном запросе
-17. 🚨 КРИТИЧЕСКИ ВАЖНО: Генерируй ТОЛЬКО ОДИН SQL запрос, БЕЗ точки с запятой в конце, без объяснений и комментариев
+17. 🚨 ТОП-N («5 самых», «топ 10», «первые 3») — ОБЯЗАТЕЛЬНО FETCH FIRST N ROWS ONLY после ORDER BY!
+   - V_REVENUE_FROM_INVOICES тяжёлое view: даже с FETCH FIRST запрос может идти минуты
+   - Для топ-N IMEI по доходу за месяц предпочитай быстрый путь через BM_INVOICE_ITEM + BM_PERIOD + SERVICES (SUM MONEY), с LEFT JOIN V_IRIDIUM_SERVICES_INFO для CUSTOMER_NAME
+   - Пример (быстро): SELECT imei, customer_name, rev FROM (SELECT TRIM(TO_CHAR(s.VSAT)) imei, MAX(vi.CUSTOMER_NAME) customer_name, SUM(ii.MONEY-NVL(ii.MONEY_REVERSED,0)) rev FROM BM_INVOICE_ITEM ii JOIN BM_PERIOD p ON ii.PERIOD_ID=p.PERIOD_ID JOIN SERVICES s ON ii.SERVICE_ID=s.SERVICE_ID LEFT JOIN V_IRIDIUM_SERVICES_INFO vi ON vi.ACCOUNT_ID=s.ACCOUNT_ID AND TRIM(TO_CHAR(vi.IMEI))=TRIM(TO_CHAR(s.VSAT)) WHERE TO_CHAR(p.START_DATE,'YYYY-MM')='2026-05' AND s.TYPE_ID IN (9002,9004,9005,9008,9010,9013,9014) AND s.VSAT IS NOT NULL GROUP BY TRIM(TO_CHAR(s.VSAT)) ORDER BY rev DESC FETCH FIRST 5 ROWS ONLY)
+18. 🚨 КРИТИЧЕСКИ ВАЖНО: Генерируй ТОЛЬКО ОДИН SQL запрос, БЕЗ точки с запятой в конце, без объяснений и комментариев
     - НЕ предлагай несколько вариантов!
     - НЕ пиши "Вариант 1:", "Вариант 2:", "Вариант 3:"!
     - НЕ пиши объяснения до или после SQL!
@@ -839,7 +962,7 @@ class RAGAssistant:
     - НЕ пиши "Примеры:", "Рекомендуемые примеры:", "Примеры запросов:"!
     - Верни ТОЛЬКО один SQL запрос, начинающийся с SELECT или WITH!
     - Начни сразу с SELECT или WITH, без предисловий и примеров!
-18. Используй формат Oracle SQL (TO_CHAR, TO_NUMBER, NVL и т.д.)
+19. Используй формат Oracle SQL (TO_CHAR, TO_NUMBER, NVL и т.д.)
 """
             
             # Проверяем, является ли вопрос финансовым анализом
@@ -977,7 +1100,12 @@ class RAGAssistant:
             import re
             
             # Удаляем блоки с примерами ПЕРЕД удалением объяснений
-            sql = re.sub(r'(?i)(?:Примеры|Рекомендуемые примеры|Примеры запросов|Examples|Recommended examples)[:.]?\s*.*?(?=(?i)(?:SELECT|WITH|INSERT|UPDATE|DELETE|$))', '', sql, flags=re.DOTALL)
+            sql = re.sub(
+                r'(?:Примеры|Рекомендуемые примеры|Примеры запросов|Examples|Recommended examples)[:.]?\s*.*?(?=(?:SELECT|WITH|INSERT|UPDATE|DELETE|$))',
+                '',
+                sql,
+                flags=re.IGNORECASE | re.DOTALL,
+            )
             
             # Удаляем префиксы типа "Вариант 1:", "Вариант 2:", "Вариант 3:"
             sql = re.sub(r'^(?:Вариант\s*\d+[:.]?\s*|Option\s*\d+[:.]?\s*)', '', sql, flags=re.IGNORECASE | re.MULTILINE)
@@ -1204,6 +1332,8 @@ class RAGAssistant:
                             break
             
             logger.info(f"Сгенерирован SQL через LLM: {sql[:100]}...")
+            sql = ensure_fetch_limit(sql, question)
+            sql = optimize_revenue_topn_query(sql, question)
             return sql
             
         except Exception as e:

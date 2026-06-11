@@ -367,7 +367,15 @@
   {
     "question": "Покажи доходы по IMEI за октябрь 2025",
     "sql": "SELECT IMEI, CONTRACT_ID, CUSTOMER_NAME, CODE_1C, REVENUE_SBD_TRAFFIC, REVENUE_SBD_ABON, REVENUE_SBD_TOTAL, REVENUE_TOTAL FROM V_REVENUE_FROM_INVOICES WHERE PERIOD_YYYYMM = '2025-10' AND IMEI IS NOT NULL ORDER BY REVENUE_TOTAL DESC",
-    "context": "Доходы по всем IMEI за период",
+    "context": "Доходы по всем IMEI за период (полный список — без FETCH FIRST, может быть медленно). Для топ-N всегда добавляй FETCH FIRST N ROWS ONLY.",
+    "business_entity": "revenue",
+    "complexity": 2,
+    "category": "Доходы"
+  },
+  {
+    "question": "5 самых выгодных IMEI с названием клиентов за май 2026",
+    "sql": "SELECT IMEI, CONTRACT_ID, CUSTOMER_NAME, CODE_1C, REVENUE_SBD_TRAFFIC, REVENUE_SBD_ABON, REVENUE_SBD_TOTAL, REVENUE_TOTAL FROM V_REVENUE_FROM_INVOICES WHERE PERIOD_YYYYMM = '2026-05' AND IMEI IS NOT NULL ORDER BY REVENUE_TOTAL DESC FETCH FIRST 5 ROWS ONLY",
+    "context": "Топ-N IMEI по доходу за период. ОБЯЗАТЕЛЬНО FETCH FIRST N ROWS ONLY — V_REVENUE_FROM_INVOICES тяжёлое представление.",
     "business_entity": "revenue",
     "complexity": 2,
     "category": "Доходы"

@@ -1,6 +1,6 @@
 # Oracle Database connectivity
 oracledb
-cx_Oracle
+# cx_Oracle: на Python 3.12+ используйте oracledb; shim cx_Oracle.py в корне проекта
 
 # Data processing and analysis
 pandas

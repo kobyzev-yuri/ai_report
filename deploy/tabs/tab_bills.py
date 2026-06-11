@@ -30,7 +30,13 @@ def _get_project_root() -> Path:
 
 
 def _ensure_dir(path: Path) -> None:
-    path.mkdir(parents=True, exist_ok=True)
+    if path.is_dir() or path.is_symlink():
+        return
+    try:
+        path.mkdir(parents=True, exist_ok=True)
+    except FileExistsError:
+        if not path.is_dir():
+            raise
 
 
 def _count_files_in_tree(root: Path) -> int:

@@ -50,7 +50,7 @@ def transcribe_audio(
         Tuple[transcription, error]: Транскрипция или None и сообщение об ошибке
     """
     try:
-        from openai import OpenAI
+        from kb_billing.rag.openai_client import build_openai_client
     except ImportError:
         return None, "Библиотека openai не установлена. Установите: pip install openai"
     
@@ -62,16 +62,7 @@ def transcribe_audio(
         return None, "OPENAI_API_KEY не установлен в config.env"
     
     try:
-        # Инициализация клиента OpenAI (стандартный подход как в sql4A)
-        client_kwargs = {"api_key": api_key}
-        if api_base:
-            client_kwargs["base_url"] = api_base
-        elif os.getenv("OPENAI_BASE_URL"):  # Поддержка OPENAI_BASE_URL (как в sql4A)
-            client_kwargs["base_url"] = os.getenv("OPENAI_BASE_URL")
-        elif os.getenv("OPENAI_API_BASE"):
-            client_kwargs["base_url"] = os.getenv("OPENAI_API_BASE")
-        
-        client = OpenAI(**client_kwargs)
+        client = build_openai_client(api_key=api_key, api_base=api_base)
 
         # Конвертация webm/ogg в wav при необходимости (избегаем "Cannot extract audio duration" от API)
         audio_to_send, ext = _convert_to_wav_if_needed(audio_file, "audio.webm")
