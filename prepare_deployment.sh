@@ -20,7 +20,7 @@ fi
 mkdir -p "$DEPLOY_DIR"
 mkdir -p "$DEPLOY_DIR/oracle/tables"
 mkdir -p "$DEPLOY_DIR/oracle/views"
-mkdir -p "$DEPLOY_DIR/oracle/functions"
+mkdir -p "$DEPLOY_DIR/oracle/scripts"
 mkdir -p "$DEPLOY_DIR/oracle/data"
 mkdir -p "$DEPLOY_DIR/python"
 mkdir -p "$DEPLOY_DIR/kb_billing/tables"
@@ -44,6 +44,7 @@ cp -r oracle/views/*.sql "$DEPLOY_DIR/oracle/views/" 2>/dev/null || true
 cp -r oracle/functions/*.sql "$DEPLOY_DIR/oracle/functions/" 2>/dev/null || true
 cp -r oracle/data/*.sql "$DEPLOY_DIR/oracle/data/" 2>/dev/null || true
 cp oracle/README.md "$DEPLOY_DIR/oracle/" 2>/dev/null || true
+cp -r oracle/scripts/*.sql "$DEPLOY_DIR/oracle/scripts/" 2>/dev/null || true
 
 # 2. Python приложение и utils (auth, db, queries, create_user)
 echo "  → Python приложение..."
@@ -84,6 +85,7 @@ cp scripts/analyze_confluence_space.py "$DEPLOY_DIR/scripts/" 2>/dev/null || tru
 cp scripts/test_satellite_rag_search.py "$DEPLOY_DIR/scripts/" 2>/dev/null || true
 cp scripts/test_revenue_feb_no_duplicate_imei.py "$DEPLOY_DIR/scripts/" 2>/dev/null || true
 cp scripts/test_revenue_feb_no_duplicate_imei.sql "$DEPLOY_DIR/scripts/" 2>/dev/null || true
+cp scripts/support_bill_encoding_fix.py "$DEPLOY_DIR/scripts/" 2>/dev/null || true
 
 # 4.0.1. Тесты (запуск на сервере: python -m tests.test_billing_assistant_top5)
 echo "  → Тесты (tests/)..."
