@@ -583,3 +583,111 @@ def get_lbs_services_report(
     finally:
         if conn:
             conn.close()
+
+
+def get_sim_services_report(
+    get_connection,
+    customer_name_filter=None,
+    account_id_filter=None,
+    service_id_filter=None,
+    iccid_filter=None,
+    imsi_filter=None,
+    msisdn_filter=None,
+    only_active=True,
+    exclude_steccom=True,
+):
+    """
+    Услуги SIM / телефония Iridium (SERVICES.TYPE_ID=9001) с атрибутами SERVICES_EXT.
+
+    DICT (TYPE_ID=9001): 123=iccid, 83=imsi, 87=pstn_number_rus,
+    84=pstn_number, 86=pstn_number_data. Активные атрибуты: DATE_END IS NULL.
+    """
+    conn = get_connection()
+    if not conn:
+        return None
+
+    conds = ["s.TYPE_ID = 9001"]
+    if only_active:
+        conds.append("s.CLOSE_DATE IS NULL")
+    if exclude_steccom:
+        conds.append("NVL(s.CUSTOMER_ID, -1) <> 521")
+    if account_id_filter and str(account_id_filter).strip():
+        val = str(account_id_filter).strip().replace("'", "''")
+        conds.append(f"TO_CHAR(s.ACCOUNT_ID) LIKE '%{val}%'")
+    if service_id_filter and str(service_id_filter).strip():
+        val = str(service_id_filter).strip().replace("'", "''")
+        conds.append(f"TO_CHAR(s.SERVICE_ID) LIKE '%{val}%'")
+    if customer_name_filter and str(customer_name_filter).strip():
+        val = str(customer_name_filter).strip().replace("'", "''")
+        conds.append(f"UPPER(NVL(cust.CUSTOMER_NAME, '')) LIKE UPPER('%{val}%')")
+    if iccid_filter and str(iccid_filter).strip():
+        val = str(iccid_filter).strip().replace("'", "''")
+        conds.append(f"NVL(se.ICCID, TO_CHAR(s.VSAT)) LIKE '%{val}%'")
+    if imsi_filter and str(imsi_filter).strip():
+        val = str(imsi_filter).strip().replace("'", "''")
+        conds.append(f"se.IMSI LIKE '%{val}%'")
+    if msisdn_filter and str(msisdn_filter).strip():
+        val = str(msisdn_filter).strip().replace("'", "''")
+        conds.append(
+            "("
+            f"se.PSTN_NUMBER_RUS LIKE '%{val}%' OR "
+            f"se.PSTN_NUMBER LIKE '%{val}%' OR "
+            f"se.PSTN_NUMBER_DATA LIKE '%{val}%'"
+            ")"
+        )
+
+    where = " AND ".join(conds)
+    query = f"""
+    SELECT
+        NVL(cust.CUSTOMER_NAME, '') AS CUSTOMER_NAME,
+        s.ACCOUNT_ID,
+        s.SERVICE_ID,
+        s.DESCRIPTION,
+        NVL(NULLIF(TRIM(se.ICCID), ''), TO_CHAR(s.VSAT)) AS ICCID,
+        se.IMSI,
+        se.PSTN_NUMBER_RUS,
+        se.PSTN_NUMBER,
+        se.PSTN_NUMBER_DATA
+    FROM SERVICES s
+    LEFT JOIN (
+        SELECT
+            SERVICE_ID,
+            MAX(CASE WHEN DICT_ID = 123 AND DATE_END IS NULL THEN VALUE END) AS ICCID,
+            MAX(CASE WHEN DICT_ID = 83  AND DATE_END IS NULL THEN VALUE END) AS IMSI,
+            MAX(CASE WHEN DICT_ID = 87  AND DATE_END IS NULL THEN VALUE END) AS PSTN_NUMBER_RUS,
+            MAX(CASE WHEN DICT_ID = 84  AND DATE_END IS NULL THEN VALUE END) AS PSTN_NUMBER,
+            MAX(CASE WHEN DICT_ID = 86  AND DATE_END IS NULL THEN VALUE END) AS PSTN_NUMBER_DATA
+        FROM SERVICES_EXT
+        WHERE DICT_ID IN (123, 83, 87, 84, 86)
+        GROUP BY SERVICE_ID
+    ) se ON s.SERVICE_ID = se.SERVICE_ID
+    LEFT JOIN (
+        SELECT
+            cc.CUSTOMER_ID,
+            NVL(
+                MAX(CASE WHEN cd.MNEMONIC = 'description' AND cc.CONTACT_DICT_ID = 23
+                    THEN cc.VALUE END),
+                TRIM(
+                    NVL(MAX(CASE WHEN cd.MNEMONIC = 'last_name' AND cc.CONTACT_DICT_ID = 11
+                        THEN cc.VALUE END), '') || ' ' ||
+                    NVL(MAX(CASE WHEN cd.MNEMONIC = 'first_name' AND cc.CONTACT_DICT_ID = 11
+                        THEN cc.VALUE END), '') || ' ' ||
+                    NVL(MAX(CASE WHEN cd.MNEMONIC = 'middle_name' AND cc.CONTACT_DICT_ID = 11
+                        THEN cc.VALUE END), '')
+                )
+            ) AS CUSTOMER_NAME
+        FROM BM_CUSTOMER_CONTACT cc
+        LEFT JOIN BM_CONTACT_DICT cd ON cc.CONTACT_DICT_ID = cd.CONTACT_DICT_ID
+        GROUP BY cc.CUSTOMER_ID
+    ) cust ON s.CUSTOMER_ID = cust.CUSTOMER_ID
+    WHERE {where}
+    ORDER BY cust.CUSTOMER_NAME NULLS LAST, s.ACCOUNT_ID, s.SERVICE_ID
+    """
+    try:
+        return pd.read_sql_query(query, conn)
+    except Exception as e:
+        st.error(f"Ошибка получения отчёта SIM: {e}")
+        return None
+    finally:
+        if conn:
+            conn.close()

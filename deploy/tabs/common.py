@@ -31,10 +31,16 @@ def export_to_excel(df):
         worksheet = writer.sheets['Report']
         from openpyxl.utils import get_column_letter
         for idx, col in enumerate(df.columns, start=1):
-            max_length = max(
-                df[col].astype(str).map(len).max() if len(df) > 0 else 0,
-                len(str(col))
-            )
+            if len(df) > 0:
+                # Arrow/nullable dtypes: astype(str).map(len) падает на float NaN
+                col_max = int(
+                    df[col]
+                    .map(lambda x: 0 if pd.isna(x) else len(str(x)))
+                    .max()
+                )
+            else:
+                col_max = 0
+            max_length = max(col_max, len(str(col)))
             col_letter = get_column_letter(idx)
             worksheet.column_dimensions[col_letter].width = min(max_length + 2, 50)
     return output.getvalue()

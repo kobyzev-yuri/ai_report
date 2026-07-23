@@ -21,6 +21,8 @@ AVAILABLE_TABS = {
     'confluence_librarian': '🛰️ Спутниковый ассистент',
     'report': '💰 Расходы Иридиум',
     'revenue': '💰 Доходы',
+    'lbs': '📍 LBS услуги',
+    'sim': '📱 SIM',
     'bills': '📄 Рассылка счетов',
     'analytics': '📋 Счета за период',
     'loader': '📥 Data Loader',
@@ -30,6 +32,8 @@ AVAILABLE_TABS = {
 _FALLBACK_TAB_LABELS = {
     "bills": "📄 Рассылка счетов",
     "campaigns": "📧 Кампании",
+    "lbs": "📍 LBS услуги",
+    "sim": "📱 SIM",
 }
 for _fk, _fl in _FALLBACK_TAB_LABELS.items():
     if _fk not in AVAILABLE_TABS:

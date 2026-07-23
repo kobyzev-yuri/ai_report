@@ -11,6 +11,8 @@
 | `confluence_librarian` | 🛰️ Спутниковый библиотекарь |
 | `report` | 💰 Расходы Иридиум |
 | `revenue` | 💰 Доходы |
+| `lbs` | 📍 LBS услуги |
+| `sim` | 📱 SIM |
 | `analytics` | 📋 Счета за период |
 | `loader` | 📥 Data Loader |
 | `bills` | 📄 Рассылка счетов |
