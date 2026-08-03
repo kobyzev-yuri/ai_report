@@ -394,18 +394,53 @@ ORDER BY t.BILL_MONTH DESC, t.CONTRACT_ID"""
         if conn: conn.close()
 
 def get_analytics_duplicates(get_connection, period_id):
-    """Поиск дубликатов в ANALYTICS"""
+    """Поиск дубликатов в ANALYTICS.
+
+    Дубликаты — записи, у которых совпадают все бизнес-поля (кроме AID).
+    Ключ совпадает с PARTITION BY в remove_analytics_duplicates.sql.
+    """
     conn = get_connection()
     if not conn: return None
-    
+
+    # Полный ключ группировки: записи с разным SUB_PERIOD_ID / COUNTER_ID и т.п. — не дубликаты
+    group_cols = """
+        PERIOD_ID,
+        SERVICE_ID,
+        CUSTOMER_ID,
+        ACCOUNT_ID,
+        TYPE_ID,
+        TARIFF_ID,
+        TARIFFEL_ID,
+        VSAT,
+        MONEY,
+        PRICE,
+        TRAF,
+        TOTAL_TRAF,
+        CBYTE,
+        INVOICE_ITEM_ID,
+        FLAG,
+        RESOURCE_TYPE_ID,
+        CLASS_ID,
+        CLASS_NAME,
+        BLANK,
+        COUNTER_ID,
+        COUNTER_CF,
+        ZONE_ID,
+        THRESHOLD,
+        SUB_TYPE_ID,
+        SUB_PERIOD_ID,
+        PMONEY,
+        PARTNER_PERCENT
+    """
+
     query = f"""
-    SELECT 
+    SELECT
         COUNT(*) AS DUPLICATE_COUNT,
         LISTAGG(AID, ', ') WITHIN GROUP (ORDER BY AID) AS AID_LIST,
-        PERIOD_ID, SERVICE_ID, CUSTOMER_ID, VSAT, MONEY, PRICE, TRAF
+        {group_cols}
     FROM ANALYTICS
     WHERE PERIOD_ID = {period_id}
-    GROUP BY PERIOD_ID, SERVICE_ID, CUSTOMER_ID, VSAT, MONEY, PRICE, TRAF
+    GROUP BY {group_cols}
     HAVING COUNT(*) > 1
     ORDER BY DUPLICATE_COUNT DESC
     """
