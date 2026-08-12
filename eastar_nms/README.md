@@ -8,3 +8,11 @@ Live-коллекторы на **Perl**. Ставятся на **хост с Zab
 - `config.env.example` → скопировать в `config.env` на AGENT_HOST
 
 Документация (деплой на любой AGENT_HOST): [docs/eastar-nms-zabbix.md](../docs/eastar-nms-zabbix.md)
+
+## Файлы на GitHub
+
+- [eastar_net_usage.pl](https://github.com/kobyzev-yuri/ai_report/blob/main/eastar_nms/eastar_net_usage.pl)
+- [eastar_hub_usage.pl](https://github.com/kobyzev-yuri/ai_report/blob/main/eastar_nms/eastar_hub_usage.pl)
+- [EastarNms.pm](https://github.com/kobyzev-yuri/ai_report/blob/main/eastar_nms/EastarNms.pm)
+- [config.env.example](https://github.com/kobyzev-yuri/ai_report/blob/main/eastar_nms/config.env.example)
+

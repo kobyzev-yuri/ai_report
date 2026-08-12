@@ -2,7 +2,15 @@
 
 Сбор метрик WEB NMS Eastar для Zabbix через Perl-коллекторы на **хосте с Zabbix Agent**, у которого есть HTTPS-доступ до NMS.
 
-Код в репозитории: `eastar_nms/`
+Код в репозитории: [`eastar_nms/`](https://github.com/kobyzev-yuri/ai_report/tree/main/eastar_nms)
+
+| Файл | На GitHub |
+|------|-----------|
+| `eastar_net_usage.pl` | [ссылка](https://github.com/kobyzev-yuri/ai_report/blob/main/eastar_nms/eastar_net_usage.pl) |
+| `eastar_hub_usage.pl` | [ссылка](https://github.com/kobyzev-yuri/ai_report/blob/main/eastar_nms/eastar_hub_usage.pl) |
+| `EastarNms.pm` | [ссылка](https://github.com/kobyzev-yuri/ai_report/blob/main/eastar_nms/EastarNms.pm) |
+| `config.env.example` | [ссылка](https://github.com/kobyzev-yuri/ai_report/blob/main/eastar_nms/config.env.example) |
+| `README.md` (каталог) | [ссылка](https://github.com/kobyzev-yuri/ai_report/blob/main/eastar_nms/README.md) |
 
 ## Схема
 
