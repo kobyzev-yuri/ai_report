@@ -9,6 +9,12 @@
 | [deploy.md](deploy.md) | Схема поддержки, синхронизация, перезапуск (без Docker). **Главный документ по выкладке.** |
 | [restart-streamlit.md](restart-streamlit.md) | Перезапуск Streamlit, очистка кэша, типичные проблемы. |
 
+## Eastar NMS / Zabbix
+
+| Документ | Описание |
+|----------|----------|
+| [eastar-nms-zabbix.md](eastar-nms-zabbix.md) | Eastar NMS → Zabbix: деплой на любой AGENT_HOST, config.env, UserParameter, JSONPath/LLD. |
+
 ## Эксплуатация и отладка
 
 | Документ | Описание |
