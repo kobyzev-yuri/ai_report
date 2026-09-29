@@ -5,7 +5,7 @@ use FindBin;
 use lib $FindBin::Bin;
 use Getopt::Long qw(GetOptions);
 use EastarNms qw(
-  load_config login_ua nms_update nms_updatetree utc_now_iso html_to_text parse_kbps json_out
+  load_config login_ua select_net nms_update nms_updatetree utc_now_iso html_to_text parse_kbps json_out
 );
 
 my ($nms_url, $login, $password, $net_id, $filter, $help);
@@ -34,6 +34,7 @@ my $key = $cfg->{filter} // '';
 $key =~ s/^\s+|\s+$//g;
 
 my $ua = login_ua($cfg);
+select_net($ua, $cfg);
 my $tree = nms_updatetree($ua, $cfg);
 my @controllers = @{ $tree->{controllers} // [] };
 

@@ -337,8 +337,10 @@ Item prototypes (Dependent), JSONPath зависит от версии Zabbix, �
 
 | Скрипт | API | Источник метрик |
 |--------|-----|-----------------|
-| `eastar_net_usage.pl` | `POST /login/insert/` → `POST /update/` | `WidgetNetworkStatus:{net_id}` |
-| `eastar_hub_usage.pl` | login → `POST /updatetree/` → `/update/` | контроллеры + `WidgetControllerStatus:{cid}` |
+| `eastar_net_usage.pl` | login → `GET /net_usage/?net_id=` → `POST /update/` | `WidgetNetworkStatus:{net_id}` |
+| `eastar_hub_usage.pl` | login → select net → `POST /updatetree/` → `/update/` | контроллеры + `WidgetControllerStatus:{cid}` |
+
+После логина NMS держит в сессии сеть по умолчанию (корень). Один только `WidgetNetworkStatus:{net_id}` сеть **не** переключает — на хабе с одной сетью это незаметно, на ГП КС (много сетей) без `GET /net_usage/?net_id=N` приходят чужие метрики. Коллекторы вызывают этот GET до `/update/`.
 
 Отдельного REST JSON API у NMS нет: HTML виджетов парсится в Perl.
 
@@ -356,9 +358,12 @@ Item prototypes (Dependent), JSONPath зависит от версии Zabbix, �
 | `curl` до NMS не проходит | ACL/маршрут **с AGENT_HOST**, не с рабочей станции |
 | `Missing EASTAR_NMS_LOGIN` | нет `config.env` / права / путь |
 | login failed / timeout | URL, пароль, TLS, proxy |
+| метрики чужой сети / `net_id=N` совпадает с сетью 1 | старый код без `select_net`; обновить `.pm`/`.pl`, задать `EASTAR_NET_ID` / `--net-id` |
 | пустой `controllers` | `--filter` / `EASTAR_FILTER` |
 | `[m\|ZBX_NOTSUPPORTED]` | путь perl/скрипта, `Include=`, restart, SELinux |
 | `zabbix_get` timeout | Server → AGENT_HOST `:10050`, firewall, `Server=` в агенте |
 | JSON есть, dependent пустые | JSONPath / тип item |
+
+Проверка на хабе с тестовой пустой сетью: `perl eastar_net_usage.pl --net-id 1` (живые) vs `--net-id 21` (нули).
 
 Логи агента: обычно `/var/log/zabbix/zabbix_agentd.log`.

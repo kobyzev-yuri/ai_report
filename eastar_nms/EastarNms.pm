@@ -14,6 +14,7 @@ use Exporter qw(import);
 our @EXPORT_OK = qw(
   load_config
   login_ua
+  select_net
   nms_update
   nms_updatetree
   utc_now_iso
@@ -84,6 +85,18 @@ sub login_ua {
         croak('NMS login failed: ' . $res->status_line);
     }
     return $ua;
+}
+
+# After login NMS keeps the default (root) network in the session.
+# Widget datasrc "...:{net_id}" alone does not switch context on multi-net hubs.
+# GET /net_usage/?net_id=N mirrors the SPA deep-link and binds the session.
+sub select_net {
+    my ($ua, $cfg) = @_;
+    my $nid = 0 + ($cfg->{net_id} // 0);
+    return if $nid <= 0;
+    my $res = $ua->get($cfg->{nms_url} . '/net_usage/?net_id=' . $nid);
+    croak('NMS select_net failed: ' . $res->status_line) unless $res->is_success;
+    return $res->decoded_content // $res->content // '';
 }
 
 sub nms_update {

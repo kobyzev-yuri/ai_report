@@ -5,7 +5,7 @@ use FindBin;
 use lib $FindBin::Bin;
 use Getopt::Long qw(GetOptions);
 use EastarNms qw(
-  load_config login_ua nms_update utc_now_iso html_to_text parse_kbps json_out
+  load_config login_ua select_net nms_update utc_now_iso html_to_text parse_kbps json_out
 );
 
 my ($nms_url, $login, $password, $net_id, $help);
@@ -30,6 +30,7 @@ my $cfg = load_config(
 );
 
 my $ua = login_ua($cfg);
+select_net($ua, $cfg);
 my $html = nms_update(
     $ua, $cfg,
     { what => 'widget', datasrc => 'WidgetNetworkStatus:' . $cfg->{net_id} },
