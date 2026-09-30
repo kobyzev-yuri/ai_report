@@ -327,6 +327,7 @@ ai_report/
 │   ├── calculate_overage.py    # Python модуль расчета превышений
 │   └── restore_load_history.py  # Восстановление истории загрузок
 │
+├── eastar_nms/                  # Zabbix: python3 eastar_*.py и perl eastar_*.pl
 ├── docs/                        # Документация (развёртывание, права, отладка)
 │   ├── README.md                # Оглавление
 │   ├── deploy.md                # Развёртывание и поддержка
@@ -381,6 +382,21 @@ pip install -r requirements.txt
 ## 📚 Документация
 
 Вся актуальная документация: **[docs/](docs/README.md)** (развёртывание, сервер, права, отладка).
+
+### Eastar NMS → Zabbix
+
+Коллекторы в [`eastar_nms/`](eastar_nms/README.md). JSON один и тот же, запускается либо Python, либо Perl.
+
+```bash
+cd eastar_nms
+python3 eastar_net_usage.py --nms-url https://start.steccom.ru --net-id 1
+python3 eastar_hub_usage.py --nms-url http://10.142.0.4 --net-id 20 --filter 'AM6 E04'
+
+perl eastar_net_usage.pl --nms-url https://start.steccom.ru --net-id 1
+perl eastar_hub_usage.pl --filter AM8
+```
+
+На русском NMS (ГП КС) цифры печатает Python. Примеры команд, JSON и `UserParameter`: [docs/eastar-nms-zabbix.md](docs/eastar-nms-zabbix.md).
 
 ## 📚 База знаний (KB) по Billing
 
