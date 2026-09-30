@@ -1,6 +1,8 @@
 # Eastar NMS → Zabbix: подключение и конфигурация
 
-Сбор метрик WEB NMS Eastar для Zabbix через Perl-коллекторы на **хосте с Zabbix Agent**, у которого есть HTTPS-доступ до NMS.
+Сбор метрик WEB NMS Eastar для Zabbix. На хосте с Zabbix Agent нужен доступ до NMS.
+
+Рабочий вариант без Perl — **Python 3** (`eastar_*.py`, только стандартная библиотека). Perl (`eastar_*.pl` + `EastarNms.pm`) остаётся и отдаёт тот же JSON.
 
 Код в репозитории: [`eastar_nms/`](https://github.com/kobyzev-yuri/ai_report/tree/main/eastar_nms)
 
@@ -337,19 +339,48 @@ Item prototypes (Dependent), JSONPath зависит от версии Zabbix, �
 
 | Скрипт | API | Источник метрик |
 |--------|-----|-----------------|
-| `eastar_net_usage.pl` | login → `GET /net_usage/?net_id=` → `POST /update/` | `WidgetNetworkStatus:{net_id}` |
+| `eastar_net_usage.pl` / `.py` | login → `GET /net_usage/?net_id=` → `POST /update/` | `WidgetNetworkStatus:{net_id}` |
 | `eastar_hub_usage.pl` | login → select net → `POST /updatetree/` → `/update/` | контроллеры + `WidgetControllerStatus:{cid}` |
+| `eastar_hub_usage.py` | login → select net → `GET /hub_usage/?net_id=` | таблица страницы, если в ней есть имена; иначе те же виджеты, что у Perl |
 
 После логина NMS держит в сессии сеть по умолчанию (корень). Один только `WidgetNetworkStatus:{net_id}` сеть **не** переключает — на хабе с одной сетью это незаметно, на ГП КС (много сетей) без `GET /net_usage/?net_id=N` приходят чужие метрики. Коллекторы вызывают этот GET до `/update/`.
 
-Отдельного REST JSON API у NMS нет: HTML виджетов парсится в Perl.
+Отдельного REST JSON API у NMS нет: оба коллектора разбирают HTML виджетов. Python дополнительно читает русские подписи ГП КС.
 
 Тестовый NMS: `https://192.168.10.49` (проверено с vz3).  
 Прод из ТЗ: `https://start.steccom.ru` — смените `EASTAR_NMS_URL`, если с AGENT_HOST есть маршрут/DNS.
 
-## Python-заготовки
+## Python (без Perl)
 
-`eastar_*.py` — stub. На хостах со старым Python (например 3.6) live не использовать. Для Zabbix — **Perl**.
+Те же флаги и тот же JSON, что у `.pl`. На AGENT_HOST нужен `python3` (3.6+), `pip` и модули Perl не нужны. Русский интерфейс ГП КС (`кбит/с`, `дБ`, `Передача`/`Приём`) разбирает Python; Perl по-прежнему ждёт английские подписи `kbps` / `TX:`.
+
+Скопировать вместе с `config.env.example`:
+
+```text
+eastar_net_usage.py
+eastar_hub_usage.py
+common.py
+nms.py
+parse.py
+hub.py
+```
+
+Проверка:
+
+```bash
+cd /usr/local/projects/ai_report/eastar_nms
+python3 eastar_net_usage.py
+python3 eastar_hub_usage.py --filter 'AM6 E04'
+```
+
+UserParameter, если агент вызывает Python:
+
+```ini
+UserParameter=eastar.nms.net_usage,/usr/bin/python3 /usr/local/projects/ai_report/eastar_nms/eastar_net_usage.py
+UserParameter=eastar.nms.hub_usage[*],/usr/bin/python3 /usr/local/projects/ai_report/eastar_nms/eastar_hub_usage.py --filter "$1"
+```
+
+Perl-ключи из раздела выше можно не менять, пока на хосте остаётся Perl. Оба варианта читают один `config.env`.
 
 ## Устранение проблем
 

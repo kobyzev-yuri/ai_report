@@ -1,20 +1,27 @@
 # Eastar NMS collectors (Zabbix)
 
-Live-коллекторы на **Perl**. Ставятся на **хост с Zabbix Agent**, у которого есть HTTPS до NMS (не обязательно vz3 / ai_report).
+Два варианта одного коллектора. JSON одинаковый, ключи Zabbix не меняются.
 
-- `eastar_net_usage.pl` — сеть (`WidgetNetworkStatus`)
-- `eastar_hub_usage.pl` — контроллеры Tx/Rx с фильтром имени
-- `EastarNms.pm` — login / `select_net` (`GET /net_usage/?net_id=`) / `/update/` / `/updatetree/`
+**Python** (`eastar_*.py`) — то, чем пользоваться, если на хосте агента не хочется ставить Perl. Хватает `python3` из системы: HTTP и разбор HTML на стандартной библиотеке. Понимает английский интерфейс NMS (СТЭККОМ: `Stations RX`, `kbps`, `TX:`) и русский (ГП КС: `Приём станций`, `кбит/с`, `Передача` / `Приём`).
+
+**Perl** (`eastar_*.pl`, `EastarNms.pm`) — прежний вариант. Его оставляем.
+
+Оба читают один `config.env`.
+
+- `eastar_net_usage.py` / `.pl` — сеть (`WidgetNetworkStatus`)
+- `eastar_hub_usage.py` / `.pl` — контроллеры Tx/Rx, фильтр по имени
 - `config.env.example` → скопировать в `config.env` на AGENT_HOST
 
-После логина сессия NMS сидит на сети по умолчанию; коллекторы делают `GET /net_usage/?net_id=N` перед запросом виджетов (иначе на хабах с несколькими сетями приходят чужие метрики).
+После логина сессия NMS сидит на сети по умолчанию. Коллекторы делают `GET /net_usage/?net_id=N` перед виджетами. Для хаба Python дополнительно открывает `GET /hub_usage/?net_id=N`: на русском NMS таблица страницы уже содержит имена и трафик.
 
-Документация (деплой на любой AGENT_HOST): [docs/eastar-nms-zabbix.md](../docs/eastar-nms-zabbix.md)
+```bash
+python3 eastar_net_usage.py --net-id 1
+python3 eastar_hub_usage.py --filter 'AM6 E04'
+# прежний запуск, если Perl уже стоит:
+perl eastar_net_usage.pl --net-id 1
+perl eastar_hub_usage.pl --filter 'AM8'
+```
 
-## Файлы на GitHub
+`--mode stub` печатает пример JSON без запроса к NMS.
 
-- [eastar_net_usage.pl](https://github.com/kobyzev-yuri/ai_report/blob/main/eastar_nms/eastar_net_usage.pl)
-- [eastar_hub_usage.pl](https://github.com/kobyzev-yuri/ai_report/blob/main/eastar_nms/eastar_hub_usage.pl)
-- [EastarNms.pm](https://github.com/kobyzev-yuri/ai_report/blob/main/eastar_nms/EastarNms.pm)
-- [config.env.example](https://github.com/kobyzev-yuri/ai_report/blob/main/eastar_nms/config.env.example)
-
+Документация: [docs/eastar-nms-zabbix.md](../docs/eastar-nms-zabbix.md)
