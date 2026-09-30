@@ -1,21 +1,21 @@
 #!/usr/bin/env python3
-"""Zabbix collector A: WEB NMS Eastar net_usage (URL1).
+"""Zabbix collector: WEB NMS Eastar net_usage.
 
-Stub mode prints sample JSON. Live fetch will use:
-  {NMS_URL}/#/net_usage/?net_id={NETID}
+Тот же JSON, что у eastar_net_usage.pl. По умолчанию live.
+`--mode stub` печатает пример без сети.
 """
 
-from __future__ import annotations
+from __future__ import print_function
 
 import argparse
-import json
 import sys
 
-from common import add_common_args, ensure_stub_or_exit, resolve_common, utc_now_iso
+from common import add_common_args, json_out, require_credentials, resolve_common, utc_now_iso
+from nms import NmsClient
+from parse import build_net_usage
 
 
-def stub_payload(net_id: int) -> dict:
-    # Shape mirrors highlighted fields on net_usage screenshot / TZ URL1.
+def stub_payload(net_id):
     return {
         "source": "net_usage",
         "net_id": net_id,
@@ -30,36 +30,29 @@ def stub_payload(net_id: int) -> dict:
     }
 
 
-def fetch_live(cfg: dict) -> dict:
-    # Placeholder until VPN + credentials + real XHR endpoints are available.
-    raise NotImplementedError(
-        "live net_usage: login to {url} as {login}, fetch net_id={net_id}".format(
-            url=cfg["nms_url"],
-            login=cfg["login"],
-            net_id=cfg["net_id"],
-        )
+def fetch_live(cfg):
+    require_credentials(cfg)
+    client = NmsClient(cfg)
+    client.login()
+    client.select_net()
+    html = client.update(
+        {"what": "widget", "datasrc": "WidgetNetworkStatus:%s" % cfg["net_id"]}
     )
+    return build_net_usage(html, cfg["net_id"], utc_now_iso())
 
 
-def main(argv: list[str] | None = None) -> int:
+def main(argv=None):
     parser = argparse.ArgumentParser(description="Eastar NMS net_usage → JSON for Zabbix")
     add_common_args(parser)
     args = parser.parse_args(argv)
     cfg = resolve_common(args)
-    ensure_stub_or_exit(cfg["mode"], "eastar_net_usage.py")
-
-    # Credentials are resolved but unused in stub mode on purpose.
-    _ = (cfg["login"], cfg["password"], cfg["nms_url"])
-
     if cfg["mode"] == "stub":
         payload = stub_payload(cfg["net_id"])
     else:
         payload = fetch_live(cfg)
-
-    json.dump(payload, sys.stdout, ensure_ascii=False, indent=2)
-    sys.stdout.write("\n")
+    json_out(payload)
     return 0
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    sys.exit(main())

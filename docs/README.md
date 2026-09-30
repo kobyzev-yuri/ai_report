@@ -13,7 +13,7 @@
 
 | Документ | Описание |
 |----------|----------|
-| [eastar-nms-zabbix.md](eastar-nms-zabbix.md) | Eastar NMS → Zabbix: деплой на любой AGENT_HOST, config.env, UserParameter, JSONPath/LLD. |
+| [eastar-nms-zabbix.md](eastar-nms-zabbix.md) | Eastar NMS → Zabbix: Python и Perl, примеры команд и JSON, config.env, UserParameter, JSONPath/LLD. |
 
 ## Эксплуатация и отладка
 
