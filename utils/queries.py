@@ -726,3 +726,283 @@ def get_sim_services_report(
     finally:
         if conn:
             conn.close()
+
+
+# Iridium: Open Port 9000, Voice 9001, SBD 9002/9014 + вспомогательные
+_PASSPORT_IRIDIUM_TYPES = (9000, 9001, 9002, 9005, 9008, 9013, 9014)
+_PASSPORT_SBD_TYPES = (9002, 9014)
+
+
+def _fetch_iridium_sim_customers_billing(
+    get_connection,
+    only_active_sim=True,
+    exclude_steccom=True,
+    service_scope="all",
+):
+    """
+    Клиенты BM7 с услугами Iridium. Одна строка на CUSTOMER_ID.
+
+    service_scope:
+      all — любой TYPE_ID из набора (опционально STATUS > 0);
+      sbd — 9002/9014 (опционально STATUS > 0);
+      open_port — 9000 и STATUS < 0;
+      voice — 9001 и STATUS > 0.
+    """
+    conn = get_connection()
+    if not conn:
+        return None
+
+    type_list = ",".join(str(t) for t in _PASSPORT_IRIDIUM_TYPES)
+    sbd_list = ",".join(str(t) for t in _PASSPORT_SBD_TYPES)
+    excl = "AND NVL(base.CUSTOMER_ID, -1) <> 521" if exclude_steccom else ""
+
+    scope = (service_scope or "all").strip().lower()
+    if scope == "sbd":
+        match_types = f"TYPE_ID IN ({sbd_list})"
+        match_status = "AND STATUS > 0" if only_active_sim else ""
+    elif scope == "open_port":
+        match_types = "TYPE_ID = 9000"
+        match_status = "AND STATUS < 0"
+    elif scope == "voice":
+        match_types = "TYPE_ID = 9001"
+        match_status = "AND STATUS > 0"
+    else:
+        match_types = f"TYPE_ID IN ({type_list})"
+        match_status = "AND STATUS > 0" if only_active_sim else ""
+
+    query = f"""
+    WITH svc AS (
+        SELECT
+            s.CUSTOMER_ID,
+            s.TYPE_ID,
+            s.STATUS,
+            s.CLOSE_DATE,
+            NVL(bt.NAME, TO_CHAR(s.TYPE_ID)) AS TYPE_NAME
+        FROM SERVICES s
+        LEFT JOIN BM_TYPE bt ON bt.TYPE_ID = s.TYPE_ID
+        WHERE s.TYPE_ID IN ({type_list})
+          AND (s.LOGIN IS NULL OR s.LOGIN NOT LIKE '%-clone-%')
+    ),
+    base AS (
+        SELECT DISTINCT svc.CUSTOMER_ID
+        FROM svc
+        WHERE {match_types}
+          {match_status}
+    ),
+    types AS (
+        SELECT
+            t.CUSTOMER_ID,
+            LISTAGG(t.TYPE_NAME, ', ')
+                WITHIN GROUP (ORDER BY t.TYPE_ID, t.TYPE_NAME) AS SERVICE_TYPES
+        FROM (
+            SELECT DISTINCT svc.CUSTOMER_ID, svc.TYPE_ID, svc.TYPE_NAME
+            FROM svc
+            INNER JOIN base ON base.CUSTOMER_ID = svc.CUSTOMER_ID
+        ) t
+        GROUP BY t.CUSTOMER_ID
+    ),
+    names AS (
+        SELECT
+            cc.CUSTOMER_ID,
+            NVL(
+                MAX(CASE WHEN cd.MNEMONIC = 'description' AND cc.CONTACT_DICT_ID = 23
+                    THEN cc.VALUE END),
+                TRIM(
+                    NVL(MAX(CASE WHEN cd.MNEMONIC = 'last_name' THEN cc.VALUE END), '') || ' ' ||
+                    NVL(MAX(CASE WHEN cd.MNEMONIC = 'first_name' THEN cc.VALUE END), '') || ' ' ||
+                    NVL(MAX(CASE WHEN cd.MNEMONIC = 'middle_name' THEN cc.VALUE END), '')
+                )
+            ) AS CUSTOMER_NAME,
+            TRIM(
+                NVL(MAX(CASE WHEN cd.MNEMONIC = 'last_name' THEN cc.VALUE END), '') || ' ' ||
+                NVL(MAX(CASE WHEN cd.MNEMONIC = 'first_name' THEN cc.VALUE END), '') || ' ' ||
+                NVL(MAX(CASE WHEN cd.MNEMONIC = 'middle_name' THEN cc.VALUE END), '')
+            ) AS PERSON_FIO,
+            NVL(
+                MAX(CASE WHEN cd.MNEMONIC = 'director' THEN cc.VALUE END),
+                MAX(CASE WHEN cd.MNEMONIC = 'short_fio' THEN cc.VALUE END)
+            ) AS DIRECTOR_FIO
+        FROM BM_CUSTOMER_CONTACT cc
+        LEFT JOIN BM_CONTACT_DICT cd ON cc.CONTACT_DICT_ID = cd.CONTACT_DICT_ID
+        INNER JOIN base ON base.CUSTOMER_ID = cc.CUSTOMER_ID
+        GROUP BY cc.CUSTOMER_ID
+    )
+    SELECT
+        base.CUSTOMER_ID,
+        (
+            SELECT TRIM(oi.EXT_ID) FROM OUTER_IDS oi
+             WHERE oi.ID = base.CUSTOMER_ID
+               AND UPPER(TRIM(oi.TBL)) = 'CUSTOMERS'
+               AND oi.EXT_ID IS NOT NULL
+               AND TRIM(oi.EXT_ID) IS NOT NULL
+               AND ROWNUM = 1
+        ) AS CODE_1C,
+        NVL(names.CUSTOMER_NAME, '') AS CUSTOMER_NAME,
+        NULLIF(TRIM(names.PERSON_FIO), '') AS PERSON_FIO,
+        NULLIF(TRIM(names.DIRECTOR_FIO), '') AS DIRECTOR_FIO,
+        types.SERVICE_TYPES
+    FROM base
+    LEFT JOIN names ON names.CUSTOMER_ID = base.CUSTOMER_ID
+    LEFT JOIN types ON types.CUSTOMER_ID = base.CUSTOMER_ID
+    WHERE 1=1
+      {excl}
+    ORDER BY names.CUSTOMER_NAME NULLS LAST, base.CUSTOMER_ID
+    """
+    try:
+        return pd.read_sql_query(query, conn)
+    except Exception as e:
+        st.error(f"Ошибка выборки клиентов Iridium: {e}")
+        return None
+    finally:
+        if conn:
+            conn.close()
+
+
+def get_passport_gaps_report(
+    get_connection,
+    only_missing_passport=True,
+    only_persons=True,
+    only_with_email=False,
+    only_active_sim=True,
+    exclude_steccom=True,
+    service_scope="all",
+    customer_name_filter=None,
+    code_1c_filter=None,
+):
+    """
+    Клиенты с услугами Iridium + паспорт/email из BPM Account.
+    service_scope: all | sbd | open_port | voice.
+    """
+    from utils.crm_connection import fetch_crm_accounts
+
+    def _s(v):
+        """Безопасная строка: NaN/None → ''."""
+        if v is None:
+            return ""
+        try:
+            if pd.isna(v):
+                return ""
+        except (TypeError, ValueError):
+            pass
+        return str(v).strip()
+
+    def _looks_like_fio(v: str) -> bool:
+        """Отсечь мусор в поле director (коды, 'дир', …)."""
+        if not v or len(v) < 5:
+            return False
+        letters = sum(ch.isalpha() for ch in v)
+        return letters >= 4 and not v.isdigit()
+
+    def _letter_fio(
+        *,
+        is_person_flag: bool,
+        customer_name: str,
+        crm_name: str,
+        person_fio: str,
+        director_contact: str,
+        primary_contact: str,
+        billing_director: str,
+    ):
+        """
+        ФЛ: название контрагента = ФИО.
+        ЮЛ: контакты CRM (ген. директор / директор), иначе PrimaryContact / BM director.
+        """
+        if is_person_flag:
+            for cand in (customer_name, crm_name, person_fio):
+                if cand and _looks_like_fio(cand):
+                    return cand
+            return customer_name or crm_name or person_fio or None
+
+        for cand in (director_contact, primary_contact, billing_director):
+            if cand and _looks_like_fio(cand):
+                return cand
+        return None
+
+    billing = _fetch_iridium_sim_customers_billing(
+        get_connection,
+        only_active_sim=only_active_sim,
+        exclude_steccom=exclude_steccom,
+        service_scope=service_scope,
+    )
+    if billing is None:
+        return None
+    if billing.empty:
+        return billing
+
+    try:
+        crm = fetch_crm_accounts()
+    except Exception as e:
+        st.error(f"Ошибка CRM (ODBC Account): {e}")
+        return None
+
+    rows = []
+    for _, r in billing.iterrows():
+        code = _s(r.get("CODE_1C"))
+        acc = crm.get(code) if code else None
+        has_passport = bool(acc and acc.get("has_passport"))
+        is_person = bool(acc and acc.get("is_person"))
+        is_legal = bool(acc and acc.get("is_legal"))
+        # если CRM нет — эвристика: PERSON_FIO заполнен → скорее ФЛ
+        if not acc and _s(r.get("PERSON_FIO")):
+            is_person = True
+        email = (acc or {}).get("email")
+        crm_name = _s((acc or {}).get("Name"))
+        billing_name = _s(r.get("CUSTOMER_NAME"))
+        person_fio = _s(r.get("PERSON_FIO"))
+        director_fio = _s(r.get("DIRECTOR_FIO"))
+        director_contact = _s((acc or {}).get("director_contact_name"))
+        director_job = _s((acc or {}).get("director_contact_job"))
+        crm_contact = _s((acc or {}).get("primary_contact_name"))
+        crm_job = _s((acc or {}).get("primary_contact_job")) or director_job
+        letter_fio = _letter_fio(
+            is_person_flag=is_person,
+            customer_name=billing_name,
+            crm_name=crm_name,
+            person_fio=person_fio,
+            director_contact=director_contact,
+            primary_contact=crm_contact,
+            billing_director=director_fio if _looks_like_fio(director_fio) else "",
+        )
+        subject = "ФЛ" if is_person else ("ЮЛ" if is_legal else ("CRM" if acc else "нет в CRM"))
+
+        if only_missing_passport and has_passport:
+            continue
+        if only_persons and acc and not is_person:
+            continue
+        if only_persons and not acc:
+            pass
+        if only_with_email and not email:
+            continue
+        if customer_name_filter and str(customer_name_filter).strip():
+            needle = str(customer_name_filter).strip().upper()
+            hay = f"{billing_name} {crm_name} {letter_fio or ''}".upper()
+            if needle not in hay:
+                continue
+        if code_1c_filter and str(code_1c_filter).strip():
+            if str(code_1c_filter).strip() not in code:
+                continue
+
+        rows.append(
+            {
+                "CUSTOMER_ID": r.get("CUSTOMER_ID"),
+                "CODE_1C": code or None,
+                "CUSTOMER_NAME": (billing_name or crm_name) or None,
+                "LETTER_FIO": letter_fio,
+                "PERSON_FIO": person_fio or None,
+                "DIRECTOR_FIO": director_fio if _looks_like_fio(director_fio) else None,
+                "CRM_CONTACT": (director_contact or crm_contact) or None,
+                "CRM_JOB_TITLE": crm_job or None,
+                "SUBJECT_TYPE": subject,
+                "SERVICE_TYPES": _s(r.get("SERVICE_TYPES")) or None,
+                "EMAIL": email,
+                "HAS_PASSPORT": "Y" if has_passport else "N",
+                "PASSPORT_ID": (acc or {}).get("passport_id"),
+                "ISSUED_BY": _s((acc or {}).get("IssuedBy")) or None,
+                "ISSUED_DATE": _s((acc or {}).get("IssuedDate")) or None,
+                "CRM_NAME": crm_name or None,
+                "PHONE": _s((acc or {}).get("Phone")) or None,
+                "MANAGER_FIO": _s((acc or {}).get("manager_fio")) or None,
+            }
+        )
+
+    return pd.DataFrame(rows)

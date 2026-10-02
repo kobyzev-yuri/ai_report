@@ -27,6 +27,7 @@ AVAILABLE_TABS = {
     'analytics': '📋 Счета за период',
     'loader': '📥 Data Loader',
     'campaigns': '📧 Кампании',
+    'passport_gaps': '🪪 Паспорта Iridium',
 }
 
 _FALLBACK_TAB_LABELS = {
@@ -34,6 +35,7 @@ _FALLBACK_TAB_LABELS = {
     "campaigns": "📧 Кампании",
     "lbs": "📍 LBS услуги",
     "sim": "📱 SIM",
+    "passport_gaps": "🪪 Паспорта Iridium",
 }
 for _fk, _fl in _FALLBACK_TAB_LABELS.items():
     if _fk not in AVAILABLE_TABS:

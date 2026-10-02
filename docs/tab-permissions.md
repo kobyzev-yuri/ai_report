@@ -17,6 +17,7 @@
 | `loader` | 📥 Data Loader |
 | `bills` | 📄 Рассылка счетов |
 | `campaigns` | 📧 Кампании |
+| `passport_gaps` | 🪪 Паспорта Iridium |
 
 ## Миграция БД (один раз)
 

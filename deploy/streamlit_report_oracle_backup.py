@@ -27,6 +27,7 @@ for _tab_key, _tab_label in (
     ("bills", "📄 Рассылка счетов"),
     ("campaigns", "📧 Кампании"),
     ("sim", "📱 SIM"),
+    ("passport_gaps", "🪪 Паспорта Iridium"),
 ):
     if _tab_key not in AVAILABLE_TABS:
         AVAILABLE_TABS[_tab_key] = _tab_label
@@ -40,6 +41,7 @@ from tabs.tab_analytics import show_tab as show_analytics_tab
 from tabs.tab_loader import show_tab as show_loader_tab
 from tabs.tab_bills import show_tab as show_bills_tab
 from tabs.tab_campaigns import show_tab as show_campaigns_tab
+from tabs.tab_passport_gaps import show_tab as show_passport_gaps_tab
 
 # Подавляем предупреждение pandas о cx_Oracle (работает корректно)
 warnings.filterwarnings('ignore', message='pandas only supports SQLAlchemy')
@@ -52,7 +54,8 @@ from utils.queries import (
     get_lbs_services_report,
     get_sim_services_report,
     get_analytics_duplicates, get_analytics_invoice_period_report,
-    remove_analytics_duplicates
+    remove_analytics_duplicates,
+    get_passport_gaps_report,
 )
 
 # Конфигурация базы данных
@@ -343,6 +346,8 @@ def main():
         show_bills_tab()
     elif tab_key == "campaigns":
         show_campaigns_tab()
+    elif tab_key == "passport_gaps":
+        show_passport_gaps_tab(get_connection, get_passport_gaps_report)
     elif tab_key == "assistant":
         try:
             from kb_billing.rag.streamlit_assistant import show_assistant_tab
